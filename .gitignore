@@ -1,0 +1,27 @@
+/target
+
+/IGNORE
+/IGNORE_THIS
+/TODO
+/REF
+/DEPRECATED
+
+output/
+
+*.elf
+*.so
+*.so.1
+*.so.1.0.0
+*.a
+*.o
+*.obj
+
+.idea/
+.vscode/
+
+
+# Added by cargo
+#
+# already existing elements were commented out
+
+#/target
