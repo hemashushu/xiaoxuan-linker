@@ -1,4 +1,4 @@
-# Single Assembly Source File Example
+# Single Assembly Source File Program Example
 
 ## Source code
 
@@ -33,16 +33,32 @@ _start:
     syscall
 ```
 
+## Calling convention
+
+x86_64 System V function calling convention:
+
+- rdi, rsi, rdx, rcx, r8, r9 for integer/pointer arguments,
+- xmm0-xmm7 for floating-point arguments,
+- rax for return value.
+
+syscall convention:
+
+- rax for syscall number,
+- rdi, rsi, rdx, r10, r8, r9 for syscall arguments,
+- rax for return value.
+
+Note that the syscall use `r10` instead of `rcx` for the 4th argument, and the caller is responsible for saving `rcx` and `r11` if needed, because the syscall instruction will overwrite them.
+
 ## Assemble, link, and run
 
 ```sh
 nasm -f elf64 -o single.o single.asm
-ld -o single.elf single.o
+ld -o single.elf single.o # or `ld -pie -o single.elf single.o
 ./single.elf
 echo $? # output: 42
 ```
 
-## Object file sections
+## Object file (relocatable file) sections
 
 ```sh
 readelf -S single.o
@@ -86,15 +102,16 @@ Where the `Nr` column is the section index, for example:
 
 General sections:
 
-| Section Name | Section Type | Description                              |
-|--------------|--------------|------------------------------------------|
-| .data        | PROGBITS     | Initialized data                         |
-| .text        | PROGBITS     | Executable code                          |
-| .bss         | NOBITS       | Uninitialized data                       |
-| .rodata      | PROGBITS     | Read-only data                           |
-| .symtab      | SYMTAB       | Symbol table                             |
-| .strtab      | STRTAB       | String table (used for symbol names)     |
-| .rela.text   | RELA         | Relocation entries for the .text section |
+| Section Name | Section Type | Description                                          |
+|--------------|--------------|------------------------------------------------------|
+| .data        | PROGBITS     | Initialized data                                     |
+| .text        | PROGBITS     | Executable code                                      |
+| .bss         | NOBITS       | Uninitialized data                                   |
+| .rodata      | PROGBITS     | Read-only data                                       |
+| .shstrtab    | STRTAB       | Section header string table (used for section names) |
+| .strtab      | STRTAB       | String table (used for symbol names)                 |
+| .symtab      | SYMTAB       | Symbol table                                         |
+| .rela.text   | RELA         | Relocation entries for the .text section             |
 
 The section types:
 
@@ -105,6 +122,17 @@ The section types:
 | STRTAB       | A section that contains null-terminated strings.                           |
 | SYMTAB       | A section that contains symbol table entries.                              |
 | RELA         | A section that contains relocation entries with addends.                   |
+
+`Address` is the virtual address of the section in memory (which is `0x0` for object files, since they are not yet linked), and `Offset` is the offset of the section in the **file**, which is used for locating or loading the section's data within the file.
+
+`EntSize` is the size of each entry in the section, only make sense for sections that contain entries (like `.symtab`, `.rela.text`, `.dynsym`, and `init_array`), for example, the entry size of `.symtab` is `0x18` (24 bytes) because each symbol table entry is 24 bytes in size, and the entry size of `.rela.text` is `0x18` (24 bytes) because each relocation entry is 24 bytes in size.
+
+`Link` and `Info` are used for sections that have a relationship with other sections, for example:
+
+- The `.rela.text` section has `Link` value `4`, which means it is linked to the section with index `4` (which is the `.symtab` section), and it has `Info` value `2`, which means the relocation entries in `.rela.text` apply to the section with index `2` (which is the `.text` section).
+- The `.symtab` section has `Link` value `5`, which means it is linked to the section with index `5` (which is the `.strtab` section), and it has `Info` value `6`, which means the first 6 entries in the symbol table are reserved for special symbols (like the null symbol, file symbols, and section symbols), and the actual symbols start from index `6`.
+
+In short, for the `relocation` section, `link=symtab_section_index` and `info=target_section_index`, for the `symtab` section, `link=strtab_section_index` and `info=first_non_local_symbol`.
 
 ## Symbols
 
@@ -128,9 +156,11 @@ Symbol table '.symtab' contains 7 entries:
      6: 000000000000000c     0 NOTYPE  GLOBAL DEFAULT    2 _start
 ```
 
-Where `Value` is the offset of the symbol within **its section**
-(not the final address, which is determined by the linker),
-and `Ndx` is the index of the section it belongs to (1 for `.data`, 2 for `.text`).
+`Value` is the offset of the symbol within **its section** (not the final address, which is determined by the linker) when the object file is `ET_REL` (relocatable), and `Ndx` is the index of the section it belongs to (1 for `.data`, 2 for `.text`).
+
+In the `ET_EXEC` (executable) file, the `Value` is the virtual address of the symbol in memory.
+
+`Size` is the size of the symbol, which is `0` because of the NASM does not generate the size of the symbol in the symbol table.
 
 ## Symbols via `nm`
 
@@ -157,6 +187,8 @@ Output:
 | U    | undefined symbol |
 | W    | weak             |
 | C    | common           |
+
+The type is determined by the section index of the symbol (from the field `st_shndx`), for example, `num` is in the `.data` section (section index 1), so it is a `D` symbol, and `inc` and `_start` are in the `.text` section (section index 2), so they are `T` symbols. if `st_shndx` is `SHN_UNDEF`, then the symbol is an undefined symbol (`U`), if `st_shndx` is `SHN_COMMON`, then the symbol is a common symbol (`C`), and if the symbol has the `STB_WEAK` binding (from the field `st_info` high 4 bits), then it is a weak symbol (`W`).
 
 ### 'U' undefined symbol
 
@@ -265,6 +297,7 @@ Fields:
 - `Offset` is the offset within the section where the relocation applies (in this case, `0x3` in the `.text` section).
 - `Info` encodes the symbol index and the type of relocation (in this case, `000200000002` means symbol index `2` and type `R_X86_64_PC32`), its value is `sym_index << 32 | type`.
 - `Type` is the type of relocation (in this case, `R_X86_64_PC32`)
+- `Sym. Value` is the value of the symbol that the relocation references (in this case, `0x0` because the symbol is `.data`, which is the section containing `num`, and its offset is `0x0`), it is used for calculating the final address during linking.
 - `Sym. Name` is the symbol that the relocation references (in this case, `.data`, which is the section containing `num`).
 - `+ Addend` indicates that the linker should add `-4` to the symbol's address (which is the section `.data` in this case) when applying the relocation.
 
@@ -272,15 +305,13 @@ Note that when CPU executes the instruction `mov rax, [rip + disp32]`, the effec
 
 We should subsitute the placeholder in the "48 8b 05 00 00 00 00" instruction with the actual offset.
 
-However, in the relocation table, it only provides the offset of the placeholder (`0x03`) and the source section name (`.data`), it does not provider the source symbol and the `next_instruction_rip`, so we need to calculate it as:
-
-`target = S (source address = secion + offset ) + A (addend) - P (placeholder address)`
+`target = S (symbol source address = secion address [+ offset] ) + A (addend) - P (placeholder address)`
 
 Where:
 
-- `S` is the address of the symbol (in this case, the address of `num` in the `.data` section, which is `0x0` since it's the first symbol in the `.data` section).
-- `A` is the addend (in this case, `-4`), it is an adjustment to calculate the correct offset from the next instruction to the symbol.
-- `P` is the place address (in this case, the address of the instruction that contains the placeholder, which is `0x3` in the `.text` section).
+- `S` is the address of the symbol (in this case, the address of section `.data`. It can also be the address of `num` in the `.data` section, which is `0x0` since it's the first symbol in the `.data` section). The value of `S` is the `Sym. Value` field in the relocation entry.
+- `A` is the addend (in this case, `-4`), it is an adjustment to calculate the correct offset from the next instruction to the symbol. The value of `A` is the `+ Addend` field in the relocation entry.
+- `P` is the place address (in this case, the address of the instruction that contains the placeholder, which is `0x3` in the `.text` section). The value of `P` is the `Offset` field in the relocation entry.
 
 The formular `target = S + A - P` is equivalent to `target = S - P + A`, where `- P + A` is the `next_instruction_rip`, becuase the `P` is less than the `next_instruction_rip`, so we need to subtract an additional value (which is `4`).
 

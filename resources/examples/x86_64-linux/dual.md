@@ -1,4 +1,4 @@
-# Dual Assembly Source File Example
+# Dual Assembly Source Files Program Example
 
 ## Source code
 
@@ -77,7 +77,6 @@ _start:
 nasm -f elf64 -o dual0.o dual0.asm
 nasm -f elf64 -o dual1.o dual1.asm
 ld -o dual.elf dual0.o dual1.o
-# or `ld -pie -o dual.elf dual0.o dual1.o`
 ./dual.elf
 echo $? # output: 128
 ```
