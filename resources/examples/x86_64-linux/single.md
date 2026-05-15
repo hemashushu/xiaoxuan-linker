@@ -1,5 +1,32 @@
 # Single Assembly Source File Program Example
 
+<!-- @import "[TOC]" {cmd="toc" depthFrom=2 depthTo=4 orderedList=false} -->
+
+<!-- code_chunk_output -->
+
+- [Source code](#source-code)
+- [Calling convention](#calling-convention)
+- [Assemble, link, and run](#assemble-link-and-run)
+- [Object file (relocatable file)](#object-file-relocatable-file)
+  - [File header](#file-header)
+  - [Sections](#sections)
+  - [Symbols](#symbols)
+  - [Symbols via `nm`](#symbols-via-nm)
+    - ['U' undefined symbol](#u-undefined-symbol)
+    - ['W' weak symbol](#w-weak-symbol)
+  - [Disassembly code](#disassembly-code)
+  - [Disassembly data](#disassembly-data)
+  - [Relocations](#relocations)
+  - [Calling](#calling)
+- [Executable file](#executable-file)
+  - [File header (ET_EXEC)](#file-header-et_exec)
+  - [Section headers](#section-headers)
+  - [Program headers](#program-headers)
+  - [Symbols (ET_EXEC)](#symbols-et_exec)
+  - [Relocations (ET_EXEC)](#relocations-et_exec)
+
+<!-- /code_chunk_output -->
+
 ## Source code
 
 single.asm:
@@ -28,7 +55,7 @@ _start:
     ; syscall call `exit(status)`
     ; syscall number: 60
 
-    mov rdi, rax        ;; move the result of inc (the incremented value) into rdi, which is the first argument to the syscall
+     mov rdi, rax        ;; move the result of inc (the incremented value) into rdi, the first syscall argument
     mov rax, 60         ;; syscall number for exit
     syscall
 ```
@@ -47,18 +74,37 @@ syscall convention:
 - rdi, rsi, rdx, r10, r8, r9 for syscall arguments,
 - rax for return value.
 
-Note that the syscall use `r10` instead of `rcx` for the 4th argument, and the caller is responsible for saving `rcx` and `r11` if needed, because the syscall instruction will overwrite them.
+Note that syscalls use `r10` instead of `rcx` for the 4th argument. The caller must save `rcx` and `r11` if needed, because the `syscall` instruction clobbers both.
 
 ## Assemble, link, and run
 
 ```sh
 nasm -f elf64 -o single.o single.asm
-ld -o single.elf single.o # or `ld -pie -o single.elf single.o
+ld -o single.elf single.o # or: ld -pie -o single.elf single.o
 ./single.elf
 echo $? # output: 42
 ```
 
-## Object file (relocatable file) sections
+## Object file (relocatable file)
+
+### File header
+
+```sh
+readelf -h single.o
+```
+
+Output:
+
+```text
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              REL (Relocatable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x0
+```
+
+### Sections
 
 ```sh
 readelf -S single.o
@@ -93,27 +139,27 @@ Key to Flags:
   D (mbind), l (large), p (processor specific)
 ```
 
-Where the `Nr` column is the section index, for example:
+The `Nr` column is the section index, for example:
 
-| Nr | Section |
-|----|---------|
-| 1  | .data   |
-| 2  | .text   |
+| Index | Section |
+|-------|---------|
+| 1     | .data   |
+| 2     | .text   |
 
 General sections:
 
 | Section Name | Section Type | Description                                          |
 |--------------|--------------|------------------------------------------------------|
-| .data        | PROGBITS     | Initialized data                                     |
-| .text        | PROGBITS     | Executable code                                      |
-| .bss         | NOBITS       | Uninitialized data                                   |
 | .rodata      | PROGBITS     | Read-only data                                       |
-| .shstrtab    | STRTAB       | Section header string table (used for section names) |
-| .strtab      | STRTAB       | String table (used for symbol names)                 |
+| .data        | PROGBITS     | Initialized data                                     |
+| .bss         | NOBITS       | Uninitialized data                                   |
+| .text        | PROGBITS     | Executable code                                      |
 | .symtab      | SYMTAB       | Symbol table                                         |
 | .rela.text   | RELA         | Relocation entries for the .text section             |
+| .shstrtab    | STRTAB       | Section header string table (used for section names) |
+| .strtab      | STRTAB       | String table (used for symbol names)                 |
 
-The section types:
+Common section types:
 
 | Section Type | Description                                                                |
 |--------------|----------------------------------------------------------------------------|
@@ -123,24 +169,25 @@ The section types:
 | SYMTAB       | A section that contains symbol table entries.                              |
 | RELA         | A section that contains relocation entries with addends.                   |
 
-`Address` is the virtual address of the section in memory (which is `0x0` for object files, since they are not yet linked), and `Offset` is the offset of the section in the **file**, which is used for locating or loading the section's data within the file.
+Fields:
 
-`EntSize` is the size of each entry in the section, only make sense for sections that contain entries (like `.symtab`, `.rela.text`, `.dynsym`, and `init_array`), for example, the entry size of `.symtab` is `0x18` (24 bytes) because each symbol table entry is 24 bytes in size, and the entry size of `.rela.text` is `0x18` (24 bytes) because each relocation entry is 24 bytes in size.
+- `Address` is the virtual address of the section in memory (which is `0x0` for object files, since they are not yet linked).
+- `Offset` is the offset of the section in the **file**, which is used for locating or loading the section's data within the file.
+- `EntSize` is the size of each entry in the section. It is meaningful only for sections that contain fixed-size entries (such as `.symtab`, `.rela.text`, `.dynsym`, and `init_array`). For example, `.symtab` has `EntSize = 0x18` (24 bytes) because each symbol table entry is 24 bytes.
+- `Link` and `Info` are used for sections that have a relationship with other sections, for example:
+  - The `.rela.text` section has `Link` value `4`, which means it is linked to the section with index `4` (which is the `.symtab` section), and it has `Info` value `2`, which means the relocation entries in `.rela.text` apply to the section with index `2` (which is the `.text` section).
+  - The `.symtab` section has `Link` value `5`, which means it is linked to the section with index `5` (which is the `.strtab` section), and it has `Info` value `6`, which means the first 6 entries in the symbol table are reserved for special symbols (like the null symbol, file symbols, and section symbols), and the actual symbols start from index `6`.
 
-`Link` and `Info` are used for sections that have a relationship with other sections, for example:
+In short:
 
-- The `.rela.text` section has `Link` value `4`, which means it is linked to the section with index `4` (which is the `.symtab` section), and it has `Info` value `2`, which means the relocation entries in `.rela.text` apply to the section with index `2` (which is the `.text` section).
-- The `.symtab` section has `Link` value `5`, which means it is linked to the section with index `5` (which is the `.strtab` section), and it has `Info` value `6`, which means the first 6 entries in the symbol table are reserved for special symbols (like the null symbol, file symbols, and section symbols), and the actual symbols start from index `6`.
+- For a relocation section, `link = symtab_section_index` and `info = target_section_index`.
+- For a symbol table section, `link = strtab_section_index` and `info = first_non_local_symbol`.
 
-In short, for the `relocation` section, `link=symtab_section_index` and `info=target_section_index`, for the `symtab` section, `link=strtab_section_index` and `info=first_non_local_symbol`.
-
-## Symbols
+### Symbols
 
 ```sh
 readelf -s single.o
 ```
-
-Lists the symbols with more details, including their size and section index.
 
 Output:
 
@@ -156,19 +203,16 @@ Symbol table '.symtab' contains 7 entries:
      6: 000000000000000c     0 NOTYPE  GLOBAL DEFAULT    2 _start
 ```
 
-`Value` is the offset of the symbol within **its section** (not the final address, which is determined by the linker) when the object file is `ET_REL` (relocatable), and `Ndx` is the index of the section it belongs to (1 for `.data`, 2 for `.text`).
+Fields:
 
-In the `ET_EXEC` (executable) file, the `Value` is the virtual address of the symbol in memory.
+- `Value` is the offset of the symbol within **its section** (not the final address, which is determined by the linker) when the object file is `ET_REL` (relocatable), and `Ndx` is the index of the section it belongs to (1 for `.data`, 2 for `.text`). In the `ET_EXEC` (executable) file, the `Value` is the virtual address of the symbol in memory.
+- `Size` is the size of the symbol. It is `0` here because NASM does not emit symbol sizes in this case.
 
-`Size` is the size of the symbol, which is `0` because of the NASM does not generate the size of the symbol in the symbol table.
-
-## Symbols via `nm`
+### Symbols via `nm`
 
 ```sh
 nm single.o
 ```
-
-Lists the symbols in the object file.
 
 Output:
 
@@ -188,11 +232,19 @@ Output:
 | W    | weak             |
 | C    | common           |
 
-The type is determined by the section index of the symbol (from the field `st_shndx`), for example, `num` is in the `.data` section (section index 1), so it is a `D` symbol, and `inc` and `_start` are in the `.text` section (section index 2), so they are `T` symbols. if `st_shndx` is `SHN_UNDEF`, then the symbol is an undefined symbol (`U`), if `st_shndx` is `SHN_COMMON`, then the symbol is a common symbol (`C`), and if the symbol has the `STB_WEAK` binding (from the field `st_info` high 4 bits), then it is a weak symbol (`W`).
+The type is determined by the symbol section index (`st_shndx`) and `st_info`. For example:
 
-### 'U' undefined symbol
+- `num` is in the `.data` section (section index 1), so it is a `D` symbol.
+- `inc` and `_start` are in the `.text` section (section index 2), so they are `T` symbols.
+- If `st_shndx` is `SHN_UNDEF`, then the symbol is an undefined symbol (`U`).
+- If `st_shndx` is `SHN_COMMON`, then the symbol is a common symbol (`C`).
+- If the symbol has the `STB_WEAK` binding (from the field `st_info` high 4 bits), then it is a weak symbol (`W`).
 
-'U' means undefined symbol (imported symbol), which is a symbol that is referenced in the code but not defined in the object file. The linker will need to resolve this symbol by finding it in another object file or library during the linking process.
+#### 'U' undefined symbol
+
+`U` means an undefined (imported) symbol. It is referenced in this object file but defined elsewhere, so the linker must resolve it from another object file or library.
+
+For example, if we have the following code that references an external function `puts`:
 
 ```asm
 extern puts
@@ -204,14 +256,14 @@ _start:
     call puts
 ```
 
-Will output:
+Output of `nm`:
 
 ```text
                  U puts
 0000000000000000 T _start
 ```
 
-and:
+And the output of `readelf -r`:
 
 ```text
 RELOCATION RECORDS FOR [.text]:
@@ -219,9 +271,9 @@ OFFSET           TYPE              VALUE
 0000000000000001 R_X86_64_PC32     puts-0x0000000000000004
 ```
 
-### 'W' weak symbol
+#### 'W' weak symbol
 
-'W' means weak symbol, which is a symbol that has a default definition but can be overridden by another definition with the same name. If there are multiple definitions of a weak symbol, the linker will choose one of them (usually the first one it encounters) and ignore the others.
+`W` means a weak symbol. A weak definition can be overridden by a strong definition of the same name. If multiple weak definitions exist, the linker selects one (typically the first one encountered).
 
 Strong vs weak:
 
@@ -231,13 +283,13 @@ Strong vs weak:
 | weak + weak       | any of them (usually the first one) |
 | strong + strong   | linker error                        |
 
-## Disassembly code
+### Disassembly code
 
 ```sh
 objdump -M intel -d -r single.o
 ```
 
-The disassembly of the resulting object file `single.o` would look like this:
+Output:
 
 ```text
 single.o:     file format elf64-x86-64
@@ -257,7 +309,7 @@ Disassembly of section .text:
    19:   0f 05                   syscall
 ```
 
-## Disassembly data
+### Disassembly data
 
 ```sh
 objdump -s -j .data single.o
@@ -272,9 +324,11 @@ Contents of section .data:
  0000 29000000 00000000                    ).......
 ```
 
-## Relocations
+### Relocations
 
-Where `<inc+0x7>` is a temporary relocation (placeholder) that will be resolved by the linker, the `0x7` is just because the `effective_address = next_instruction_rip + disp32` and the `next_instruction_rip` is `0x7` at the time of encoding the instruction.
+In the disassembly, `<inc+0x7>` reflects a temporary relocation target (placeholder) that the linker will later resolve. The `0x7` comes from `effective_address = next_instruction_rip + disp32`, where `next_instruction_rip` is `0x7` for this instruction.
+
+The `0x7` is shown for readability in disassembly; it is not directly encoded in the instruction bytes. The actual encoding is `48 8b 05 00 00 00 00`, where `00 00 00 00` is the placeholder to be patched by relocation.
 
 Check out the relocation section:
 
@@ -290,35 +344,143 @@ Relocation section '.rela.text' at offset 0x340 contains 1 entry:
 000000000003  000200000002 R_X86_64_PC32     0000000000000000 .data - 4
 ```
 
-Which means that at offset `0x3` in the `.text` section, there is a relocation entry of type `R_X86_64_PC32`:
-
 Fields:
 
 - `Offset` is the offset within the section where the relocation applies (in this case, `0x3` in the `.text` section).
-- `Info` encodes the symbol index and the type of relocation (in this case, `000200000002` means symbol index `2` and type `R_X86_64_PC32`), its value is `sym_index << 32 | type`.
+- `Info` encodes the symbol index and relocation type. In this case, `000200000002` means symbol index `2` and type `R_X86_64_PC32`, using `info = sym_index << 32 | type`.
 - `Type` is the type of relocation (in this case, `R_X86_64_PC32`)
-- `Sym. Value` is the value of the symbol that the relocation references (in this case, `0x0` because the symbol is `.data`, which is the section containing `num`, and its offset is `0x0`), it is used for calculating the final address during linking.
+- `Sym. Value` is the offset of the symbol that the relocation references (in this case, `0x0` because the symbol is `.data`, which is the section containing `num`, and its offset is `0x0`), it is used for calculating the final address during linking.
 - `Sym. Name` is the symbol that the relocation references (in this case, `.data`, which is the section containing `num`).
 - `+ Addend` indicates that the linker should add `-4` to the symbol's address (which is the section `.data` in this case) when applying the relocation.
 
-Note that when CPU executes the instruction `mov rax, [rip + disp32]`, the effective address is calculated as `effective_address = next_instruction_rip + disp32`, thus `disp32 = source_address (address of num) - next_instruction_address`.
+When the CPU executes `mov rax, [rip + disp32]`, the effective address is `effective_address = next_instruction_rip + disp32`. Therefore, `disp32 = target_address - next_instruction_rip`.
 
-We should subsitute the placeholder in the "48 8b 05 00 00 00 00" instruction with the actual offset.
+The linker replaces the placeholder in `48 8b 05 00 00 00 00` with the final displacement. In a relocatable file, `disp32` is computed with this relocation formula:
 
-`target = S (symbol source address = secion address [+ offset] ) + A (addend) - P (placeholder address)`
+`disp32 = S (symbol address = section address [+ symbol offset]) + A (addend) - P (placeholder address)`
 
 Where:
 
-- `S` is the address of the symbol (in this case, the address of section `.data`. It can also be the address of `num` in the `.data` section, which is `0x0` since it's the first symbol in the `.data` section). The value of `S` is the `Sym. Value` field in the relocation entry.
-- `A` is the addend (in this case, `-4`), it is an adjustment to calculate the correct offset from the next instruction to the symbol. The value of `A` is the `+ Addend` field in the relocation entry.
-- `P` is the place address (in this case, the address of the instruction that contains the placeholder, which is `0x3` in the `.text` section). The value of `P` is the `Offset` field in the relocation entry.
+- `S` is the address of the symbol (in this case, the address of section `.data`).
+- `A` is the addend (in this case, `-4`), it is an adjustment to calculate the correct offset from the next instruction to the symbol.
+- `P` is the placeholder address (in this case, the address of the placeholder in the instruction `MOV`, which is `0x3` in the `.text` section).
 
-The formular `target = S + A - P` is equivalent to `target = S - P + A`, where `- P + A` is the `next_instruction_rip`, becuase the `P` is less than the `next_instruction_rip`, so we need to subtract an additional value (which is `4`).
+The formula `disp32 = S + A - P` is equivalent to `disp32 = S - P + A`. For `R_X86_64_PC32`, `A = -4` adjusts from the placeholder location (`P`) to the next instruction address (`P + 4`).
 
-> 'Addend' is the distance from the placeholder to the next instruction, so the addend is `-4` because the placeholder (`0x03`) is 4 bytes before the next instruction (`0x07`). If the symbol is the section (`.data`) instead of the actual symbol (`num`), then the addend is needed to adjust by adding the actual symbol offset. For example, if another symbol is at offset `0x8` in the `.data` section, then the addend would be `-4 + 0x8 = 4`.
+> The addend here is `-4` because the relocation place (`0x03`) is 4 bytes before the next instruction (`0x07`). More generally, when relocation references a section symbol (such as `.data`) rather than a specific symbol (such as `num`), the addend can include both the `-4` RIP adjustment and any symbol offset within that section.
 
-## Calling
+### Calling
 
-Where `call 0 <inc>` is `CALL rel32`, and `ef ff ff ff` is the little-endian encoding of `-17` (the offset from the next instruction to the start of `inc`).
+In the disassembly, `call 0 <inc>` is the `CALL rel32` instruction. The bytes `ef ff ff ff` are the little-endian encoding of `-17`, which is the offset from the next instruction to `inc`.
 
-The target address is `target = next_rip + rel32`, and since `next_rip` is `0x11` at the time of encoding, the target address is `0x11 - 17 = 0x0`, which is the start of `inc`.
+The target address is calculated as `target = next_instruction_rip + rel32`. Here, `next_instruction_rip = 0x11`, so `0x11 + (-17) = 0x0`, which is the start of `inc`.
+
+## Executable file
+
+### File header (ET_EXEC)
+
+```sh
+readelf -h single.elf
+```
+
+Output:
+
+```text
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x40100c
+```
+
+### Section headers
+
+```sh
+readelf -S single.elf
+```
+
+Output:
+
+```text
+There are 6 section headers, starting at offset 0x2120:
+
+Section Headers:
+  [Nr] Name              Type             Address           Offset
+       Size              EntSize          Flags  Link  Info  Align
+  [ 0]                   NULL             0000000000000000  00000000
+       0000000000000000  0000000000000000           0     0     0
+  [ 1] .text             PROGBITS         0000000000401000  00001000
+       000000000000001b  0000000000000000  AX       0     0     16
+  [ 2] .data             PROGBITS         0000000000402000  00002000
+       0000000000000008  0000000000000000  WA       0     0     4
+  [ 3] .symtab           SYMTAB           0000000000000000  00002008
+       00000000000000c0  0000000000000018           4     4     8
+  [ 4] .strtab           STRTAB           0000000000000000  000020c8
+       000000000000002c  0000000000000000           0     0     1
+  [ 5] .shstrtab         STRTAB           0000000000000000  000020f4
+       0000000000000027  0000000000000000           0     0     1
+```
+
+### Program headers
+
+```sh
+readelf -l single.elf
+```
+
+Output:
+
+```text
+Elf file type is EXEC (Executable file)
+Entry point 0x40100c
+There are 3 program headers, starting at offset 64
+
+Program Headers:
+  Type           Offset             VirtAddr           PhysAddr
+                 FileSiz            MemSiz              Flags  Align
+  LOAD           0x0000000000000000 0x0000000000400000 0x0000000000400000
+                 0x00000000000000e8 0x00000000000000e8  R      0x1000
+  LOAD           0x0000000000001000 0x0000000000401000 0x0000000000401000
+                 0x000000000000001b 0x000000000000001b  R E    0x1000
+  LOAD           0x0000000000002000 0x0000000000402000 0x0000000000402000
+                 0x0000000000000008 0x0000000000000008  RW     0x1000
+
+ Section to Segment mapping:
+  Segment Sections...
+   00
+   01     .text
+   02     .data
+```
+
+### Symbols (ET_EXEC)
+
+```sh
+readelf -s single.elf
+```
+
+Output:
+
+```text
+Symbol table '.symtab' contains 8 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
+     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS single.asm
+     2: 0000000000402000     0 NOTYPE  LOCAL  DEFAULT    2 num
+     3: 0000000000401000     0 NOTYPE  LOCAL  DEFAULT    1 inc
+     4: 000000000040100c     0 NOTYPE  GLOBAL DEFAULT    1 _start
+     5: 0000000000402008     0 NOTYPE  GLOBAL DEFAULT    2 __bss_start
+     6: 0000000000402008     0 NOTYPE  GLOBAL DEFAULT    2 _edata
+     7: 0000000000402008     0 NOTYPE  GLOBAL DEFAULT    2 _end
+```
+
+### Relocations (ET_EXEC)
+
+```sh
+readelf -r single.elf
+```
+
+Output:
+
+```text
+There are no relocations in this file.
+```
