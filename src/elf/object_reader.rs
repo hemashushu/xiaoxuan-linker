@@ -10,22 +10,22 @@ mod tests {
 
     use object::{
         Object, ObjectSection,
-        read::elf::{FileHeader, Rela, SectionHeader, Sym},
+        read::elf::{FileHeader, ProgramHeader, Rela, SectionHeader, Sym},
     };
 
     fn get_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
-            .join("resources/object-file-examples")
+            .join("resources/examples/x86_64-linux")
             .join(file_name);
 
         let binary_vec = fs::read(file_path).unwrap();
         binary_vec
     }
 
-    /// Test read ELF64 sections low-levelly
+    /// Test read ELF64 file header low-levelly
     #[test]
-    fn test_read_elf64_sections() {
+    fn test_read_elf64_file_header() {
         let binary_vec = get_file_binary("single.o");
         let binary = binary_vec.as_slice();
 
@@ -44,6 +44,21 @@ mod tests {
         println!("  Type: {}", elf.e_type(endian));
         // EM_*, expect `EM_X86_64`, it determines the relocation types (e.g. R_X86_64_PC32, R_X86_64_PLT32)
         println!("  Machine: {}", elf.e_machine(endian));
+    }
+
+    /// Test read ELF64 sections low-levelly
+    #[test]
+    fn test_read_elf64_sections() {
+        let binary_vec = get_file_binary("single.o");
+        let binary = binary_vec.as_slice();
+
+        let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
+            panic!("Failed to parse ELF64 file");
+        };
+
+        let Ok(endian) = elf.endian() else {
+            panic!("Failed to determine endianness");
+        };
 
         let Ok(sections) = elf.sections(endian, binary) else {
             panic!("Failed to get sections");
@@ -242,6 +257,63 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// Test read ELF64 program headers low-levelly
+    #[test]
+    fn test_read_elf64_program_headers() {
+        let binary_vec = get_file_binary("single.elf");
+        let binary = binary_vec.as_slice();
+
+        let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
+            panic!("Failed to parse ELF64 file");
+        };
+
+        let Ok(endian) = elf.endian() else {
+            panic!("Failed to determine endianness");
+        };
+
+        let Ok(segments) = elf.program_headers(endian, binary) else {
+            panic!("Failed to get program headers");
+        };
+
+        println!("Program Headers:");
+
+        for segment in segments {
+            let type_ = match segment.p_type(endian) {
+                object::elf::PT_NULL => "NULL",
+                object::elf::PT_LOAD => "LOAD",
+                object::elf::PT_DYNAMIC => "DYNAMIC",
+                object::elf::PT_INTERP => "INTERP",
+                object::elf::PT_NOTE => "NOTE",
+                object::elf::PT_SHLIB => "SHLIB",
+                object::elf::PT_PHDR => "PHDR",
+                _ => "UNKNOWN",
+            };
+
+            let mut flags = String::new();
+            if segment.p_flags(endian) & object::elf::PF_R != 0 {
+                flags.push('R');
+            }
+            if segment.p_flags(endian) & object::elf::PF_W != 0 {
+                flags.push('W');
+            }
+            if segment.p_flags(endian) & object::elf::PF_X != 0 {
+                flags.push('E');
+            }
+
+            println!(
+                "type: {}, offset (in file): 0x{:x}, virtual address: 0x{:x}, physical address: 0x{:x}, file size: 0x{:x}, memory size: 0x{:x}, flags: {}, alignment: {}",
+                type_,
+                segment.p_offset(endian),
+                segment.p_vaddr(endian),
+                segment.p_paddr(endian),
+                segment.p_filesz(endian),
+                segment.p_memsz(endian),
+                flags,
+                segment.p_align(endian),
+            );
         }
     }
 

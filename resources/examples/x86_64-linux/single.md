@@ -32,9 +32,6 @@
 single.asm:
 
 ```asm
-;; A simple NASM assembly program that defines a global variable,
-;; a function to increment it, and a main entry point that calls the function and exits with the result.
-
 global _start
 
 section .data
@@ -52,10 +49,10 @@ inc:
 _start:
     call inc            ;; call the inc function, result is in rax
 
-    ; syscall call `exit(status)`
-    ; syscall number: 60
+    ;; exit program using syscall `exit(status)`
+    ;; syscall number: 60
 
-     mov rdi, rax        ;; move the result of inc (the incremented value) into rdi, the first syscall argument
+    mov rdi, rax        ;; move the result of inc (the incremented value) into rdi, the first syscall argument
     mov rax, 60         ;; syscall number for exit
     syscall
 ```
@@ -80,7 +77,7 @@ Note that syscalls use `r10` instead of `rcx` for the 4th argument. The caller m
 
 ```sh
 nasm -f elf64 -o single.o single.asm
-ld -o single.elf single.o # or: ld -pie -o single.elf single.o
+ld -o single.elf single.o
 ./single.elf
 echo $? # output: 42
 ```
@@ -386,12 +383,26 @@ readelf -h single.elf
 Output:
 
 ```text
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
   OS/ABI:                            UNIX - System V
   ABI Version:                       0
   Type:                              EXEC (Executable file)
   Machine:                           Advanced Micro Devices X86-64
   Version:                           0x1
   Entry point address:               0x40100c
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          8480 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         3
+  Size of section headers:           64 (bytes)
+  Number of section headers:         6
+  Section header string table index: 5
 ```
 
 ### Section headers
@@ -451,6 +462,14 @@ Program Headers:
    01     .text
    02     .data
 ```
+
+The first segment contains the ELF header and program headers, the size is `0xe8` bytes, which is calculated by:
+
+- ELF header size: `0x40` bytes (64 bytes)
+- Program header size: `0x38` bytes (56 bytes) * 3 = `0xa8` bytes
+- Total: `0x40 + 0xa8 = 0xe8` bytes
+
+The `Section to Segment mapping` is determined by the `p_offset` and `p_filesz` fields of the program headers. For example, the second segment (which is executable) has `p_offset = 0x1000` and `p_filesz = 0x1b`, which means it includes the `.text` section that starts at offset `0x1000` and has size `0x1b`.
 
 ### Symbols (ET_EXEC)
 

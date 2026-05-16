@@ -1,6 +1,3 @@
-;; A simple NASM assembly program that defines a global variable,
-;; a function to increment it, and a main entry point that calls the function and exits with the result.
-
 global _start
 
 section .data
@@ -18,9 +15,9 @@ inc:
 _start:
     call inc            ;; call the inc function, result is in rax
 
-    ; syscall call `exit(status)`
-    ; syscall number: 60
+    ;; exit program using syscall `exit(status)`
+    ;; syscall number: 60
 
-    mov rdi, rax        ;; move the result of inc (the incremented value) into rdi, which is the first argument to the syscall
+    mov rdi, rax        ;; move the result of inc (the incremented value) into rdi, the first syscall argument
     mov rax, 60         ;; syscall number for exit
     syscall
