@@ -14,14 +14,13 @@ fn get_file_binary(file_name: &str) -> Vec<u8> {
         .join("resources/examples/x86_64-linux")
         .join(file_name);
 
-    let binary_vec = fs::read(file_path).unwrap();
-    binary_vec
+    fs::read(file_path).unwrap()
 }
 
 /// Test read ELF64 file header low-levelly
 #[test]
 fn test_read_elf64_file_header() {
-    let binary_vec = get_file_binary("single.o");
+    let binary_vec = get_file_binary("simple.elf");
     let binary = binary_vec.as_slice();
 
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
@@ -44,7 +43,7 @@ fn test_read_elf64_file_header() {
 /// Test read ELF64 sections low-levelly
 #[test]
 fn test_read_elf64_sections() {
-    let binary_vec = get_file_binary("single.o");
+    let binary_vec = get_file_binary("simple.elf");
     let binary = binary_vec.as_slice();
 
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
@@ -99,7 +98,7 @@ fn test_read_elf64_sections() {
 /// Test read ELF64 symbols low-levelly
 #[test]
 fn test_read_elf64_symbols() {
-    let binary_vec = get_file_binary("single.o");
+    let binary_vec = get_file_binary("simple.elf");
     let binary = binary_vec.as_slice();
 
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
@@ -133,10 +132,10 @@ fn test_read_elf64_symbols() {
                 // and the index of the symbol name in the strtab is given by the `st_name` field in the symbol table entry.
                 let name = str::from_utf8(symbol.name(endian, symbols.strings()).unwrap()).unwrap();
 
-                // high 4 bits is the binding (e.g. STB_GLOBAL, STB_LOCAL, and STB_WEAK),
+                // high 4 bits is the bind (e.g. STB_GLOBAL, STB_LOCAL, and STB_WEAK),
                 // low 4 bits is the type (e.g. STT_FUNC, STT_OBJECT, STT_SECTION, STT_FILE, and STT_COMMON)
                 //
-                // Obtains symbol binding and type from the `st_info` field:
+                // Obtains symbol bind and type from the `st_info` field:
                 //
                 // ```rust
                 // let info = symbol.st_info();

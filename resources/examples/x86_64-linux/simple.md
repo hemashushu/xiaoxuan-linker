@@ -22,6 +22,7 @@
     - [Disassembly 1](#disassembly-1)
     - [Relocation 1](#relocation-1)
   - [simple.elf](#simpleelf)
+    - [File header](#file-header)
     - [Sections EXEC](#sections-exec)
     - [Segments (Program Headers)](#segments-program-headers)
     - [Symbols EXEC](#symbols-exec)
@@ -462,6 +463,37 @@ Comparing the relocation entries in `simple-app.o` with those in `simple-lib.o`,
 
 ### simple.elf
 
+#### File header
+
+```sh
+readelf -h simple.elf
+```
+
+Output:
+
+```text
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x401040
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          8760 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         4
+  Size of section headers:           64 (bytes)
+  Number of section headers:         8
+  Section header string table index: 7
+```
+
 #### Sections EXEC
 
 ```sh
@@ -527,7 +559,21 @@ Program Headers:
    03     .data .bss
 ```
 
-Note that segment `03` contains both the `.data` and `.bss` sections. Its file size is 0x10 (the size of `.data`), but its memory size is 0x18 (the combined size of `.data` and `.bss`).
+The first segment is consisted of the ELF header and program headers:
+
+```text
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         4
+```
+
+The size is: `64 + 56 * 4 = 64 + 224 = 288 (0x120)`, which matches the file size of the first segment.
+
+The first segment in some ELF files may only contain the program headers (with 0x40 bytes file header skipped) and the segment type is `PT_PHDR` instead of `PT_LOAD`.
+
+Segment `01` contains the `.text` section, but in most cases, it contains `.init .text .fini`.
+
+Segment `03` contains both the `.data` and `.bss` sections. Its file size is 0x10 (the size of `.data`), but its memory size is 0x18 (the combined size of `.data` and `.bss`). There is also `.got` section at the beginning of this segment, which is used for dynamic linking and is not present in our example.
 
 #### Symbols EXEC
 

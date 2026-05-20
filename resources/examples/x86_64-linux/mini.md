@@ -471,6 +471,8 @@ The first segment contains the ELF header and program headers, the size is `0xe8
 
 The `Section to Segment mapping` is determined by the `p_offset` and `p_filesz` fields of the program headers. For example, the second segment (which is executable) has `p_offset = 0x1000` and `p_filesz = 0x1b`, which means it includes the `.text` section that starts at offset `0x1000` and has size `0x1b`.
 
+The `PhysAddr` field is usually the same as `VirtAddr` for executable files, only for some special cases (like baremetal programs, EFI applications) they might differ.
+
 ### Symbols (ET_EXEC)
 
 ```sh

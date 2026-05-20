@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-object = "0.39.1"
+object = { version = "0.39.1", features = ["read", "write"] }
 
 [dev-dependencies]
 pretty_assertions = "1.3.0"
