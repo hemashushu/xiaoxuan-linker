@@ -1,27 +1,27 @@
-# Dual Assembly Source Files Program Example
+# Program "simple"
 
 <!-- @import "[TOC]" {cmd="toc" depthFrom=2 depthTo=4 orderedList=false} -->
 
 <!-- code_chunk_output -->
 
 - [Source code](#source-code)
-  - [`dual0.asm`](#dual0asm)
-  - [`dual1.asm`](#dual1asm)
+  - [simple-lib.asm](#simple-libasm)
+  - [simple-app.asm](#simple-appasm)
 - [Assemble, link, and run](#assemble-link-and-run)
 - [Symbols, Disassembly, and relocations](#symbols-disassembly-and-relocations)
-  - [Dual0.o](#dual0o)
+  - [simple-lib.o](#simple-libo)
     - [Sections 0](#sections-0)
     - [Symbols 0](#symbols-0)
     - [Symbol type 0](#symbol-type-0)
     - [Disassembly 0](#disassembly-0)
     - [Relocation 0](#relocation-0)
-  - [Dual1.o](#dual1o)
+  - [simple-app.o](#simple-appo)
     - [Sections 1](#sections-1)
     - [Symbols 1](#symbols-1)
     - [Symbol type 1](#symbol-type-1)
     - [Disassembly 1](#disassembly-1)
     - [Relocation 1](#relocation-1)
-  - [Dual.elf](#dualelf)
+  - [simple.elf](#simpleelf)
     - [Sections EXEC](#sections-exec)
     - [Segments (Program Headers)](#segments-program-headers)
     - [Symbols EXEC](#symbols-exec)
@@ -33,7 +33,7 @@
 
 ## Source code
 
-### `dual0.asm`
+### simple-lib.asm
 
 ```asm
 global msg
@@ -86,7 +86,7 @@ dec:
     ret                     ;; return the decremented value in rax
 ```
 
-### `dual1.asm`
+### simple-app.asm
 
 ```asm
 global _start
@@ -142,21 +142,21 @@ _start:
 ## Assemble, link, and run
 
 ```sh
-nasm -f elf64 -o dual0.o dual0.asm
-nasm -f elf64 -o dual1.o dual1.asm
-ld -o dual.elf dual0.o dual1.o
-./dual.elf
+nasm -f elf64 -o simple-lib.o simple-lib.asm
+nasm -f elf64 -o simple-app.o simple-app.asm
+ld -o simple.elf simple-lib.o simple-app.o
+./simple.elf
 echo $? # output: Hello\n28
 ```
 
 ## Symbols, Disassembly, and relocations
 
-### Dual0.o
+### simple-lib.o
 
 #### Sections 0
 
 ```sh
-readelf -S dual0.o
+readelf -S simple-lib.o
 ```
 
 Output:
@@ -194,7 +194,7 @@ Be careful when linking `NOBITS` sections like `.bss`. These sections have no ac
 #### Symbols 0
 
 ```sh
-readelf -s dual0.o
+readelf -s simple-lib.o
 ```
 
 Output:
@@ -203,7 +203,7 @@ Output:
 Symbol table '.symtab' contains 15 entries:
    Num:    Value          Size Type    Bind   Vis      Ndx Name
      0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
-     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS dual0.asm
+     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS simple-lib.asm
      2: 0000000000000000     0 SECTION LOCAL  DEFAULT    1 .rodata
      3: 0000000000000000     0 SECTION LOCAL  DEFAULT    2 .data
      4: 0000000000000000     0 SECTION LOCAL  DEFAULT    3 .bss
@@ -219,12 +219,12 @@ Symbol table '.symtab' contains 15 entries:
     14: 0000000000000012     0 NOTYPE  GLOBAL DEFAULT    4 dec
 ```
 
-The `test` symbol is a private function defined in `dual0.asm`, so it is a local symbol.
+The `test` symbol is a private function defined in `simple-lib.asm`, so it is a local symbol.
 
 #### Symbol type 0
 
 ```sh
-nm dual0.o
+nm simple-lib.o
 ```
 
 Output:
@@ -244,13 +244,13 @@ Output:
 #### Disassembly 0
 
 ```sh
-objdump -M intel -sdr dual0.o
+objdump -M intel -sdr simple-lib.o
 ```
 
 Output:
 
 ```text
-dual0.o:     file format elf64-x86-64
+simple-lib.o:     file format elf64-x86-64
 
 Contents of section .rodata:
  0000 48656c6c 6f0a0006 00000000 000000    Hello..........
@@ -294,7 +294,7 @@ Note that the section `.bss` is not present in the file, so there are no content
 #### Relocation 0
 
 ```sh
-readelf -r dual0.o
+readelf -r simple-lib.o
 ```
 
 Output:
@@ -310,12 +310,12 @@ Relocation section '.rela.text' at offset 0x4d0 contains 6 entries:
 00000000002e  000200000002 R_X86_64_PC32     0000000000000000 .rodata + 3
 ```
 
-### Dual1.o
+### simple-app.o
 
 #### Sections 1
 
 ```sh
-readelf -S dual1.o
+readelf -S simple-app.o
 ```
 
 Output:
@@ -338,12 +338,12 @@ Section Headers:
        00000000000000c0  0000000000000018           3     1     8
 ```
 
-There is no `.data` or `.bss` section in `dual1.o` because `dual1.asm` does not define any global variables, all data are imported from `dual0.o`.
+There is no `.data` or `.bss` section in `simple-app.o` because `simple-app.asm` does not define any global variables, all data are imported from `simple-lib.o`.
 
 #### Symbols 1
 
 ```sh
-readelf -s dual1.o
+readelf -s simple-app.o
 ```
 
 Output:
@@ -352,7 +352,7 @@ Output:
 Symbol table '.symtab' contains 12 entries:
    Num:    Value          Size Type    Bind   Vis      Ndx Name
      0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
-     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS dual1.asm
+     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS simple-app.asm
      2: 0000000000000000     0 SECTION LOCAL  DEFAULT    1 .text
      3: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND msg
      4: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND len
@@ -370,7 +370,7 @@ All imported symbols (`msg`, `len`, `left`, `right`, `foo`, `bar`, `inc`, and `d
 #### Symbol type 1
 
 ```sh
-nm dual1.o
+nm simple-app.o
 ```
 
 Output:
@@ -390,13 +390,13 @@ Output:
 #### Disassembly 1
 
 ```sh
-objdump -M intel -sdr dual1.o
+objdump -M intel -sdr simple-app.o
 ```
 
 Output:
 
 ```text
-dual1.o:     file format elf64-x86-64
+simple-app.o:     file format elf64-x86-64
 
 Contents of section .text:
  0000 488b1d00 00000048 8b1d0000 00008b1d  H......H........
@@ -440,7 +440,7 @@ Disassembly of section .text:
 #### Relocation 1
 
 ```sh
-readelf -r dual1.o
+readelf -r simple-app.o
 ```
 
 Output:
@@ -458,14 +458,14 @@ Relocation section '.rela.text' at offset 0x3b0 contains 8 entries:
 000000000043  000a00000002 R_X86_64_PC32     0000000000000000 dec - 4
 ```
 
-Comparing the relocation entries in `dual1.o` with those in `dual0.o`, we observe that relocations in `dual1.o` reference symbols instead of sections (with offsets).
+Comparing the relocation entries in `simple-app.o` with those in `simple-lib.o`, we observe that relocations in `simple-app.o` reference symbols instead of sections (with offsets).
 
-### Dual.elf
+### simple.elf
 
 #### Sections EXEC
 
 ```sh
-readelf -S dual.elf
+readelf -S simple.elf
 ```
 
 Output:
@@ -497,7 +497,7 @@ Section Headers:
 #### Segments (Program Headers)
 
 ```sh
-readelf -l dual.elf
+readelf -l simple.elf
 ```
 
 Output:
@@ -532,7 +532,7 @@ Note that segment `03` contains both the `.data` and `.bss` sections. Its file s
 #### Symbols EXEC
 
 ```sh
-readelf -s dual.elf
+readelf -s simple.elf
 ```
 
 Output:
@@ -541,9 +541,9 @@ Output:
 Symbol table '.symtab' contains 16 entries:
    Num:    Value          Size Type    Bind   Vis      Ndx Name
      0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
-     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS dual0.asm
+     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS simple-lib.asm
      2: 0000000000401024     0 NOTYPE  LOCAL  DEFAULT    1 test
-     3: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS dual1.asm
+     3: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS simple-app.asm
      4: 0000000000403018     0 NOTYPE  GLOBAL DEFAULT    3 right
      5: 0000000000402000     0 NOTYPE  GLOBAL DEFAULT    2 msg
      6: 0000000000403010     0 NOTYPE  GLOBAL DEFAULT    3 left
@@ -558,7 +558,7 @@ Symbol table '.symtab' contains 16 entries:
     15: 0000000000402007     0 NOTYPE  GLOBAL DEFAULT    2 len
 ```
 
-The symbol `test` is a local symbol defined in `dual0.o` that does not appear in the `dual.elf` symbol table.
+The symbol `test` is a local symbol defined in `simple-lib.o` that does not appear in the `simple.elf` symbol table.
 
 The linker generates several special symbols related to the BSS section: `__bss_start`, `_edata`, and `_end`. These are typically used for BSS section initialization (all data in the BSS section is zeroed when the program starts).
 
@@ -577,7 +577,7 @@ Linkers often optimize memory layout by merging the `.data` and `.bss` sections,
 #### Symbol type EXEC
 
 ```sh
-nm dual.elf
+nm simple.elf
 ```
 
 Output:
@@ -601,13 +601,13 @@ Output:
 #### Disassembly EXEC
 
 ```sh
-objdump -M intel -sdr dual.elf
+objdump -M intel -sdr simple.elf
 ```
 
 Output:
 
 ```text
-dual.elf:     file format elf64-x86-64
+simple.elf:     file format elf64-x86-64
 
 Contents of section .text:
  401000 488b0509 20000048 83c00189 050f2000  H... ..H...... .
@@ -671,7 +671,7 @@ Disassembly of section .text:
 #### Relocation EXEC
 
 ```sh
-readelf -r dual.elf
+readelf -r simple.elf
 ```
 
 Output:

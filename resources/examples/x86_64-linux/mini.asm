@@ -1,3 +1,5 @@
+default rel     ;; use RIP-relative addressing by default for position-independent code
+
 global _start
 
 section .data

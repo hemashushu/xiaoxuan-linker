@@ -1,4 +1,4 @@
-# Single Assembly Source File Program Example
+# Program "mini"
 
 <!-- @import "[TOC]" {cmd="toc" depthFrom=2 depthTo=4 orderedList=false} -->
 
@@ -29,7 +29,7 @@
 
 ## Source code
 
-single.asm:
+mini.asm:
 
 ```asm
 global _start
@@ -76,9 +76,9 @@ Note that syscalls use `r10` instead of `rcx` for the 4th argument. The caller m
 ## Assemble, link, and run
 
 ```sh
-nasm -f elf64 -o single.o single.asm
-ld -o single.elf single.o
-./single.elf
+nasm -f elf64 -o mini.o mini.asm
+ld -o mini.elf mini.o
+./mini.elf
 echo $? # output: 42
 ```
 
@@ -87,7 +87,7 @@ echo $? # output: 42
 ### File header
 
 ```sh
-readelf -h single.o
+readelf -h mini.o
 ```
 
 Output:
@@ -104,7 +104,7 @@ Output:
 ### Sections
 
 ```sh
-readelf -S single.o
+readelf -S mini.o
 ```
 
 Output:
@@ -183,7 +183,7 @@ In short:
 ### Symbols
 
 ```sh
-readelf -s single.o
+readelf -s mini.o
 ```
 
 Output:
@@ -192,7 +192,7 @@ Output:
 Symbol table '.symtab' contains 7 entries:
    Num:    Value          Size Type    Bind   Vis      Ndx Name
      0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
-     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS single.asm
+     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS mini.asm
      2: 0000000000000000     0 SECTION LOCAL  DEFAULT    1 .data
      3: 0000000000000000     0 SECTION LOCAL  DEFAULT    2 .text
      4: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT    1 num
@@ -208,7 +208,7 @@ Fields:
 ### Symbols via `nm`
 
 ```sh
-nm single.o
+nm mini.o
 ```
 
 Output:
@@ -283,13 +283,13 @@ Strong vs weak:
 ### Disassembly code
 
 ```sh
-objdump -M intel -d -r single.o
+objdump -M intel -d -r mini.o
 ```
 
 Output:
 
 ```text
-single.o:     file format elf64-x86-64
+mini.o:     file format elf64-x86-64
 
 Disassembly of section .text:
 
@@ -309,13 +309,13 @@ Disassembly of section .text:
 ### Disassembly data
 
 ```sh
-objdump -s -j .data single.o
+objdump -s -j .data mini.o
 ```
 
 Output:
 
 ```text
-single.o:     file format elf64-x86-64
+mini.o:     file format elf64-x86-64
 
 Contents of section .data:
  0000 29000000 00000000                    ).......
@@ -330,7 +330,7 @@ The `0x7` is shown for readability in disassembly; it is not directly encoded in
 Check out the relocation section:
 
 ```sh
-readelf -r single.o
+readelf -r mini.o
 ```
 
 Output:
@@ -377,7 +377,7 @@ The target address is calculated as `target = next_instruction_rip + rel32`. Her
 ### File header (ET_EXEC)
 
 ```sh
-readelf -h single.elf
+readelf -h mini.elf
 ```
 
 Output:
@@ -408,7 +408,7 @@ ELF Header:
 ### Section headers
 
 ```sh
-readelf -S single.elf
+readelf -S mini.elf
 ```
 
 Output:
@@ -436,7 +436,7 @@ Section Headers:
 ### Program headers
 
 ```sh
-readelf -l single.elf
+readelf -l mini.elf
 ```
 
 Output:
@@ -474,7 +474,7 @@ The `Section to Segment mapping` is determined by the `p_offset` and `p_filesz` 
 ### Symbols (ET_EXEC)
 
 ```sh
-readelf -s single.elf
+readelf -s mini.elf
 ```
 
 Output:
@@ -483,7 +483,7 @@ Output:
 Symbol table '.symtab' contains 8 entries:
    Num:    Value          Size Type    Bind   Vis      Ndx Name
      0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
-     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS single.asm
+     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS mini.asm
      2: 0000000000402000     0 NOTYPE  LOCAL  DEFAULT    2 num
      3: 0000000000401000     0 NOTYPE  LOCAL  DEFAULT    1 inc
      4: 000000000040100c     0 NOTYPE  GLOBAL DEFAULT    1 _start
@@ -495,7 +495,7 @@ Symbol table '.symtab' contains 8 entries:
 ### Relocations (ET_EXEC)
 
 ```sh
-readelf -r single.elf
+readelf -r mini.elf
 ```
 
 Output:
