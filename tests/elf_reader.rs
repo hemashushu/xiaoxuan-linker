@@ -8,7 +8,7 @@ use std::fs;
 
 use object::read::elf::{FileHeader, ProgramHeader, Rela, SectionHeader, Sym};
 
-fn get_file_binary(file_name: &str) -> Vec<u8> {
+fn get_example_file_binary(file_name: &str) -> Vec<u8> {
     let file_path = std::env::current_dir()
         .unwrap()
         .join("resources/examples/x86_64-linux")
@@ -20,7 +20,7 @@ fn get_file_binary(file_name: &str) -> Vec<u8> {
 /// Test read ELF64 file header low-levelly
 #[test]
 fn test_read_elf64_file_header() {
-    let binary_vec = get_file_binary("simple.elf");
+    let binary_vec = get_example_file_binary("simple.elf");
     let binary = binary_vec.as_slice();
 
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
@@ -43,7 +43,7 @@ fn test_read_elf64_file_header() {
 /// Test read ELF64 sections low-levelly
 #[test]
 fn test_read_elf64_sections() {
-    let binary_vec = get_file_binary("simple.elf");
+    let binary_vec = get_example_file_binary("simple.elf");
     let binary = binary_vec.as_slice();
 
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
@@ -98,7 +98,7 @@ fn test_read_elf64_sections() {
 /// Test read ELF64 symbols low-levelly
 #[test]
 fn test_read_elf64_symbols() {
-    let binary_vec = get_file_binary("simple.elf");
+    let binary_vec = get_example_file_binary("simple.elf");
     let binary = binary_vec.as_slice();
 
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
@@ -132,8 +132,9 @@ fn test_read_elf64_symbols() {
                 // and the index of the symbol name in the strtab is given by the `st_name` field in the symbol table entry.
                 let name = str::from_utf8(symbol.name(endian, symbols.strings()).unwrap()).unwrap();
 
-                // high 4 bits is the bind (e.g. STB_GLOBAL, STB_LOCAL, and STB_WEAK),
-                // low 4 bits is the type (e.g. STT_FUNC, STT_OBJECT, STT_SECTION, STT_FILE, and STT_COMMON)
+                // The `st_info` field encodes both the symbol bind and type:
+                // - high 4 bits is the bind (e.g. STB_GLOBAL, STB_LOCAL, and STB_WEAK).
+                // - low 4 bits is the type (e.g. STT_FUNC, STT_OBJECT, STT_SECTION, STT_FILE, and STT_COMMON).
                 //
                 // Obtains symbol bind and type from the `st_info` field:
                 //
@@ -143,7 +144,7 @@ fn test_read_elf64_symbols() {
                 // let symbol_type = info & 0x0f;
                 // ```
                 //
-                // Or from the `symbol` trait methods:
+                // Or using `symbol` trait methods:
                 //
                 // ```rust
                 // symbol.st_bind(),
@@ -186,7 +187,7 @@ fn test_read_elf64_symbols() {
 /// Test read ELF64 relocations low-levelly
 #[test]
 fn test_read_elf64_relocations() {
-    let binary_vec = get_file_binary("simple-lib.o");
+    let binary_vec = get_example_file_binary("simple-lib.o");
     let binary = binary_vec.as_slice();
 
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
@@ -226,8 +227,8 @@ fn test_read_elf64_relocations() {
 
             for relocation in relocations {
                 // The `r_info` field encodes both the symbol index and the relocation type.
-                // high 32 bits is the symbol index,
-                // low 32 bits is the relocation type (such as R_X86_64_PC32, R_X86_64_PLT32, etc.)
+                // - high 32 bits is the symbol index.
+                // - low 32 bits is the relocation type (such as R_X86_64_PC32, R_X86_64_PLT32, etc.)
                 //
                 // Obtains symbol index and relocation type from the `r_info` field:
                 //
@@ -237,7 +238,7 @@ fn test_read_elf64_relocations() {
                 // let relocation_type = info & 0xffffffff;
                 // ```
                 //
-                // Or from the `relocation` trait methods:
+                // Or using `relocation` trait methods:
                 //
                 // ```rust
                 // let symbol_index =relocation.r_sym(endian, elf.is_mips64el(endian));
@@ -290,7 +291,7 @@ fn test_read_elf64_relocations() {
 /// Test read ELF64 program headers low-levelly
 #[test]
 fn test_read_elf64_program_headers() {
-    let binary_vec = get_file_binary("simple.elf");
+    let binary_vec = get_example_file_binary("simple.elf");
     let binary = binary_vec.as_slice();
 
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {

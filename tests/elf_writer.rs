@@ -25,14 +25,14 @@ const DATA_ALIGN: u64 = 8; // .rodata, .data and .bss sections are 8-byte aligne
 // ```text
 // .text
 // 0000000000401000 <_start>:
-//   401000:	bf 01 00 00 00       	mov    edi,0x1
-//   401005:	48 8d 35 f4 0f 00 00 	lea    rsi,[rip+0xff4]        # 402000 <msg>
-//   40100c:	48 8b 15 f4 0f 00 00 	mov    rdx,QWORD PTR [rip+0xff4]        # 402007 <len>
-//   401013:	b8 01 00 00 00       	mov    eax,0x1
-//   401018:	0f 05                	syscall
-//   40101a:	48 31 ff             	xor    rdi,rdi
-//   40101d:	b8 3c 00 00 00       	mov    eax,0x3c
-//   401022:	0f 05                	syscall
+//   401000:    bf 01 00 00 00           mov    edi,0x1
+//   401005:    48 8d 35 f4 0f 00 00     lea    rsi,[rip+0xff4]        # 402000 <msg>
+//   40100c:    48 8b 15 f4 0f 00 00     mov    rdx,QWORD PTR [rip+0xff4]        # 402007 <len>
+//   401013:    b8 01 00 00 00           mov    eax,0x1
+//   401018:    0f 05                    syscall
+//   40101a:    48 31 ff                 xor    rdi,rdi
+//   40101d:    b8 3c 00 00 00           mov    eax,0x3c
+//   401022:    0f 05                    syscall
 //
 // .rodata
 //   402000 48656c6c 6f0a0006 00000000 000000    Hello..........
@@ -98,16 +98,16 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
     //
     // ```text
     // 0000000000000000 <_start>:
-    //    0:	bf 01 00 00 00       	mov    edi,0x1
-    //    5:	48 8d 35 00 00 00 00 	lea    rsi,[rip+0x0]        # c <_start+0xc>
-    // 			8: R_X86_64_PC32	.rodata-0x4
-    //    c:	48 8b 15 00 00 00 00 	mov    rdx,QWORD PTR [rip+0x0]        # 13 <_start+0x13>
-    // 			f: R_X86_64_PC32	.rodata+0x3
-    //   13:	b8 01 00 00 00       	mov    eax,0x1
-    //   18:	0f 05                	syscall
-    //   1a:	48 31 ff             	xor    rdi,rdi
-    //   1d:	b8 3c 00 00 00       	mov    eax,0x3c
-    //   22:	0f 05                	syscall
+    //    0:    bf 01 00 00 00           mov    edi,0x1
+    //    5:    48 8d 35 00 00 00 00     lea    rsi,[rip+0x0]        # c <_start+0xc>
+    //             8: R_X86_64_PC32    .rodata-0x4
+    //    c:    48 8b 15 00 00 00 00     mov    rdx,QWORD PTR [rip+0x0]        # 13 <_start+0x13>
+    //             f: R_X86_64_PC32    .rodata+0x3
+    //   13:    b8 01 00 00 00           mov    eax,0x1
+    //   18:    0f 05                    syscall
+    //   1a:    48 31 ff                 xor    rdi,rdi
+    //   1d:    b8 3c 00 00 00           mov    eax,0x3c
+    //   22:    0f 05                    syscall
     // ```
 
     let mut text_data: Vec<u8> = Vec::new();
@@ -421,6 +421,7 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
         st_info: STB_LOCAL << 4 | STT_NOTYPE,
 
         // Symbol visibility.
+        // Possible values are STV_DEFAULT, STV_HIDDEN, and STV_PROTECTED etc,.
         st_other: STV_DEFAULT,
 
         // section index of the symbol, e.g. 1 for .text, 2 for .rodata,
@@ -519,10 +520,12 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
         sh_size: section_text_size as u64,
 
         // depends on the section type, for SHT_PROGBITS it is usually 0
-        // for section `.symtab`, it is the index of the associated string table section (e.g. `.strtab`),
+        // for section `.rela.text`, it is the index of the section `.symtab` that holds the symbols.
+        // for section `.symtab`, it is the index of the associated string table section (`.strtab`),
         sh_link: 0,
 
         // depends on the section type, for SHT_PROGBITS it is usually 0
+        // for section `.rela.text`, it is the index of the section to which the relocations apply (e.g. `.text`)
         // for section `.symtab`, it is the index of the first non-local symbol (i.e. the number of local symbols)
         sh_info: 0,
         sh_addralign: 16, // code sections are usually aligned to 16 bytes
@@ -588,18 +591,19 @@ fn align_up(val: usize, align: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use std::{os::unix::fs::PermissionsExt, path::Path};
+    use std::os::unix::fs::PermissionsExt;
 
-    use crate::elf_writer::write_elf_x86_64;
+    use crate::write_elf_x86_64;
 
     #[test]
     fn test_write_elf_x86_64() {
         let mut buffer: Vec<u8> = Vec::new();
         write_elf_x86_64(&mut buffer);
 
-        let path = Path::new("/tmp/hello.elf");
-        std::fs::write(path, &buffer).expect("failed to write ELF file");
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+        let tmp_dir = std::env::temp_dir();
+        let path = tmp_dir.join("hello.elf");
+        std::fs::write(&path, &buffer).expect("failed to write ELF file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .expect("failed to set permissions");
     }
 }

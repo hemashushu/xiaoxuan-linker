@@ -8,7 +8,7 @@ use std::fs;
 
 use object::{Object, ObjectSection, ObjectSegment, ObjectSymbol};
 
-fn get_file_binary(file_name: &str) -> Vec<u8> {
+fn get_example_file_binary(file_name: &str) -> Vec<u8> {
     let file_path = std::env::current_dir()
         .unwrap()
         .join("resources/examples/x86_64-linux")
@@ -19,7 +19,7 @@ fn get_file_binary(file_name: &str) -> Vec<u8> {
 
 #[test]
 fn test_read_file_header() {
-    let binary_vec = get_file_binary("mini.o");
+    let binary_vec = get_example_file_binary("mini.o");
     let binary = binary_vec.as_slice();
 
     let file = object::File::parse(binary).unwrap();
@@ -35,7 +35,7 @@ fn test_read_file_header() {
 
 #[test]
 fn test_read_sections() {
-    let binary_vec = get_file_binary("mini.o");
+    let binary_vec = get_example_file_binary("mini.o");
     let binary = binary_vec.as_slice();
 
     let file = object::File::parse(binary).unwrap();
@@ -59,7 +59,7 @@ fn test_read_sections() {
 
 #[test]
 fn test_read_symbols() {
-    let binary_vec = get_file_binary("mini.o");
+    let binary_vec = get_example_file_binary("mini.o");
     let binary = binary_vec.as_slice();
 
     let file = object::File::parse(binary).unwrap();
@@ -82,7 +82,7 @@ fn test_read_symbols() {
 
 #[test]
 fn test_read_relocations() {
-    let binary_vec = get_file_binary("mini.o");
+    let binary_vec = get_example_file_binary("mini.o");
     let binary = binary_vec.as_slice();
 
     let file = object::File::parse(binary).unwrap();
@@ -110,7 +110,7 @@ fn test_read_relocations() {
 
 #[test]
 fn test_read_program_headers() {
-    let binary_vec = get_file_binary("mini.elf");
+    let binary_vec = get_example_file_binary("mini.elf");
     let binary = binary_vec.as_slice();
 
     let file = object::File::parse(binary).unwrap();

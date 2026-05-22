@@ -1,4 +1,4 @@
-default rel     ;; use RIP-relative addressing by default for position-independent code
+default rel                 ;; use RIP-relative addressing by default for position-independent code
 
 global msg
 global len

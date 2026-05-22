@@ -19,9 +19,10 @@ output/
 .idea/
 .vscode/
 
-
-# Added by cargo
-#
-# already existing elements were commented out
-
-#/target
+!/resources/**/*.elf
+!/resources/**/*.so
+!/resources/**/*.so.1
+!/resources/**/*.so.1.0.0
+!/resources/**/*.a
+!/resources/**/*.o
+!/resources/**/*.obj

@@ -3,9 +3,3 @@
 // This Source Code Form is subject to the terms of
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
-
-mod elf_executable_writer;
-mod elf_linker;
-mod elf_module;
-mod elf_relocatable_reader;
-mod error;
