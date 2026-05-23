@@ -424,8 +424,8 @@ mod tests {
     }
 
     #[test]
-    fn test_read_pointer_in_rodata_o() {
-        let binary = get_example_file_binary("pointer-in-rodata.o");
+    fn test_read_pointer_in_tls_o() {
+        let binary = get_example_file_binary("pointer-in-tls.o");
         let module = read(&binary).unwrap();
         println!("{:#?}", module);
     }

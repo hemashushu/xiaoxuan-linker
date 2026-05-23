@@ -2,15 +2,16 @@ default rel                         ;; use RIP-relative addressing by default fo
 
 global my_var
 global my_func
-global my_array
 global _start
 
 section .data
     my_var dq 42                    ;; read-write global variable with initial value 42
 
-    my_array:
-        dq my_var                   ;; element 0: pointer to my_var (data pointer)
-        dq my_func                  ;; element 1: pointer to my_func (function pointer)
+    var_ptr dq my_var               ;; pointer to my_var (data pointer)
+    func_ptr dq my_func             ;; pointer to my_func (function pointer)
+
+section .rodata
+    var_ptr_const dq my_var         ;; pointer to my_var (data pointer, read-only)
 
 section .text
 
@@ -22,27 +23,25 @@ my_func:
 
 ;; fn _start() -> void
 _start:
-    sub rsp, 16                     ;; allocate 16 bytes for two local pointer variables
 
-    ;; load pointers from my_array and store them in local variables on the stack
-    mov rax, [rel my_array]         ;; load my_array[0] (pointer to my_var) into rax
-    mov [rsp], rax                  ;; store pointer to my_var at local[0]
-    mov rax, [rel my_array + 8]     ;; load my_array[1] (pointer to my_func) into rax
-    mov [rsp + 8], rax              ;; store pointer to my_func at local[1]
+    ;; Dereference var_ptr (in .data) to get the value it points to
+    mov rax, [var_ptr]              ;; rax = *var_ptr = &my_var  (RIP-relative → .rela.text entry)
+    mov rbx, [rax]                  ;; rbx = my_var = 42
 
-    ;; dereference local[0] to get the value of my_var
-    mov rcx, [rsp]                  ;; load the pointer to my_var from local[0]
-    mov rdi, [rcx]                  ;; dereference: load the value of my_var (42) into rdi
+    ;; Dereference var_ptr_const (in .rodata) to get the value it points to
+    mov rax, [var_ptr_const]        ;; rax = *var_ptr_const = &my_var  (RIP-relative → .rela.text entry)
+    mov rcx, [rax]                  ;; rcx = my_var = 42
 
-    ;; call my_func through the function pointer stored in local[1]
-    mov rax, [rsp + 8]              ;; load the function pointer from local[1]
-    call rax                        ;; call my_func(42), result (43) returned in rax
+    ;; Calculate the sum of the two values
+    add rbx, rcx                    ;; rbx = 42 + 42 = 84
 
-    add rsp, 16                     ;; restore stack pointer
+    ;; Call the function pointed to by func_ptr with the sum as argument
+    mov rax, [func_ptr]             ;; rax = *func_ptr = &my_func  (RIP-relative → .rela.text entry)
+    mov rdi, rbx                    ;; first argument = 84
+    call rax                        ;; rax = my_func(84) = 85
 
     ;; exit program using syscall `exit(status)`
     ;; syscall number: 60
-
     mov rdi, rax                    ;; move the return value of my_func into rdi (exit status)
     mov rax, 60                     ;; syscall number for exit
     syscall

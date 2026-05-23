@@ -1,4 +1,4 @@
-// pointer-in-rodata.c
+// pointer-in-tls.c
 //
 // Demonstrates pointer-typed globals that produce R_X86_64_64 relocation
 // entries in three different sections of the relocatable object file:
@@ -22,14 +22,14 @@
 // Build commands:
 //
 //   Compile to relocatable object (-fno-pie overrides distro default-pie):
-//     gcc -c -O0 -fno-pie -o pointer-in-rodata.o pointer-in-rodata.c
+//     gcc -c -O0 -fno-pie -o pointer-in-tls.o pointer-in-tls.c
 //
 //   Inspect relocation sections (expect .rela.rodata, .rela.data, .rela.tdata):
-//     readelf -r pointer-in-rodata.o
+//     readelf -r pointer-in-tls.o
 //
 //   Link and run (expected exit code: 126 = 42 + 42 + 42, clamped to uint8):
-//     gcc -static -O0 -fno-pie -o pointer-in-rodata.elf pointer-in-rodata.c
-//     ./pointer-in-rodata.elf; echo "exit code: $?"
+//     gcc -static -O0 -fno-pie -o pointer-in-tls.elf pointer-in-tls.c
+//     ./pointer-in-tls.elf; echo "exit code: $?"
 
 // The target symbol whose address is stored as a pointer in each section.
 int target = 42;
