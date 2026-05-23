@@ -1,11 +1,12 @@
 // Thread-Local Storage (TLS) example
 //
 // Demonstrates:
-//   - .tdata: initialized TLS variable (tls_var_a = 11)
-//   - .tbss:  zero-initialized TLS variable (tls_var_b = 0)
+//   - .tdata: initialized TLS variable (tls_var_a = 11, tls_var_b = 13)
+//   - .tbss:  zero-initialized TLS variable (tls_var_c = 0)
 //   - .data:  regular global variable (my_var = 42)
 //
-// Logic: read tls_var_a, write its value into tls_var_b, then exit with my_var (42).
+// Logic: read tls_var_a, write its value into tls_var_c, then
+// read tls_var_b and my_var, add them together, and return the result as the exit code.
 //
 // TLS model notes:
 //   local-exec  — offset from thread pointer is a link-time constant (R_X86_64_TPOFF32).
@@ -38,16 +39,18 @@
 
 // thread-local variables: placed in .tdata (initialized) and .tbss (zero-init)
 __thread long tls_var_a = 11;
-__thread long tls_var_b = 0;
+__thread long tls_var_b = 13;
+__thread long tls_var_c = 0;
 
 // regular global variable: placed in .data
 long my_var = 42;
 
 int main(void)
 {
-    // read tls_var_a and write its value into tls_var_b
-    tls_var_b = tls_var_a;
+    // read tls_var_a and write its value into tls_var_c
+    tls_var_c = tls_var_a;
+    long result = my_var + tls_var_b;
 
-    // exit with my_var as the exit code (expected: 42)
-    return (int)my_var;
+    // exit with `result` as the exit code (expected: 42+13=55)
+    return (int)result;
 }

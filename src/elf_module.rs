@@ -16,14 +16,14 @@
 ///
 /// - At most one code section `.text`
 /// - At most one read-only data section `.rodata`
-/// - At most one data section `.data`
-/// - At most one bss section `.bss`
+/// - At most one data section `.data`/`.tdata`
+/// - At most one bss section `.bss`/`.tbss`
 /// - At most one symbol table `.symtab`
-/// - At most one relocation table `.rela.text` (for the code section)
+/// - At most one relocation table `.rela.text`/`.rela.rodata`/`.rela.data`/`.rela.tdata`
 /// - At most one string table `.strtab` (for symbol names)
 /// - One section header table `.shstrtab` (for section names)
 ///
-/// Other sections and details of the object file are ignored for simplicity.
+/// Other sections and details of the object file are ignored without notice.
 #[derive(Debug)]
 pub struct Module {
     /// The code section of the module, which contains the machine code instructions.
@@ -31,6 +31,9 @@ pub struct Module {
 
     /// The read-only data section of the module, which contains constants and other immutable data.
     pub rodata: Vec<u8>,
+
+    pub tdata: Vec<u8>,
+    pub tbss_size: usize,
 
     /// The data section of the module, which contains initialized data.
     pub data: Vec<u8>,
@@ -49,7 +52,11 @@ pub struct Module {
     ///
     /// This list is translated from the relocation table in the object file directly,
     /// and the `Relocation.symbol_index` field refers to the index of the symbol in the `symbols` list.
-    pub relocations: Vec<Relocation>,
+    pub relocations_code: Vec<Relocation>,
+
+    pub relocations_rodata: Vec<Relocation>,
+    pub relocations_data: Vec<Relocation>,
+    pub relocations_tdata: Vec<Relocation>,
 
     /// The offset of the code section in the final executable,
     /// which is calculated during the linking process.
@@ -57,6 +64,9 @@ pub struct Module {
 
     /// The offset of the read-only data section in the final executable.
     pub rodata_offset: usize,
+
+    pub tdata_offset: usize,
+    pub tbss_offset: usize,
 
     /// The offset of the data section in the final executable.
     pub data_offset: usize,
@@ -70,12 +80,19 @@ impl Module {
         Self {
             code: Vec::new(),
             rodata: Vec::new(),
+            tdata: Vec::new(),
+            tbss_size: 0,
             data: Vec::new(),
             bss_size: 0,
             symbols: Vec::new(),
-            relocations: Vec::new(),
+            relocations_code: Vec::new(),
+            relocations_rodata: Vec::new(),
+            relocations_data: Vec::new(),
+            relocations_tdata: Vec::new(),
             code_offset: 0,
             rodata_offset: 0,
+            tdata_offset: 0,
+            tbss_offset: 0,
             data_offset: 0,
             bss_offset: 0,
         }
@@ -86,6 +103,8 @@ impl Module {
 pub enum SymbolSection {
     Code,
     Rodata,
+    ThreadData,
+    ThreadBss,
     Data,
     Bss,
 }
@@ -190,16 +209,46 @@ pub enum RelocationType {
     /// after determining the base address. The value stored at the site becomes `B + S + A`
     /// where `B` is the base address chosen by the loader.
     R_X86_64_64,
+    R_X86_64_32,
 
-    // For `local-exec` TLS model.
-    //
-    // There are also other TLS models:
-    // - `initial-exec`: `R_X86_64_GOTTPOFF`
-    // - `local-dynamic`: `R_X86_64_TLSLD`
-    // - `global-dynamic`: `R_X86_64_TLSGD`
-    //
-    // Currently linker does not support TLS yet.
-    // R_X86_64_TPOFF32,
+    /// For `local-exec` TLS model.
+    ///
+    /// There are also other TLS models:
+    /// - `initial-exec`: `R_X86_64_GOTTPOFF`
+    /// - `local-dynamic`: `R_X86_64_TLSLD`
+    /// - `global-dynamic`: `R_X86_64_TLSGD`
+    ///
+    /// Currently, only `local-exec` is supported.
+    ///
+    /// The formula for calculating the value to be written at the relocation site is:
+    /// TPOFF(sym) = sym_offset_in_tls_block − tls_block_size_rounded
+    ///
+    /// For example, if we have the following TLS variable declarations in C:
+    ///
+    /// ```c
+    /// __thread int var1;  // offset 0 in the TLS block
+    /// __thread int var2;  // offset 4 in the TLS block
+    /// ```
+    ///
+    /// The size of TLS block would be 8 bytes (assuming 4 bytes for each `int`),
+    /// and the offsets of `var1` and `var2` in the TLS block would be 0 and 4, respectively.
+    /// Then the value to be written at the relocation site for `var1` would be `0 - 8 = -8`,
+    /// and for `var2` would be `4 - 8 = -4`.
+    ///
+    /// Note that the value is negative because the TLS block grows downwards from the thread pointer (TP).
+    ///
+    /// The TLS block layout is:
+    ///
+    /// Higher addresses
+    /// +---------------------------+
+    /// | other TCB fields (if any) |
+    /// | self pointer (TCB)        | [fs:0] = FS.base
+    /// +---------------------------+
+    /// | var2 (offset 4)           | [fs:-4] = FS.base - 4 (tpoff = -4)
+    /// | var1 (offset 0)           | [fs:-8] = FS.base - 8 (tpoff = -8)
+    /// +---------------------------+
+    /// Lower addresses
+    R_X86_64_TPOFF32,
 }
 
 #[derive(Debug, Clone, PartialEq)]

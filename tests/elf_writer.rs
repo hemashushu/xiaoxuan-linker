@@ -14,6 +14,7 @@ use object::write::elf::{FileHeader, ProgramHeader, SectionHeader, Sym, Writer};
 
 const LOAD_ADDR: u64 = 0x400000; // typical base address for x86_64 executables
 const PAGE_SIZE: u64 = 0x1000; // segments must be page-aligned in memory
+// const CODE_ALIGN: u64 = 16; // code sections are usually 16-byte aligned
 const DATA_ALIGN: u64 = 8; // .rodata, .data and .bss sections are 8-byte aligned
 
 // Generates a minimal statically linked x86_64 ELF executable that writes
