@@ -10,7 +10,7 @@ use object::{
 };
 
 use crate::{
-    elf_module::{Module, Relocation, RelocationType, Symbol, SymbolScope, SymbolSection},
+    elf::module::{Module, Relocation, RelocationType, Symbol, SymbolScope, SymbolSection},
     error::LinkerError,
 };
 
@@ -51,7 +51,7 @@ pub fn read(binary: &[u8]) -> Result<Module, LinkerError> {
         return Err(LinkerError::new("Failed to read section headers"));
     };
 
-    let mut index_table = IndexTable::new();
+    let mut index_table = SectionIndexTable::new();
     let mut module = Module::new();
 
     for (section_index, section_header) in section_table.enumerate() {
@@ -172,7 +172,7 @@ pub fn read(binary: &[u8]) -> Result<Module, LinkerError> {
 
 fn read_symbols(
     symbol_table: &SymbolTable<object::elf::FileHeader64<Endianness>>,
-    index_table: &IndexTable,
+    index_table: &SectionIndexTable,
     endian: Endianness,
 ) -> Result<Vec<Symbol>, LinkerError> {
     let string_table = symbol_table.strings();
@@ -249,7 +249,8 @@ fn read_symbols(
                     }
                 }
                 None => {
-                    // Invalid section index
+                    // Other section index, such as `SHN_ABS` (absolute symbol) and
+                    // `SHN_COMMON` (common symbol), or an invalid section index.
                     Symbol::Other
                 }
             }
@@ -307,7 +308,7 @@ fn read_relocations(
     Ok(relocations)
 }
 
-struct IndexTable {
+struct SectionIndexTable {
     code: usize,
     rodata: usize,
     tdata: usize,
@@ -316,7 +317,14 @@ struct IndexTable {
     bss: usize,
 }
 
-impl IndexTable {
+/// The index of sections
+///
+/// This table is used to determine the section where a symbol
+/// is defined based on the `st_shndx` field in the symbol table.
+/// This table does not hold complete sections, but only the sesstions
+/// which can define symbols (e.g. `.text`, `.rodata`, `.tdata`,
+/// `.tbss`, `.data`, and `.bss`).
+impl SectionIndexTable {
     fn new() -> Self {
         Self {
             code: 0,
@@ -332,15 +340,15 @@ impl IndexTable {
         if index == self.code {
             Some(SymbolSection::Code)
         } else if index == self.rodata {
-            Some(SymbolSection::Rodata)
+            Some(SymbolSection::ReadOnlyData)
         } else if index == self.tdata {
             Some(SymbolSection::ThreadData)
         } else if index == self.tbss {
-            Some(SymbolSection::ThreadBss)
+            Some(SymbolSection::ThreadUninitialized)
         } else if index == self.data {
             Some(SymbolSection::Data)
         } else if index == self.bss {
-            Some(SymbolSection::Bss)
+            Some(SymbolSection::Uninitialized)
         } else {
             None
         }
@@ -363,7 +371,7 @@ fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, Lin
 mod tests {
     use std::fs;
 
-    use crate::elf_relocatable_reader::read;
+    use crate::elf::relocatable_reader::read;
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()

@@ -101,12 +101,12 @@ impl Module {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SymbolSection {
-    Code,
-    Rodata,
-    ThreadData,
-    ThreadBss,
-    Data,
-    Bss,
+    Code,                // `.text` section
+    ReadOnlyData,        // `.rodata` section
+    ThreadData,          // `.tdata` section
+    ThreadUninitialized, // `.tbss` section
+    Data,                // `.data` section
+    Uninitialized,       // `.bss` section
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -135,6 +135,31 @@ pub enum Symbol {
 
     // Symbols that the linker does not care about.
     Other,
+}
+
+impl Symbol {
+    pub fn new_defined(
+        name: &str,
+        symbol_section: SymbolSection,
+        scope: SymbolScope,
+        offset_origin: usize,
+    ) -> Self {
+        Self::Defined {
+            name: name.to_string(),
+            symbol_section,
+            scope,
+            offset_origin,
+            offset: 0, // This will be calculated during the linking process.
+        }
+    }
+
+    pub fn new_external(name: &str) -> Self {
+        Self::External(name.to_string())
+    }
+
+    pub fn new_other() -> Self {
+        Self::Other
+    }
 }
 
 /// The `RelocationType` enum represents the type of relocation that needs to be applied to
@@ -257,4 +282,20 @@ pub struct Relocation {
     pub placeholder_offset: usize,
     pub symbol_index: usize,
     pub addend: isize,
+}
+
+impl Relocation {
+    pub fn new(
+        relocation_type: RelocationType,
+        placeholder_offset: usize,
+        symbol_index: usize,
+        addend: isize,
+    ) -> Self {
+        Self {
+            relocation_type,
+            placeholder_offset,
+            symbol_index,
+            addend,
+        }
+    }
 }
