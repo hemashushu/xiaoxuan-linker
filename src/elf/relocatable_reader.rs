@@ -37,6 +37,10 @@ pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
         return Err(LinkerError::new("Failed to determine endianness"));
     };
 
+    // -------------------------------------------------------------------------
+    // Read file header
+    // -------------------------------------------------------------------------
+
     // ET_*, expect `ET_REL`
     if elf.e_type(endian) != object::elf::ET_REL {
         return Err(LinkerError::new("Unsupported ELF type, expected ET_REL"));
@@ -48,6 +52,10 @@ pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
             "Unsupported ELF machine, expected EM_X86_64",
         ));
     }
+
+    // -------------------------------------------------------------------------
+    // Read section headers
+    // -------------------------------------------------------------------------
 
     let Ok(section_table) = elf.sections(endian, binary) else {
         return Err(LinkerError::new("Failed to read section headers"));
@@ -64,13 +72,22 @@ pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
         let section_type = section_header.sh_type(endian);
         let section_tls = (section_header.sh_flags(endian) as u32) & object::elf::SHF_TLS != 0;
 
+        // Common section type (sh_type) includes:
+        // - object::elf::SHT_NULL => "NULL"
+        // - object::elf::SHT_PROGBITS => "PROGBITS"
+        // - object::elf::SHT_SYMTAB => "SYMTAB"
+        // - object::elf::SHT_STRTAB => "STRTAB"
+        // - object::elf::SHT_RELA => "RELA"
+        // - object::elf::SHT_NOBITS => "NOBITS"
+
         match section_name {
             SECTION_NAME_TEXT if section_type == object::elf::SHT_PROGBITS => {
                 module.section_binary.text = section_header.data(endian, binary).unwrap().to_vec();
                 index_table.code = section_index.0;
             }
             SECTION_NAME_RODATA if section_type == object::elf::SHT_PROGBITS => {
-                module.section_binary.rodata = section_header.data(endian, binary).unwrap().to_vec();
+                module.section_binary.rodata =
+                    section_header.data(endian, binary).unwrap().to_vec();
                 index_table.rodata = section_index.0;
             }
             SECTION_NAME_TDATA if section_tls && section_type == object::elf::SHT_PROGBITS => {
@@ -177,8 +194,27 @@ fn read_symbols(
     index_table: &SectionIndexTable,
     endian: Endianness,
 ) -> Result<Vec<Symbol>, LinkerError> {
-    let string_table = symbol_table.strings();
+    // Symbols Example
+    //
+    //  Local symbols (not visible outside the file):
+    //
+    // | Index | Address          | Type   | Bind   | Section Index | Name        |
+    // |-------|------------------|--------|--------|---------------|-------------|
+    // | 0     | 0000000000000000 | NOTYPE | LOCAL  | UND           |             |
+    // | 1     | 0000000000000000 | FILE   | LOCAL  | ABS           | hello.asm   |
+    // | 2     | 0000000000402000 | NOTYPE | LOCAL  | 2             | msg         |
+    // | 3     | 0000000000402007 | NOTYPE | LOCAL  | 2             | len         |
+    //
+    // Global symbols (visible outside the file):
+    //
+    // | Index | Address          | Type   | Bind   | Section Index | Name        |
+    // |-------|------------------|--------|--------|---------------|-------------|
+    // | 4     | 0000000000401000 | NOTYPE | GLOBAL | 1             | _start      |
+    // | 5     | 000000000040300f | NOTYPE | GLOBAL | 2             | __bss_start |
+    // | 6     | 000000000040300f | NOTYPE | GLOBAL | 2             | _edata      |
+    // | 7     | 0000000000403010 | NOTYPE | GLOBAL | 2             | _end        |
 
+    let string_table = symbol_table.strings();
     let mut symbols = Vec::new();
 
     for (symbol_index, sym) in symbol_table.enumerate() {
@@ -232,6 +268,17 @@ fn read_symbols(
                             )));
                         }
                     };
+
+                    // Common symbol type (st_type) includes:
+                    // - object::elf::STT_NOTYPE => "NOTYPE"
+                    // - object::elf::STT_OBJECT => "OBJECT"
+                    // - object::elf::STT_FUNC => "FUNC"
+                    // - object::elf::STT_SECTION => "SECTION"
+                    // - object::elf::STT_FILE => "FILE"
+                    // - object::elf::STT_COMMON => "COMMON"
+                    //
+                    // Since the symbol type does not affect the linking process in this linker,
+                    // we don't need to check the symbol type, but we can print it for debugging purposes.
 
                     // The low 2 bits of the `st_other` field encode the symbol visibility:
                     // - STV_DEFAULT: the symbol is visible to all modules.
@@ -291,6 +338,14 @@ fn read_relocations(
         let symbol_index = rela.r_sym(endian, is_mips64el);
         let relocation_type_raw = rela.r_type(endian, is_mips64el);
         let relocation_type = parse_relocation_type(relocation_type_raw)?;
+
+        // Common relocation type (r_type) includes:
+        // - object::elf::R_X86_64_64 => "R_X86_64_64"
+        // - object::elf::R_X86_64_PC32 => "R_X86_64_PC32"
+        // - object::elf::R_X86_64_GOT32 => "R_X86_64_GOT32"
+        // - object::elf::R_X86_64_PLT32 => "R_X86_64_PLT32"
+        // - object::elf::R_X86_64_RELATIVE => "R_X86_64_RELATIVE"
+        // - object::elf::R_X86_64_32 => "R_X86_64_32"
 
         let relocation = Relocation {
             relocation_type,
@@ -424,20 +479,6 @@ mod tests {
     #[test]
     fn test_read_pointer_in_data_o() {
         let binary = get_example_file_binary("pointer-in-data.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
-    }
-
-    #[test]
-    fn test_read_pointer_in_tls_o() {
-        let binary = get_example_file_binary("pointer-in-tls.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
-    }
-
-    #[test]
-    fn test_read_tls_o() {
-        let binary = get_example_file_binary("tls.o");
         let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }

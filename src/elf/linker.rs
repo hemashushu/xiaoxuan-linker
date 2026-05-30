@@ -580,7 +580,7 @@ fn find_global_symbol(
 mod tests {
     use std::fs;
 
-    use crate::elf::{linker::link, relocatable_reader::read_relocatable};
+    use crate::elf::{linker::link, module::Module, relocatable_reader::read_relocatable};
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
@@ -591,13 +591,56 @@ mod tests {
         fs::read(file_path).unwrap()
     }
 
-    #[test]
-    fn test_link() {
-        let binary_vec = get_example_file_binary("hello-world.o");
-        let binary = binary_vec.as_slice();
+    fn get_example_file_module(file_name: &str) -> Module {
+        let file_binary = get_example_file_binary(file_name);
+        read_relocatable(&file_binary).unwrap()
+    }
 
-        let module = read_relocatable(binary).unwrap();
-        let mut modules = vec![module];
+    fn get_example_file_modules(file_names: &[&str]) -> Vec<Module> {
+        file_names
+            .iter()
+            .map(|file_name| get_example_file_module(file_name))
+            .collect()
+    }
+
+    #[test]
+    fn test_link_mini() {
+        let mut modules = get_example_file_modules(&["mini.o"]);
+        let result = link(&mut modules).unwrap();
+        println!("Module after linking: {:#?}", modules);
+        println!("Link result: {:?}", result);
+    }
+
+    #[test]
+    fn test_link_hello_world() {
+        let mut modules = get_example_file_modules(&["hello-world.o"]);
+        let result = link(&mut modules).unwrap();
+
+        println!("Module after linking: {:#?}", modules);
+        println!("Link result: {:?}", result);
+    }
+
+    #[test]
+    fn test_link_simple() {
+        let mut modules = get_example_file_modules(&["simple-lib.o", "simple-app.o"]);
+        let result = link(&mut modules).unwrap();
+
+        println!("Module after linking: {:#?}", modules);
+        println!("Link result: {:?}", result);
+    }
+
+    #[test]
+    fn test_link_weak_symbol() {
+        let mut modules = get_example_file_modules(&["weak-symbol-lib.o", "weak-symbol-app.o"]);
+        let result = link(&mut modules).unwrap();
+
+        println!("Module after linking: {:#?}", modules);
+        println!("Link result: {:?}", result);
+    }
+
+    #[test]
+    fn test_link_pointer_in_data() {
+        let mut modules = get_example_file_modules(&["pointer-in-data.o"]);
         let result = link(&mut modules).unwrap();
 
         println!("Module after linking: {:#?}", modules);

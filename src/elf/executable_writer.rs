@@ -70,6 +70,11 @@ pub fn write_executable(
     // Phase 1: build string tables
     // -------------------------------------------------------------------------
 
+    // Call `writer.add_string(b"len");` to add a string to the string table and
+    // get a `StringId` that can be used for writing symbol table entries later.
+    // Since we have no symbol in our final executable,
+    // we don't need to add any string to the string table.
+
     let section_name_text = writer.add_section_name(b".text");
     let section_name_rodata = writer.add_section_name(b".rodata");
     let mut section_name_tdata_opt: Option<StringId> = None;
@@ -112,8 +117,8 @@ pub fn write_executable(
 
     writer.reserve_null_symbol_index(); // null symbol
 
-    // Call `reserve_symbol_index(None)` to reserve a symbol index for a symbol,
-    // however, since we have no symbol in our final executable,
+    // Call `writer.reserve_symbol_index(None)` to reserve a symbol index for a symbol.
+    // Since we have no symbol in our final executable,
     // we don't need to keep track of the reserved symbol indices.
 
     // -------------------------------------------------------------------------
@@ -211,6 +216,12 @@ pub fn write_executable(
         p_memsz: segment_phdr_size as u64,
         p_align: PHDR_SEGMENT_ALIGN as u64,
     });
+
+    // Common segment type (p_type) includes:
+    // - object::elf::PT_NULL => "NULL"
+    // - object::elf::PT_PHDR => "PHDR"
+    // - object::elf::PT_INTERP => "INTERP"
+    // - object::elf::PT_LOAD => "LOAD"
 
     // Write metadata segment header
     let segment_metadata_offset = 0_usize;
@@ -552,27 +563,51 @@ mod tests {
         read_relocatable(&file_binary).unwrap()
     }
 
-    fn link_example_files(file_names: &[&str], output_buffer: &mut dyn WritableBuffer) {
-        let mut modules: Vec<Module> = file_names
+    fn get_example_file_modules(file_names: &[&str]) -> Vec<Module> {
+        file_names
             .iter()
             .map(|file_name| get_example_file_module(file_name))
-            .collect();
+            .collect()
+    }
 
+    fn link_example_files(file_names: &[&str], output_buffer: &mut dyn WritableBuffer) {
+        let mut modules: Vec<Module> = get_example_file_modules(file_names);
         let link_result = link(&mut modules).unwrap();
-
         write_executable(&mut modules, &link_result, output_buffer).unwrap();
     }
 
-    #[test]
-    fn test_write_executable() {
+    fn link_example_file_to_executable(file_names: &[&str], output_file_path: &str) {
         let tmp_dir = std::env::temp_dir();
-        let path = tmp_dir.join("test-hello-world.elf");
-
+        let path = tmp_dir.join(output_file_path);
         let mut file = fs::File::create(&path).unwrap();
         let mut buffer = StreamingBuffer::new(&mut file);
-        link_example_files(&["hello-world.o"], &mut buffer);
-
+        link_example_files(file_names, &mut buffer);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .expect("failed to set permissions");
+    }
+
+    #[test]
+    fn test_write_mini() {
+        link_example_file_to_executable(&["mini.o"], "test-mini.elf");
+    }
+
+    #[test]
+    fn test_write_hello_world() {
+        link_example_file_to_executable(&["hello-world.o"], "test-hello-world.elf");
+    }
+
+    #[test]
+    fn test_write_simple() {
+        link_example_file_to_executable(&["simple-lib.o", "simple-app.o"], "test-simple.elf");
+    }
+
+    #[test]
+    fn test_write_weak_symbol() {
+        link_example_file_to_executable(&["weak-symbol-lib.o", "weak-symbol-app.o"], "test-weak-symbol.elf");
+    }
+
+    #[test]
+    fn test_write_pointer_in_data() {
+        link_example_file_to_executable(&["pointer-in-data.o"], "test-pointer-in-data.elf");
     }
 }

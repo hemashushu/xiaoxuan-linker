@@ -258,18 +258,18 @@ fn test_read_elf64_relocations() {
 
                 let type_ = relocation.r_type(endian, elf.is_mips64el(endian));
                 let kind = match type_ {
-                    0 => "R_X86_64_NONE",
-                    1 => "R_X86_64_64",
-                    2 => "R_X86_64_PC32",
-                    3 => "R_X86_64_GOT32",
-                    4 => "R_X86_64_PLT32",
-                    5 => "R_X86_64_COPY",
-                    6 => "R_X86_64_GLOB_DAT",
-                    7 => "R_X86_64_JUMP_SLOT",
-                    8 => "R_X86_64_RELATIVE",
-                    9 => "R_X86_64_GOTPCREL",
-                    10 => "R_X86_64_32",
-                    11 => "R_X86_64_32S",
+                    object::elf::R_X86_64_NONE => "R_X86_64_NONE",
+                    object::elf::R_X86_64_64 => "R_X86_64_64",
+                    object::elf::R_X86_64_PC32 => "R_X86_64_PC32",
+                    object::elf::R_X86_64_GOT32 => "R_X86_64_GOT32",
+                    object::elf::R_X86_64_PLT32 => "R_X86_64_PLT32",
+                    object::elf::R_X86_64_COPY => "R_X86_64_COPY",
+                    object::elf::R_X86_64_GLOB_DAT => "R_X86_64_GLOB_DAT",
+                    object::elf::R_X86_64_JUMP_SLOT => "R_X86_64_JUMP_SLOT",
+                    object::elf::R_X86_64_RELATIVE => "R_X86_64_RELATIVE",
+                    object::elf::R_X86_64_GOTPCREL => "R_X86_64_GOTPCREL",
+                    object::elf::R_X86_64_32 => "R_X86_64_32",
+                    object::elf::R_X86_64_32S => "R_X86_64_32S",
                     _ => "UNKNOWN",
                 };
 
