@@ -26,17 +26,10 @@
 /// Other sections and details of the object file are ignored without notice.
 #[derive(Debug)]
 pub struct Module {
-    /// The code section of the module, which contains the machine code instructions.
-    pub code: Vec<u8>,
+    pub section_binary: SectionBinary,
 
-    /// The read-only data section of the module, which contains constants and other immutable data.
-    pub rodata: Vec<u8>,
-
-    pub tdata: Vec<u8>,
+    /// The thread-local uninitialized data section of the module, which contains uninitialized thread-local variables.
     pub tbss_size: usize,
-
-    /// The data section of the module, which contains initialized data.
-    pub data: Vec<u8>,
 
     /// The bss section of the module, which contains uninitialized data.
     pub bss_size: usize,
@@ -52,71 +45,91 @@ pub struct Module {
     ///
     /// This list is translated from the relocation table in the object file directly,
     /// and the `Relocation.symbol_index` field refers to the index of the symbol in the `symbols` list.
-    pub relocations_code: Vec<Relocation>,
+    pub relocations_text: Vec<Relocation>,
 
+    /// The relocation entries for the read-only data section.
+    ///
+    /// Relocations on the data sections (`.rodata`, `.data`, `.tdata`) are
+    /// usually the pointers to symbols (other data or functions).
     pub relocations_rodata: Vec<Relocation>,
+
+    /// The relocation entries for the data section.
     pub relocations_data: Vec<Relocation>,
+
+    /// The relocation entries for the thread-local data section.
     pub relocations_tdata: Vec<Relocation>,
 
-    /// The offset of the code section in the final executable,
-    /// which is calculated during the linking process.
-    pub code_offset: usize,
+    /// The section offsets in the final executable, which are calculated during the linking process.
+    pub section_offsets: SectionOffset,
 
-    /// The offset of the read-only data section in the final executable.
-    pub rodata_offset: usize,
-
-    pub tdata_offset: usize,
-    pub tbss_offset: usize,
-
-    /// The offset of the data section in the final executable.
-    pub data_offset: usize,
-
-    /// The offset of the bss section in the final executable.
-    pub bss_offset: usize,
+    /// The section virtual addresses in the final executable, which are calculated during the linking process.
+    pub section_virtual_addresses: SectionVirtualAddress,
 }
 
 impl Module {
     pub fn new() -> Self {
         Self {
-            code: Vec::new(),
-            rodata: Vec::new(),
-            tdata: Vec::new(),
+            section_binary: SectionBinary::new(),
             tbss_size: 0,
-            data: Vec::new(),
             bss_size: 0,
             symbols: Vec::new(),
-            relocations_code: Vec::new(),
+            relocations_text: Vec::new(),
             relocations_rodata: Vec::new(),
             relocations_data: Vec::new(),
             relocations_tdata: Vec::new(),
-            code_offset: 0,
-            rodata_offset: 0,
-            tdata_offset: 0,
-            tbss_offset: 0,
-            data_offset: 0,
-            bss_offset: 0,
+            section_offsets: SectionOffset::new(),
+            section_virtual_addresses: SectionVirtualAddress::new(),
+        }
+    }
+
+    pub fn has_tls(&self) -> bool {
+        !self.section_binary.tdata.is_empty() || self.tbss_size > 0
+    }
+}
+
+/// Sections that a symbol can belong to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionBinary {
+    /// The code section of the module, which contains the machine code instructions.
+    pub text: Vec<u8>,
+    /// The read-only data section of the module, which contains constants and other immutable data.
+    pub rodata: Vec<u8>,
+    /// The thread-local data section of the module, which contains initialized thread-local variables.
+    pub tdata: Vec<u8>,
+    /// The data section of the module, which contains initialized data.
+    pub data: Vec<u8>,
+}
+
+impl SectionBinary {
+    pub fn new() -> Self {
+        Self {
+            text: Vec::new(),
+            rodata: Vec::new(),
+            tdata: Vec::new(),
+            data: Vec::new(),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// Sections that a symbol can belong to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolSection {
-    Code,                // `.text` section
-    ReadOnlyData,        // `.rodata` section
-    ThreadData,          // `.tdata` section
-    ThreadUninitialized, // `.tbss` section
-    Data,                // `.data` section
-    Uninitialized,       // `.bss` section
+    Text,   // `.text` section
+    RoData, // `.rodata` section
+    TData,  // `.tdata` section
+    TBss,   // `.tbss` section
+    Data,   // `.data` section
+    Bss,    // `.bss` section
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolScope {
     Local,
     Global,
     Weak,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum Symbol {
     Defined {
         // The name of the symbol
@@ -125,11 +138,11 @@ pub enum Symbol {
         symbol_section: SymbolSection,
         scope: SymbolScope,
 
-        // The offset of the symbol in its section in the object file.
-        offset_origin: usize,
+        // The offset of the symbol in its original section in the object file.
+        offset_original: usize,
 
-        // The offset of the symbol in the merged section in the final executable.
-        offset: usize,
+        offset_in_merged_section: usize, // calculated during linking, used for relocation
+        virtual_address_in_merged_section: usize, // calculated during linking, used for relocation
     },
     External(/* name */ String),
 
@@ -142,14 +155,15 @@ impl Symbol {
         name: &str,
         symbol_section: SymbolSection,
         scope: SymbolScope,
-        offset_origin: usize,
+        offset_original: usize,
     ) -> Self {
         Self::Defined {
             name: name.to_string(),
             symbol_section,
             scope,
-            offset_origin,
-            offset: 0, // This will be calculated during the linking process.
+            offset_original,
+            offset_in_merged_section: 0,
+            virtual_address_in_merged_section: 0,
         }
     }
 
@@ -195,7 +209,8 @@ impl Symbol {
 ///
 /// In summary, for a *static non-PIE* linker, only `R_X86_64_PC32`, `R_X86_64_64`, and
 /// `R_X86_64_TPOFF32` need to be handled as input relocations.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
 pub enum RelocationType {
     /// The `R_X86_64_PC32` relocation type represents a 32-bit PC-relative relocation.
     /// It is used for instructions that reference symbols, such as `mov`, `lea`, and `call`.
@@ -246,7 +261,7 @@ pub enum RelocationType {
     /// Currently, only `local-exec` is supported.
     ///
     /// The formula for calculating the value to be written at the relocation site is:
-    /// TPOFF(sym) = sym_offset_in_tls_block − tls_block_size_rounded
+    /// TPOFF(sym) = symbol_offset_in_tls_block − tls_block_size_rounded
     ///
     /// For example, if we have the following TLS variable declarations in C:
     ///
@@ -276,7 +291,7 @@ pub enum RelocationType {
     R_X86_64_TPOFF32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct Relocation {
     pub relocation_type: RelocationType,
     pub placeholder_offset: usize,
@@ -296,6 +311,81 @@ impl Relocation {
             placeholder_offset,
             symbol_index,
             addend,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SectionOffset {
+    /// The offset of the code section in the final executable,
+    /// which is calculated during the linking process.
+    pub text: usize,
+
+    /// The offset of the read-only data section in the final executable.
+    pub rodata: usize,
+
+    /// The offset of the thread-local data section in the final executable.
+    pub tdata: usize,
+
+    /// The offset of the thread-local uninitialized data section in the final executable.
+    pub tbss: usize,
+
+    /// The offset of the data section in the final executable.
+    pub data: usize,
+
+    /// The offset of the bss section in the final executable.
+    pub bss: usize,
+}
+
+impl SectionOffset {
+    pub fn new() -> Self {
+        Self {
+            text: 0,
+            rodata: 0,
+            tdata: 0,
+            tbss: 0,
+            data: 0,
+            bss: 0,
+        }
+    }
+}
+
+/// The virtual addresses of the sections in the final executable,
+/// which are calculated during the linking process based on the section offsets and the load address.
+///
+/// For most sections, `virtual address = load address + section offset`,
+/// but start from the `.data` section, the virtual address is also affected by the
+/// size of the previous section `.bss` (which is not present in the file, but occupies space in memory).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SectionVirtualAddress {
+    /// The virtual address of the code section in the final executable.
+    pub text: usize,
+
+    /// The virtual address of the read-only data section in the final executable.
+    pub rodata: usize,
+
+    /// The virtual address of the thread-local data section in the final executable.
+    pub tdata: usize,
+
+    /// The virtual address of the thread-local uninitialized data section in the final executable.
+    pub tbss: usize,
+
+    /// The virtual address of the data section in the final executable.
+    pub data: usize,
+
+    /// The virtual address of the bss section in the final executable.
+    pub bss: usize,
+}
+
+impl SectionVirtualAddress {
+    pub fn new() -> Self {
+        Self {
+            text: 0,
+            rodata: 0,
+            tdata: 0,
+            tbss: 0,
+            data: 0,
+            bss: 0,
         }
     }
 }

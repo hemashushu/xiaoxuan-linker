@@ -32,3 +32,13 @@ weak_fn:
     ret
 
 
+;; invoke weak_fn() and add its return value to 1, then return the result.
+;; ```c
+;; int invoke_weak_fn() {
+;;     return weak_fn() + 1;
+;; }
+
+invoke_weak_fn:
+    call weak_fn
+    add eax, 1
+    ret

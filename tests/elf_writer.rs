@@ -6,16 +6,39 @@
 
 use object::Endianness;
 use object::elf::{
-    ELFOSABI_NONE, EM_X86_64, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD, SHF_ALLOC, SHF_EXECINSTR,
-    SHN_UNDEF, SHT_NOBITS, SHT_PROGBITS, STB_GLOBAL, STB_LOCAL, STT_NOTYPE, STV_DEFAULT,
+    ELFOSABI_NONE, EM_X86_64, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD, PT_PHDR, SHF_ALLOC,
+    SHF_EXECINSTR, SHN_UNDEF, SHT_NOBITS, SHT_PROGBITS, STB_GLOBAL, STB_LOCAL, STT_NOTYPE,
+    STV_DEFAULT,
 };
 use object::write::WritableBuffer;
 use object::write::elf::{FileHeader, ProgramHeader, SectionHeader, Sym, Writer};
 
-const LOAD_ADDR: u64 = 0x400000; // typical base address for x86_64 executables
-const PAGE_SIZE: u64 = 0x1000; // segments must be page-aligned in memory
-// const CODE_ALIGN: u64 = 16; // code sections are usually 16-byte aligned
-const DATA_ALIGN: u64 = 8; // .rodata, .data and .bss sections are 8-byte aligned
+// ELF64 header size is fixed at 64 bytes
+const ELF_HEADER_SIZE: usize = 64;
+
+// ELF64 program header entry size is fixed at 56 bytes
+const PROGRAM_HEADER_ENTRY_SIZE: usize = 56;
+
+// typical base address for x86_64 executables (ET_EXEC),
+// by a contrast, PIE/DSO (ET_DYN) usually has a base address of 0.
+const LOAD_ADDR_BASE: u64 = 0x400000;
+
+// segments must be page-aligned in memory
+const PAGE_SIZE: u64 = 0x1000;
+
+const PHDR_SEGMENT_ALIGN: u64 = 0x8;
+// const TLS_SEGMENT_ALIGN: u64 = 0x8;
+
+// code sections are usually 16-byte aligned, it is also used for
+// merging .text sections from different modules
+// const CODE_ALIGN: u64 = 16;
+
+// .rodata, .data and .bss sections are 8-byte aligned. This is used for
+// merging data sections from different modules
+const DATA_ALIGN: u64 = 8;
+
+// The symbol table section is 8-byte aligned
+const SYMTAB_ALIGN: usize = 8;
 
 // Generates a minimal statically linked x86_64 ELF executable that writes
 // "Hello" to stdout via a syscall. The string and its length are stored in
@@ -39,36 +62,42 @@ const DATA_ALIGN: u64 = 8; // .rodata, .data and .bss sections are 8-byte aligne
 //   402000 48656c6c 6f0a0006 00000000 000000    Hello..........
 // ```
 //
-// ## File layout
+// ## ELF file layout overall
 //
-// | Size | Content         |
-// |------|-----------------|
-// | 64   | ELF header      |
-// | Mx56 | program headers |
-// | ...  | sections        |
-// | Nx64 | section headers |
+// | Size   | Content         |
+// |--------|-----------------|
+// | 64     | ELF header      |
+// | m * 56 | program headers |
+// | ...    | section data    |
+// | n * 64 | section headers |
 //
-// ## Sections (in file order):
+// ## Sections (in file order)
 //
-// | Name                       | Type         | Description                 | Alignment |
-// |----------------------------|--------------|-----------------------------|-----------|
-// | NULL                       | SHT_NULL     | Null section header         | 0         |
-// | `.init`, `.text`, `.finit` | SHT_PROGBITS | Executable code             | 16        |
-// | `.rodata`                  | SHT_PROGBITS | Read-only data (strings)    | 4/8       |
-// | `.data`                    | SHT_PROGBITS | Initialized data            | 4/8       |
-// | `.bss`                     | SHT_NOBITS   | Uninitialized data (zeroed) | 4/8       |
-// | `.symtab`                  | SHT_SYMTAB   | Symbol table                | 8         |
-// | `.strtab`                  | SHT_STRTAB   | Strings for symbol names    | 1         |
-// | `.shstrtab`                | SHT_STRTAB   | Strings for section names   | 1         |
+// | Name                       | Type         | Description                     | Align |
+// |----------------------------|--------------|---------------------------------|-------|
+// | NULL                       | SHT_NULL     | Null section header             | 0     |
+// | `.init`, `.text`, `.finit` | SHT_PROGBITS | Executable code                 | 16    |
+// | `.rodata`                  | SHT_PROGBITS | Read-only data (strings)        | 4/8   |
+// | `.tdata`                   | SHT_PROGBITS | Initialized thread-local data   | 4/8   |
+// | `.tbss`                    | SHT_NOBITS   | Uninitialized thread-local data | 4/8   |
+// | `.data`                    | SHT_PROGBITS | Initialized data                | 4/8   |
+// | `.bss`                     | SHT_NOBITS   | Uninitialized data              | 4/8   |
+// | `.symtab`                  | SHT_SYMTAB   | Symbol table                    | 8     |
+// | `.strtab`                  | SHT_STRTAB   | Strings for symbol names        | 1     |
+// | `.shstrtab`                | SHT_STRTAB   | Strings for section names       | 1     |
+//
+// Note that sections such as `.rela.*` are consumed by the linker and would not appear in the final executable.
 //
 // ## Program headers
 //
-// | Segment | Sections                      | Type | Flags | Alignment |
-// |---------|-------------------------------|------|-------|-----------|
-// | 00      | File header + program headers | Load | R     | 0x1000    |
-// | 01      | `.init`, `.text`, `.finit`    | Load | R E   | 0x1000    |
-// | 02      | .rodata                       | Load | R     | 0x1000    |
-// | 03      | .data, .bss                   | Load | R W   | 0x1000    |
+// | Segment           | Sections                       | Type    | Flags | Alignment |
+// |-------------------|--------------------------------|---------|-------|-----------|
+// | 00 phdr           | program headers                | PT_PHDR | R     | 0x8       |
+// | 01 metadata       | data before first code section | PT_LOAD | R     | 0x1000    |
+// | 02 code           | .init`, .text, .finit          | PT_LOAD | R E   | 0x1000    |
+// | 03 read-only data | .rodata                        | PT_LOAD | R     | 0x1000    |
+// | 04 writable data  | .tdata, .tbss, .data, .bss     | PT_LOAD | R W   | 0x1000    |
+// | 05 tls            | .tdata, .tbss                  | PT_TLS  | R     | 0x8       |
 //
 // ## Symbols (example)
 //
@@ -89,8 +118,9 @@ const DATA_ALIGN: u64 = 8; // .rodata, .data and .bss sections are 8-byte aligne
 // | 5     | 000000000040300f | NOTYPE | GLOBAL | 2             | __bss_start |
 // | 6     | 000000000040300f | NOTYPE | GLOBAL | 2             | _edata      |
 // | 7     | 0000000000403010 | NOTYPE | GLOBAL | 2             | _end        |
+
 #[allow(dead_code)]
-pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
+pub fn write_elf_x86_64(output_buffer: &mut dyn WritableBuffer) {
     // -------------------------------------------------------------------------
     // Construct .text and .rodata contents
     // -------------------------------------------------------------------------
@@ -110,6 +140,10 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
     //   1d:    b8 3c 00 00 00           mov    eax,0x3c
     //   22:    0f 05                    syscall
     // ```
+    //
+    // This code prints "Hello" to stdout via a syscall, and then exits with status code 0.
+    // It is generated by the `hello-world.asm` in the examples directory, which is
+    // assembled with NASM and then disassembled with objdump.
 
     let mut text_data: Vec<u8> = Vec::new();
     let symbol_start_offset = text_data.len(); // offset of _start symbol in .text
@@ -143,22 +177,16 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
     // -------------------------------------------------------------------------
     // Pre-calculate lengths and offsets
     // -------------------------------------------------------------------------
-    let elf_header_size: usize = 64; // ELF64 header size is fixed at 64 bytes
-    let program_header_entry_size: usize = 56; // ELF64
-    let number_of_program_headers: u32 = 4; // 00-NULL, 01-.text, 02-.rodata, 03-.data
-
-    // let section_header_entry_size: usize = 64; // ELF64
-    // let number_of_section_headers: u16 = 8; // NULL, .text, .rodata, .data, .bss, .symtab, .strtab, .shstrtab
-    // let section_header_string_table_index: u16 = 7; // index of .shstrtab in section header table
+    let number_of_program_headers: u32 = 5; // this example does not include TLS segment
 
     // --------
     // Sections
     // --------
 
-    let headers_size =
-        elf_header_size + program_header_entry_size * (number_of_program_headers as usize);
+    let metadata_size =
+        ELF_HEADER_SIZE + PROGRAM_HEADER_ENTRY_SIZE * (number_of_program_headers as usize);
 
-    let section_text_offset = align_up(headers_size, PAGE_SIZE as usize);
+    let section_text_offset = align_up(metadata_size, PAGE_SIZE as usize);
     let section_text_size: usize = text_data.len();
 
     let section_rodata_offset =
@@ -173,37 +201,43 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
 
     // .bss section starts immediately after .data section
     let section_bss_offset = align_up(section_data_offset + section_data_size, DATA_ALIGN as usize);
-    let section_bss_memory_size: usize = 0; // there is no data in .bss section, but it still occupies memory
+    let section_bss_memory_size: usize = 0; // there is no data in .bss section in file, but it still occupies memory
 
     // --------
     // Program headers
     // --------
 
-    let segment_null_offset = 0_usize;
-    let segment_null_size =
-        elf_header_size + program_header_entry_size * (number_of_program_headers as usize);
-    let segment_null_virtual_address = LOAD_ADDR;
+    let segment_phdr_offset = ELF_HEADER_SIZE;
+    let segment_phdr_size = PROGRAM_HEADER_ENTRY_SIZE * (number_of_program_headers as usize);
+    let segment_phdr_virtual_address = LOAD_ADDR_BASE + ELF_HEADER_SIZE as u64;
 
-    let segment_text_offset = section_text_offset;
-    let segment_text_size = section_text_size;
-    let segment_text_virtual_address = LOAD_ADDR + segment_text_offset as u64;
+    let segment_metadata_offset = 0_usize;
+    let segment_metadata_size =
+        ELF_HEADER_SIZE + PROGRAM_HEADER_ENTRY_SIZE * (number_of_program_headers as usize);
+    let segment_metadata_virtual_address = LOAD_ADDR_BASE;
 
-    let segment_rodata_offset = section_rodata_offset;
-    let segment_rodata_size = section_rodata_size;
-    let segment_rodata_virtual_address = LOAD_ADDR + segment_rodata_offset as u64;
+    let segment_code_offset = section_text_offset;
+    let segment_code_size = section_text_size;
+    let segment_code_virtual_address = LOAD_ADDR_BASE + segment_code_offset as u64;
+
+    let segment_read_only_data_offset = section_rodata_offset;
+    let segment_read_only_data_size = section_rodata_size;
+    let segment_read_only_data_virtual_address =
+        LOAD_ADDR_BASE + segment_read_only_data_offset as u64;
 
     // segment for .data and .bss sections.
-    let segment_data_offset = section_data_offset;
-    let segment_data_size =
+    let segment_writable_data_offset = section_data_offset;
+    let segment_writable_data_size =
         align_up(section_data_size, DATA_ALIGN as usize) + section_bss_memory_size;
-    let segment_data_virtual_address = LOAD_ADDR + segment_data_offset as u64;
+    let segment_writable_data_virtual_address =
+        LOAD_ADDR_BASE + segment_writable_data_offset as u64;
 
     // --------
     // Relocations and symbol addresses
     // --------
 
     // Calculate the relocation values for the .text section.
-    let dist_rodata = segment_rodata_virtual_address - segment_text_virtual_address;
+    let dist_rodata = segment_read_only_data_virtual_address - segment_code_virtual_address;
     let relo_msg_value = dist_rodata + symbol_msg_offset as u64 - (relo_offset_msg as u64 + 4); // `-4` is addend.
     let relo_len_value = dist_rodata + symbol_len_offset as u64 - (relo_offset_len as u64 + 4); // `-4` is addend.
 
@@ -217,10 +251,13 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
     // Symbol addresses
     // --------
 
-    let symbol_start_virtual_address = segment_text_virtual_address + symbol_start_offset as u64;
-    let symbol_msg_virtual_address = segment_rodata_virtual_address + symbol_msg_offset as u64;
-    let symbol_len_virtual_address = segment_rodata_virtual_address + symbol_len_offset as u64;
-    let symbol_edata_virtual_address = segment_data_virtual_address + section_data_size as u64; // _edata is at the end of the .data section
+    let symbol_start_virtual_address = segment_code_virtual_address + symbol_start_offset as u64;
+    let symbol_msg_virtual_address =
+        segment_read_only_data_virtual_address + symbol_msg_offset as u64;
+    let symbol_len_virtual_address =
+        segment_read_only_data_virtual_address + symbol_len_offset as u64;
+    let symbol_edata_virtual_address =
+        segment_writable_data_virtual_address + section_data_size as u64; // _edata is at the end of the .data section
     let symbol_bss_start_virtual_address =
         align_up(symbol_edata_virtual_address as usize, DATA_ALIGN as usize) as u64; // __bss_start is at the end of the .data section
     let symbol_end_virtual_address =
@@ -253,10 +290,10 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
     // References:
     // https://docs.rs/object/latest/object/write/elf/struct.Writer.html
 
-    // Both `Vec<u8>` and `StreamingBuffer` implement `WritableBuffer`.
+    // Both `Vec<u8>` and `object::write::StreamingBuffer` implement `WritableBuffer`.
     // `Vec<u8>` is simpler for this example, but `StreamingBuffer` can be used to
     // write directly to a file without buffering the entire contents in memory.
-    let mut writer = Writer::new(Endianness::Little, true, buffer);
+    let mut writer = Writer::new(Endianness::Little, true, output_buffer);
 
     // -------------------------------------------------------------------------
     // Phase 1: build string tables
@@ -265,9 +302,9 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
     let string_id_msg = writer.add_string(b"msg");
     let string_id_len = writer.add_string(b"len");
     let string_id_start = writer.add_string(b"_start");
-    let string_id_edata = writer.add_string(b"_edata");
-    let string_id_bss_start = writer.add_string(b"__bss_start");
-    let string_id_end = writer.add_string(b"_end");
+    let string_id_edata = writer.add_string(b"_edata"); // for .bss
+    let string_id_bss_start = writer.add_string(b"__bss_start"); // for .bss
+    let string_id_end = writer.add_string(b"_end"); // for .bss
 
     let section_text_name = writer.add_section_name(b".text");
     let section_rodata_name = writer.add_section_name(b".rodata");
@@ -347,53 +384,66 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
         })
         .expect("failed to write ELF file header");
 
+    // Write padding between ELF header and program headers
     writer.write_align_program_headers();
 
-    // Write 00-NULL segment header
+    // Write PHDR segment header
+    writer.write_program_header(&ProgramHeader {
+        p_type: PT_PHDR,
+        p_flags: PF_R,
+        p_offset: segment_phdr_offset as u64,
+        p_vaddr: segment_phdr_virtual_address,
+        p_paddr: segment_phdr_virtual_address,
+        p_filesz: segment_phdr_size as u64,
+        p_memsz: segment_phdr_size as u64,
+        p_align: PHDR_SEGMENT_ALIGN,
+    });
+
+    // Write metadata segment header
     writer.write_program_header(&ProgramHeader {
         p_type: PT_LOAD,
         p_flags: PF_R,
-        p_offset: segment_null_offset as u64,
-        p_vaddr: segment_null_virtual_address,
-        p_paddr: segment_null_virtual_address,
-        p_filesz: segment_null_size as u64,
-        p_memsz: segment_null_size as u64,
+        p_offset: segment_metadata_offset as u64,
+        p_vaddr: segment_metadata_virtual_address,
+        p_paddr: segment_metadata_virtual_address,
+        p_filesz: segment_metadata_size as u64,
+        p_memsz: segment_metadata_size as u64,
         p_align: PAGE_SIZE,
     });
 
-    // Write 01-.text segment header
+    // Write code segment header
     writer.write_program_header(&ProgramHeader {
         p_type: PT_LOAD,
         p_flags: PF_R | PF_X,
-        p_offset: segment_text_offset as u64,
-        p_vaddr: segment_text_virtual_address,
-        p_paddr: segment_text_virtual_address,
-        p_filesz: segment_text_size as u64,
-        p_memsz: segment_text_size as u64,
+        p_offset: segment_code_offset as u64,
+        p_vaddr: segment_code_virtual_address,
+        p_paddr: segment_code_virtual_address,
+        p_filesz: segment_code_size as u64,
+        p_memsz: segment_code_size as u64,
         p_align: PAGE_SIZE,
     });
 
-    // Write 02-.rodata segment header
+    // Write read-only data segment header
     writer.write_program_header(&ProgramHeader {
         p_type: PT_LOAD,
         p_flags: PF_R,
-        p_offset: segment_rodata_offset as u64,
-        p_vaddr: segment_rodata_virtual_address,
-        p_paddr: segment_rodata_virtual_address,
-        p_filesz: segment_rodata_size as u64,
-        p_memsz: segment_rodata_size as u64,
+        p_offset: segment_read_only_data_offset as u64,
+        p_vaddr: segment_read_only_data_virtual_address,
+        p_paddr: segment_read_only_data_virtual_address,
+        p_filesz: segment_read_only_data_size as u64,
+        p_memsz: segment_read_only_data_size as u64,
         p_align: PAGE_SIZE,
     });
 
-    // Write 03-.data segment header
+    // Write writable data segment header
     writer.write_program_header(&ProgramHeader {
         p_type: PT_LOAD,
         p_flags: PF_R | PF_W,
-        p_offset: segment_data_offset as u64,
-        p_vaddr: segment_data_virtual_address,
-        p_paddr: segment_data_virtual_address,
-        p_filesz: segment_data_size as u64,
-        p_memsz: segment_data_size as u64,
+        p_offset: segment_writable_data_offset as u64,
+        p_vaddr: segment_writable_data_virtual_address,
+        p_paddr: segment_writable_data_virtual_address,
+        p_filesz: segment_writable_data_size as u64,
+        p_memsz: segment_writable_data_size as u64,
         p_align: PAGE_SIZE,
     });
 
@@ -407,6 +457,10 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
 
     // Write .data section data
     writer.write_align(PAGE_SIZE as usize);
+    // there is no data in .data section in this example
+
+    // Write symtab section data.
+    writer.write_align(SYMTAB_ALIGN);
 
     // Write symbol `NULL`
     writer.write_symbol(&Sym {
@@ -516,7 +570,7 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
         name: Some(section_text_name),
         sh_type: SHT_PROGBITS,
         sh_flags: (SHF_ALLOC | SHF_EXECINSTR) as u64,
-        sh_addr: segment_text_virtual_address,
+        sh_addr: segment_code_virtual_address,
         sh_offset: section_text_offset as u64,
         sh_size: section_text_size as u64,
 
@@ -538,7 +592,7 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
         name: Some(section_rodata_name),
         sh_type: SHT_PROGBITS,
         sh_flags: SHF_ALLOC as u64,
-        sh_addr: segment_rodata_virtual_address,
+        sh_addr: segment_read_only_data_virtual_address,
         sh_offset: section_rodata_offset as u64,
         sh_size: section_rodata_size as u64,
         sh_link: 0,
@@ -552,7 +606,7 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
         name: Some(section_data_name),
         sh_type: SHT_PROGBITS,
         sh_flags: (SHF_ALLOC | PF_W) as u64,
-        sh_addr: segment_data_virtual_address,
+        sh_addr: segment_writable_data_virtual_address,
         sh_offset: section_data_offset as u64,
         sh_size: section_data_size as u64,
         sh_link: 0,
@@ -566,7 +620,7 @@ pub fn write_elf_x86_64(buffer: &mut dyn WritableBuffer) {
         name: Some(section_bss_name),
         sh_type: SHT_NOBITS,
         sh_flags: (SHF_ALLOC | PF_W) as u64,
-        sh_addr: segment_data_virtual_address + section_data_size as u64,
+        sh_addr: segment_writable_data_virtual_address + section_data_size as u64,
         sh_offset: section_bss_offset as u64,
         sh_size: 0, // .bss has no data in the file
         sh_link: 0,
@@ -602,7 +656,7 @@ mod tests {
         write_elf_x86_64(&mut buffer);
 
         let tmp_dir = std::env::temp_dir();
-        let path = tmp_dir.join("hello.elf");
+        let path = tmp_dir.join("test-elf-writer.elf");
         std::fs::write(&path, &buffer).expect("failed to write ELF file");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .expect("failed to set permissions");

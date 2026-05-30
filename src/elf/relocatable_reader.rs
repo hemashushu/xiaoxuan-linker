@@ -16,17 +16,19 @@ use crate::{
 
 const SECTION_NAME_TEXT: &str = ".text";
 const SECTION_NAME_RODATA: &str = ".rodata";
+
 const SECTION_NAME_TDATA: &str = ".tdata";
 const SECTION_NAME_TBSS: &str = ".tbss";
 const SECTION_NAME_DATA: &str = ".data";
 const SECTION_NAME_BSS: &str = ".bss";
+
 const SECTION_NAME_SYMTAB: &str = ".symtab";
 const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
 const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
 const SECTION_NAME_RELA_DATA: &str = ".rela.data";
 const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
 
-pub fn read(binary: &[u8]) -> Result<Module, LinkerError> {
+pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
         return Err(LinkerError::new("Failed to parse ELF64 file"));
     };
@@ -64,15 +66,15 @@ pub fn read(binary: &[u8]) -> Result<Module, LinkerError> {
 
         match section_name {
             SECTION_NAME_TEXT if section_type == object::elf::SHT_PROGBITS => {
-                module.code = section_header.data(endian, binary).unwrap().to_vec();
+                module.section_binary.text = section_header.data(endian, binary).unwrap().to_vec();
                 index_table.code = section_index.0;
             }
             SECTION_NAME_RODATA if section_type == object::elf::SHT_PROGBITS => {
-                module.rodata = section_header.data(endian, binary).unwrap().to_vec();
+                module.section_binary.rodata = section_header.data(endian, binary).unwrap().to_vec();
                 index_table.rodata = section_index.0;
             }
             SECTION_NAME_TDATA if section_tls && section_type == object::elf::SHT_PROGBITS => {
-                module.tdata = section_header.data(endian, binary).unwrap().to_vec();
+                module.section_binary.tdata = section_header.data(endian, binary).unwrap().to_vec();
                 index_table.tdata = section_index.0;
             }
             SECTION_NAME_TBSS if section_tls && section_type == object::elf::SHT_NOBITS => {
@@ -80,7 +82,7 @@ pub fn read(binary: &[u8]) -> Result<Module, LinkerError> {
                 index_table.tbss = section_index.0;
             }
             SECTION_NAME_DATA if section_type == object::elf::SHT_PROGBITS => {
-                module.data = section_header.data(endian, binary).unwrap().to_vec();
+                module.section_binary.data = section_header.data(endian, binary).unwrap().to_vec();
                 index_table.data = section_index.0;
             }
             SECTION_NAME_BSS if section_type == object::elf::SHT_NOBITS => {
@@ -144,7 +146,7 @@ pub fn read(binary: &[u8]) -> Result<Module, LinkerError> {
 
                 match section_name {
                     SECTION_NAME_RELA_TEXT => {
-                        module.relocations_code = read_relocations(relas, endian, is_mips64el)?;
+                        module.relocations_text = read_relocations(relas, endian, is_mips64el)?;
                     }
                     SECTION_NAME_RELA_RODATA => {
                         module.relocations_rodata = read_relocations(relas, endian, is_mips64el)?;
@@ -197,7 +199,7 @@ fn read_symbols(
                 Symbol::Other
             } else {
                 // External symbol
-                Symbol::External(symbol_name.to_string())
+                Symbol::new_external(symbol_name)
             }
         } else {
             match index_table.get_symbol_section(section_header_index as usize) {
@@ -224,7 +226,7 @@ fn read_symbols(
                         object::elf::STB_LOCAL => SymbolScope::Local,
                         object::elf::STB_GLOBAL => SymbolScope::Global,
                         object::elf::STB_WEAK => SymbolScope::Weak,
-                        bind @ _ => {
+                        bind => {
                             return Err(LinkerError::new(&format!(
                                 "Unsupported symbol bind: {bind}, expected STB_LOCAL, STB_GLOBAL, or STB_WEAK"
                             )));
@@ -239,14 +241,8 @@ fn read_symbols(
                     //
                     // This linker only supports STV_DEFAULT, which is the default visibility for symbols.
 
-                    let offset_origin = sym.st_value(endian) as usize;
-                    Symbol::Defined {
-                        name: symbol_name.to_string(),
-                        symbol_section,
-                        scope,
-                        offset_origin,
-                        offset: 0,
-                    }
+                    let offset_original = sym.st_value(endian) as usize;
+                    Symbol::new_defined(symbol_name, symbol_section, scope, offset_original)
                 }
                 None => {
                     // Other section index, such as `SHN_ABS` (absolute symbol) and
@@ -308,6 +304,7 @@ fn read_relocations(
     Ok(relocations)
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct SectionIndexTable {
     code: usize,
     rodata: usize,
@@ -338,17 +335,17 @@ impl SectionIndexTable {
 
     fn get_symbol_section(&self, index: usize) -> Option<SymbolSection> {
         if index == self.code {
-            Some(SymbolSection::Code)
+            Some(SymbolSection::Text)
         } else if index == self.rodata {
-            Some(SymbolSection::ReadOnlyData)
+            Some(SymbolSection::RoData)
         } else if index == self.tdata {
-            Some(SymbolSection::ThreadData)
+            Some(SymbolSection::TData)
         } else if index == self.tbss {
-            Some(SymbolSection::ThreadUninitialized)
+            Some(SymbolSection::TBss)
         } else if index == self.data {
             Some(SymbolSection::Data)
         } else if index == self.bss {
-            Some(SymbolSection::Uninitialized)
+            Some(SymbolSection::Bss)
         } else {
             None
         }
@@ -371,7 +368,7 @@ fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, Lin
 mod tests {
     use std::fs;
 
-    use crate::elf::relocatable_reader::read;
+    use crate::elf::relocatable_reader::read_relocatable;
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
@@ -385,63 +382,63 @@ mod tests {
     #[test]
     fn test_read_mini_o() {
         let binary = get_example_file_binary("mini.o");
-        let module = read(&binary).unwrap();
+        let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
     fn test_read_hello_world_o() {
         let binary = get_example_file_binary("hello-world.o");
-        let module = read(&binary).unwrap();
+        let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
     fn test_read_simple_lib_o() {
         let binary = get_example_file_binary("simple-lib.o");
-        let module = read(&binary).unwrap();
+        let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
     fn test_read_simple_app_o() {
         let binary = get_example_file_binary("simple-app.o");
-        let module = read(&binary).unwrap();
+        let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
     fn test_read_weak_symbol_lib_o() {
         let binary = get_example_file_binary("weak-symbol-lib.o");
-        let module = read(&binary).unwrap();
+        let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
     fn test_read_weak_symbol_app_o() {
         let binary = get_example_file_binary("weak-symbol-app.o");
-        let module = read(&binary).unwrap();
+        let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
     fn test_read_pointer_in_data_o() {
         let binary = get_example_file_binary("pointer-in-data.o");
-        let module = read(&binary).unwrap();
+        let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
     fn test_read_pointer_in_tls_o() {
         let binary = get_example_file_binary("pointer-in-tls.o");
-        let module = read(&binary).unwrap();
+        let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
     fn test_read_tls_o() {
         let binary = get_example_file_binary("tls.o");
-        let module = read(&binary).unwrap();
+        let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 }

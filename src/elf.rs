@@ -4,7 +4,9 @@
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
-mod executable_writer;
-mod linker;
+mod consts;
 mod module;
-mod relocatable_reader;
+
+pub mod executable_writer;
+pub mod linker;
+pub mod relocatable_reader;
