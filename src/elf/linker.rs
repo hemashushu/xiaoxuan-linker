@@ -604,25 +604,16 @@ mod tests {
     }
 
     #[test]
-    fn test_link_mini() {
-        let mut modules = get_example_file_modules(&["mini.o"]);
+    fn test_link_minimal() {
+        let mut modules = get_example_file_modules(&["minimal.o"]);
         let result = link(&mut modules).unwrap();
         println!("Module after linking: {:#?}", modules);
         println!("Link result: {:?}", result);
     }
 
     #[test]
-    fn test_link_hello_world() {
-        let mut modules = get_example_file_modules(&["hello-world.o"]);
-        let result = link(&mut modules).unwrap();
-
-        println!("Module after linking: {:#?}", modules);
-        println!("Link result: {:?}", result);
-    }
-
-    #[test]
-    fn test_link_simple() {
-        let mut modules = get_example_file_modules(&["simple-lib.o", "simple-app.o"]);
+    fn test_link_function() {
+        let mut modules = get_example_file_modules(&["function.o"]);
         let result = link(&mut modules).unwrap();
 
         println!("Module after linking: {:#?}", modules);
@@ -630,8 +621,8 @@ mod tests {
     }
 
     #[test]
-    fn test_link_weak_symbol() {
-        let mut modules = get_example_file_modules(&["weak-symbol-lib.o", "weak-symbol-app.o"]);
+    fn test_link_data() {
+        let mut modules = get_example_file_modules(&["data.o"]);
         let result = link(&mut modules).unwrap();
 
         println!("Module after linking: {:#?}", modules);
@@ -639,8 +630,26 @@ mod tests {
     }
 
     #[test]
-    fn test_link_pointer_in_data() {
-        let mut modules = get_example_file_modules(&["pointer-in-data.o"]);
+    fn test_link_symbol() {
+        let mut modules = get_example_file_modules(&["symbol-export.o", "symbol-import.o"]);
+        let result = link(&mut modules).unwrap();
+
+        println!("Module after linking: {:#?}", modules);
+        println!("Link result: {:?}", result);
+    }
+
+    #[test]
+    fn test_link_override() {
+        let mut modules = get_example_file_modules(&["override-weak.o", "override-strong.o"]);
+        let result = link(&mut modules).unwrap();
+
+        println!("Module after linking: {:#?}", modules);
+        println!("Link result: {:?}", result);
+    }
+
+    #[test]
+    fn test_link_relocate_data() {
+        let mut modules = get_example_file_modules(&["relocate-data.o"]);
         let result = link(&mut modules).unwrap();
 
         println!("Module after linking: {:#?}", modules);

@@ -288,9 +288,10 @@ pub fn write_executable(
             align_up(link_result.section_size.data, DATA_ALIGN) + link_result.section_size.bss,
         )
     };
+
     writer.write_program_header(&ProgramHeader {
         p_type: PT_LOAD,
-        p_flags: PF_R,
+        p_flags: PF_R | PF_W, // writable data
         p_offset: segment_writable_data_offset as u64,
         p_vaddr: segment_writable_data_virtual_address as u64,
         p_paddr: segment_writable_data_virtual_address as u64,
@@ -587,27 +588,35 @@ mod tests {
     }
 
     #[test]
-    fn test_write_mini() {
-        link_example_file_to_executable(&["mini.o"], "test-mini.elf");
+    fn test_write_minimal() {
+        link_example_file_to_executable(&["minimal.o"], "test-minimal.elf");
     }
 
     #[test]
-    fn test_write_hello_world() {
-        link_example_file_to_executable(&["hello-world.o"], "test-hello-world.elf");
+    fn test_write_function() {
+        link_example_file_to_executable(&["function.o"], "test-function.elf");
     }
 
     #[test]
-    fn test_write_simple() {
-        link_example_file_to_executable(&["simple-lib.o", "simple-app.o"], "test-simple.elf");
+    fn test_write_data() {
+        link_example_file_to_executable(&["data.o"], "test-data.elf");
     }
 
     #[test]
-    fn test_write_weak_symbol() {
-        link_example_file_to_executable(&["weak-symbol-lib.o", "weak-symbol-app.o"], "test-weak-symbol.elf");
+    fn test_write_symbol() {
+        link_example_file_to_executable(&["symbol-export.o", "symbol-import.o"], "test-symbol.elf");
     }
 
     #[test]
-    fn test_write_pointer_in_data() {
-        link_example_file_to_executable(&["pointer-in-data.o"], "test-pointer-in-data.elf");
+    fn test_write_override() {
+        link_example_file_to_executable(
+            &["override-weak.o", "override-strong.o"],
+            "test-override.elf",
+        );
+    }
+
+    #[test]
+    fn test_write_relocate_data() {
+        link_example_file_to_executable(&["relocate-data.o"], "test-relocate-data.elf");
     }
 }

@@ -435,50 +435,57 @@ mod tests {
     }
 
     #[test]
-    fn test_read_mini_o() {
-        let binary = get_example_file_binary("mini.o");
+    fn test_read_minimal() {
+        let binary = get_example_file_binary("minimal.o");
         let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
-    fn test_read_hello_world_o() {
-        let binary = get_example_file_binary("hello-world.o");
+    fn test_read_function() {
+        let binary = get_example_file_binary("function.o");
         let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
-    fn test_read_simple_lib_o() {
-        let binary = get_example_file_binary("simple-lib.o");
+    fn test_read_data() {
+        let binary = get_example_file_binary("data.o");
         let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
-    fn test_read_simple_app_o() {
-        let binary = get_example_file_binary("simple-app.o");
+    fn test_read_symbol_export() {
+        let binary = get_example_file_binary("symbol-export.o");
         let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
-    fn test_read_weak_symbol_lib_o() {
-        let binary = get_example_file_binary("weak-symbol-lib.o");
+    fn test_read_symbol_import() {
+        let binary = get_example_file_binary("symbol-import.o");
         let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
-    fn test_read_weak_symbol_app_o() {
-        let binary = get_example_file_binary("weak-symbol-app.o");
+    fn test_read_override_weak() {
+        let binary = get_example_file_binary("override-weak.o");
         let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }
 
     #[test]
-    fn test_read_pointer_in_data_o() {
-        let binary = get_example_file_binary("pointer-in-data.o");
+    fn test_read_override_strong() {
+        let binary = get_example_file_binary("override-strong.o");
+        let module = read_relocatable(&binary).unwrap();
+        println!("{:#?}", module);
+    }
+
+    #[test]
+    fn test_read_relocate_data() {
+        let binary = get_example_file_binary("relocate-data.o");
         let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }

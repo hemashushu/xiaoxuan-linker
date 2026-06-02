@@ -1,11 +1,14 @@
-// pointer-in-tls.c
+// Program summary:
+// - Exit with status code 126.
+
+// ## relocate-data-tls.c
 //
 // Demonstrates pointer-typed globals that produce R_X86_64_64 relocation
 // entries in three different sections of the relocatable object file:
 //
-//   .rela.rodata — const pointer stored in .rodata
-//   .rela.data   — non-const pointer stored in .data
-//   .rela.tdata  — TLS pointer stored in .tdata (the per-thread TLS template)
+// - .rela.rodata -- const pointer stored in .rodata
+// - .rela.data   -- non-const pointer stored in .data
+// - .rela.tdata  -- TLS pointer stored in .tdata (the per-thread TLS template)
 //
 // NOTE: must compile with -fno-pie to ensure pointers land in .rodata and .data.
 //
@@ -15,9 +18,10 @@
 // and non-const pointers in .data.rel.local, because the dynamic linker needs to
 // patch those slots at load time and .rodata/.data are subject to special mapping.
 // Passing -fno-pie overrides the distro default and restores the classic layout:
-//   const pointer → .rodata  → .rela.rodata
-//   non-const ptr → .data    → .rela.data
-//   TLS pointer   → .tdata   → .rela.tdata
+//
+// - const pointer -> .rodata  -> .rela.rodata
+// - non-const ptr -> .data    -> .rela.data
+// - TLS pointer   -> .tdata   -> .rela.tdata
 //
 // Build commands:
 //
