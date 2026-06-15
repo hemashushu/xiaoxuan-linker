@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 
-AS=/usr/bin/aarch64-linux-gnu-as
-LD=/usr/bin/aarch64-linux-gnu-ld
-GCC=/usr/bin/aarch64-linux-gnu-gcc
+# initialize the build environment
+AS=/usr/bin/riscv64-linux-gnu-as
+LD=/usr/bin/riscv64-linux-gnu-ld
+QEMU_USER=/usr/bin/qemu-riscv64
+GCC=/usr/bin/riscv64-linux-gnu-gcc
 
 set -euxo pipefail
 

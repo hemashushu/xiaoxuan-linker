@@ -1,18 +1,10 @@
-.section .rodata
+.section .data
 .align 3
 foo:
     .quad 11
 .align 3
 bar:
     .quad 13
-.align 3
-pfoo:
-    .quad foo
-.align 3
-pbar:
-    .quad bar
-
-.section .data
 .align 3
 a:
     .quad 17
@@ -25,6 +17,14 @@ pdec:
 .align 3
 pinc:
     .quad inc
+
+.section .rodata
+.align 3
+pfoo:
+    .quad foo
+.align 3
+pbar:
+    .quad bar
 
 .section .bss
 .align 3

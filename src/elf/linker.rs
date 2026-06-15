@@ -12,7 +12,7 @@ use crate::{
             DATA_ALIGN, ELF_HEADER_SIZE, LOAD_ADDR_BASE, PAGE_SIZE, PROGRAM_HEADER_ENTRY_SIZE,
             TEXT_ALIGN,
         },
-        module::{Module, RelocationType, Symbol, SymbolScope, SymbolSection},
+        module::{Module, RelocationType, Symbol, SymbolScope, SymbolSectionType},
     },
     error::LinkerError,
 };
@@ -31,11 +31,11 @@ pub struct LinkResult {
     /// The virtual address of the entry point (the `_start` symbol) in the final executable.
     pub entry_point: usize,
 
-    pub section_size: SectionSize,
+    pub merged_section_size: MergedSectionSize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SectionSize {
+pub struct MergedSectionSize {
     pub text: usize,
     pub rodata: usize,
     pub tdata: usize,
@@ -74,9 +74,8 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     // | ...    | section data    |
     // | n * 64 | section headers |
 
-    // The first section in file is started from the end of the metadata,
-    // which includes the ELF header and the program headers.
-    let metadata_size = ELF_HEADER_SIZE + number_of_program_headers * PROGRAM_HEADER_ENTRY_SIZE;
+    // The first section in file is started from the end of the program headers.
+    let file_and_program_headers_size = ELF_HEADER_SIZE + number_of_program_headers * PROGRAM_HEADER_ENTRY_SIZE;
 
     // Sections (in file order)
     //
@@ -107,39 +106,39 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     // | 05 tls            | .tdata, .tbss                  | PT_TLS  | R     | 0x8       |
 
     // merge `.text`
-    let mut offset = align_up(metadata_size, PAGE_SIZE); // code segment must be page-aligned
-    let mut section_size_text = offset;
+    let mut offset = align_up(file_and_program_headers_size, PAGE_SIZE); // code segment must be page-aligned
+    let mut merged_section_size_text = offset;
     for module in modules.iter_mut() {
         offset = align_up(offset, TEXT_ALIGN);
         module.section_offsets.text = offset;
         module.section_virtual_addresses.text = LOAD_ADDR_BASE + offset;
-        offset += module.section_binary.text.len();
+        offset += module.section_size.text;
     }
-    section_size_text = offset - section_size_text;
+    merged_section_size_text = offset - merged_section_size_text;
 
     // merge `.rodata`
     offset = align_up(offset, PAGE_SIZE); // read-only segment must be page-aligned
-    let mut section_size_rodata = offset;
+    let mut merged_section_size_rodata = offset;
     for module in modules.iter_mut() {
         offset = align_up(offset, DATA_ALIGN);
         module.section_offsets.rodata = offset;
         module.section_virtual_addresses.rodata = LOAD_ADDR_BASE + offset;
-        offset += module.section_binary.rodata.len();
+        offset += module.section_size.rodata;
     }
-    section_size_rodata = offset - section_size_rodata;
+    merged_section_size_rodata = offset - merged_section_size_rodata;
 
     // merge `.tdata`
     // Note that the `.tdata`, `.tbss`, `.data`, and `.bss` sections will be merged into
     // the same writable segment, so we need to calculate their offsets and virtual addresses together.
     offset = align_up(offset, PAGE_SIZE); // writable segment must be page-aligned
-    let mut section_size_tdata = offset;
+    let mut merged_section_size_tdata = offset;
     for module in modules.iter_mut() {
         offset = align_up(offset, DATA_ALIGN);
         module.section_offsets.tdata = offset;
         module.section_virtual_addresses.tdata = LOAD_ADDR_BASE + offset;
-        offset += module.section_binary.tdata.len();
+        offset += module.section_size.tdata;
     }
-    section_size_tdata = offset - section_size_tdata;
+    merged_section_size_tdata = offset - merged_section_size_tdata;
 
     // merge `.tbss`
     offset = align_up(offset, DATA_ALIGN);
@@ -147,26 +146,26 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     // because `.tbss` is a NOBITS section and does not occupy space in the file,
     // so we cannot simply use `offset` to calculate the virtual address for `.tbss`.
     let mut virtual_address = LOAD_ADDR_BASE + offset;
-    let mut section_size_tbss = virtual_address;
+    let mut merged_section_size_tbss = virtual_address;
     for module in modules.iter_mut() {
         virtual_address = align_up(virtual_address, DATA_ALIGN);
         module.section_offsets.tbss = offset;
         module.section_virtual_addresses.tbss = virtual_address;
-        virtual_address += module.tbss_size;
+        virtual_address += module.section_size.tbss;
     }
-    section_size_tbss = virtual_address - section_size_tbss;
+    merged_section_size_tbss = virtual_address - merged_section_size_tbss;
 
     // merge `.data`
-    let mut section_size_data = offset;
+    let mut merged_section_size_data = offset;
     for module in modules.iter_mut() {
         offset = align_up(offset, DATA_ALIGN);
         virtual_address = align_up(virtual_address, DATA_ALIGN);
         module.section_offsets.data = offset;
         module.section_virtual_addresses.data = virtual_address;
-        offset += module.section_binary.data.len();
-        virtual_address += module.section_binary.data.len();
+        offset += module.section_size.data;
+        virtual_address += module.section_size.data;
     }
-    section_size_data = offset - section_size_data;
+    merged_section_size_data = offset - merged_section_size_data;
 
     // The symbol `edata` points to the end of the initialized data segment.
     let symbol_edata_vaddr = virtual_address;
@@ -179,14 +178,14 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     let symbol_bss_start_vaddr = virtual_address;
     let symbol_bss_start_offset = offset;
 
-    let mut section_size_bss = virtual_address;
+    let mut merged_section_size_bss = virtual_address;
     for module in modules.iter_mut() {
         virtual_address = align_up(virtual_address, DATA_ALIGN);
         module.section_offsets.bss = offset;
         module.section_virtual_addresses.bss = virtual_address;
-        virtual_address += module.bss_size;
+        virtual_address += module.section_size.bss;
     }
-    section_size_bss = virtual_address - section_size_bss;
+    merged_section_size_bss = virtual_address - merged_section_size_bss;
 
     let symbol_end_vaddr = virtual_address;
     let symbol_end_offset = offset;
@@ -196,7 +195,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     linker_generated_symbols.insert(
         "_edata".to_string(),
         FindSymbolResult {
-            symbol_section: SymbolSection::Bss,
+            symbol_section: SymbolSectionType::Bss,
             offset_in_merged_section: symbol_edata_offset,
             virtual_address_in_merged_section: symbol_edata_vaddr,
         },
@@ -204,7 +203,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     linker_generated_symbols.insert(
         "__bss_start".to_string(),
         FindSymbolResult {
-            symbol_section: SymbolSection::Bss,
+            symbol_section: SymbolSectionType::Bss,
             offset_in_merged_section: symbol_bss_start_offset,
             virtual_address_in_merged_section: symbol_bss_start_vaddr,
         },
@@ -212,7 +211,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     linker_generated_symbols.insert(
         "_end".to_string(),
         FindSymbolResult {
-            symbol_section: SymbolSection::Bss,
+            symbol_section: SymbolSectionType::Bss,
             offset_in_merged_section: symbol_end_offset,
             virtual_address_in_merged_section: symbol_end_vaddr,
         },
@@ -222,7 +221,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     for module in modules.iter_mut() {
         for symbol in module.symbols.iter_mut() {
             if let Symbol::Defined {
-                symbol_section,
+                symbol_section_type: symbol_section,
                 offset_original: offset,
                 offset_in_merged_section,
                 virtual_address_in_merged_section,
@@ -230,27 +229,27 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
             } = symbol
             {
                 let (section_offset, section_virtual_address) = match symbol_section {
-                    SymbolSection::Text => (
+                    SymbolSectionType::Text => (
                         module.section_offsets.text,
                         module.section_virtual_addresses.text,
                     ),
-                    SymbolSection::RoData => (
+                    SymbolSectionType::RoData => (
                         module.section_offsets.rodata,
                         module.section_virtual_addresses.rodata,
                     ),
-                    SymbolSection::TData => (
+                    SymbolSectionType::TData => (
                         module.section_offsets.tdata,
                         module.section_virtual_addresses.tdata,
                     ),
-                    SymbolSection::TBss => (
+                    SymbolSectionType::TBss => (
                         module.section_offsets.tbss,
                         module.section_virtual_addresses.tbss,
                     ),
-                    SymbolSection::Data => (
+                    SymbolSectionType::Data => (
                         module.section_offsets.data,
                         module.section_virtual_addresses.data,
                     ),
-                    SymbolSection::Bss => (
+                    SymbolSectionType::Bss => (
                         module.section_offsets.bss,
                         module.section_virtual_addresses.bss,
                     ),
@@ -285,7 +284,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
                     Symbol::Defined {
                         name,
                         scope,
-                        symbol_section,
+                        symbol_section_type: symbol_section,
                         offset_in_merged_section,
                         virtual_address_in_merged_section,
                         ..
@@ -375,7 +374,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
                         // TPOFF(sym) = symbol_offset_in_tls_block − tls_block_size
                         let tls_block_size = module.section_virtual_addresses.tbss
                             - module.section_virtual_addresses.tdata
-                            + module.tbss_size;
+                            + module.section_size.tbss;
                         let symbol_offset_in_tls_block = target_symbol.offset_in_merged_section;
 
                         let relocated_value = symbol_offset_in_tls_block
@@ -425,20 +424,20 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
         ));
     };
 
-    let section_size = SectionSize {
-        text: section_size_text,
-        rodata: section_size_rodata,
-        tdata: section_size_tdata,
-        tbss: section_size_tbss,
-        data: section_size_data,
-        bss: section_size_bss,
+    let section_size = MergedSectionSize {
+        text: merged_section_size_text,
+        rodata: merged_section_size_rodata,
+        tdata: merged_section_size_tdata,
+        tbss: merged_section_size_tbss,
+        data: merged_section_size_data,
+        bss: merged_section_size_bss,
     };
 
     let link_result = LinkResult {
         existing_tls,
         number_of_program_headers,
         entry_point,
-        section_size,
+        merged_section_size: section_size,
     };
 
     Ok(link_result)
@@ -506,7 +505,7 @@ fn check_duplicated_strong_global_symbol(
 
 #[derive(Debug, Clone, PartialEq)]
 struct FindSymbolResult {
-    symbol_section: SymbolSection,
+    symbol_section: SymbolSectionType,
     offset_in_merged_section: usize,
     virtual_address_in_merged_section: usize,
 }
@@ -523,7 +522,7 @@ fn find_global_symbol(
             if let Symbol::Defined {
                 name,
                 scope,
-                symbol_section,
+                symbol_section_type: symbol_section,
                 offset_in_merged_section: offset,
                 virtual_address_in_merged_section: vaddr,
                 ..
@@ -580,7 +579,7 @@ fn find_global_symbol(
 mod tests {
     use std::fs;
 
-    use crate::elf::{linker::link, module::Module, relocatable_reader::read_relocatable};
+    use crate::elf::{linker::link, module::Module, reader::read_relocatable};
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
@@ -648,8 +647,8 @@ mod tests {
     }
 
     #[test]
-    fn test_link_relocate_data() {
-        let mut modules = get_example_file_modules(&["relocate-data.o"]);
+    fn test_link_relocate_within_data() {
+        let mut modules = get_example_file_modules(&["relocate-within-data.o"]);
         let result = link(&mut modules).unwrap();
 
         println!("Module after linking: {:#?}", modules);

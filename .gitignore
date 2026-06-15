@@ -15,6 +15,7 @@ output/
 *.a
 *.o
 *.obj
+*.core
 
 .idea/
 .vscode/

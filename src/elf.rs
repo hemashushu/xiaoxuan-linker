@@ -5,11 +5,11 @@
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
 mod consts;
-mod executable_writer;
+mod writer;
 mod linker;
 mod module;
-mod relocatable_reader;
+mod reader;
 
-pub use executable_writer::write_executable;
+pub use writer::write_executable;
 pub use linker::link;
-pub use relocatable_reader::read_relocatable;
+pub use reader::read_relocatable;

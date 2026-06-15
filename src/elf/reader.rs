@@ -6,11 +6,15 @@
 
 use object::{
     Endianness,
+    elf::FileHeader64,
     read::elf::{FileHeader, Rela, SectionHeader, Sym, SymbolTable},
 };
 
 use crate::{
-    elf::module::{Module, Relocation, RelocationType, Symbol, SymbolScope, SymbolSection},
+    elf::module::{
+        FileType, Machine, Module, OSABI, Relocation, RelocationType, SectionIndexTable, Symbol,
+        SymbolScope, SymbolSectionType,
+    },
     error::LinkerError,
 };
 
@@ -27,6 +31,39 @@ const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
 const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
 const SECTION_NAME_RELA_DATA: &str = ".rela.data";
 const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
+
+pub fn parse(binary: &[u8]) -> Result<&FileHeader64<Endianness>, LinkerError> {
+    let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
+        return Err(LinkerError::new("Failed to parse ELF64 file"));
+    };
+
+    Ok(elf)
+}
+
+pub fn read_file_header(
+    elf: &FileHeader64<Endianness>,
+) -> Result<super::module::FileHeader, LinkerError> {
+    let Ok(endian) = elf.endian() else {
+        return Err(LinkerError::new("Failed to determine endianness"));
+    };
+
+    let os_abi = OSABI::from(elf.e_ident.os_abi);
+    let file_type = FileType::from(elf.e_type(endian));
+    let machine = Machine::from(elf.e_machine(endian));
+
+    let entry_point = elf.e_entry(endian) as usize;
+    let number_of_program_headers = elf.e_phnum(endian) as usize;
+    let number_of_section_headers = elf.e_shnum(endian) as usize;
+
+    Ok(super::module::FileHeader {
+        os_abi,
+        machine,
+        file_type,
+        entry_point,
+        number_of_program_headers,
+        number_of_section_headers,
+    })
+}
 
 pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
@@ -61,7 +98,7 @@ pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
         return Err(LinkerError::new("Failed to read section headers"));
     };
 
-    let mut index_table = SectionIndexTable::new();
+    // let mut index_table = SectionIndexTable::new();
     let mut module = Module::new();
 
     for (section_index, section_header) in section_table.enumerate() {
@@ -82,29 +119,33 @@ pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
 
         match section_name {
             SECTION_NAME_TEXT if section_type == object::elf::SHT_PROGBITS => {
+                module.section_index_table.code = section_index.0;
+                module.section_size.text = section_header.sh_size(endian) as usize;
                 module.section_binary.text = section_header.data(endian, binary).unwrap().to_vec();
-                index_table.code = section_index.0;
             }
             SECTION_NAME_RODATA if section_type == object::elf::SHT_PROGBITS => {
+                module.section_index_table.rodata = section_index.0;
+                module.section_size.rodata = section_header.sh_size(endian) as usize;
                 module.section_binary.rodata =
                     section_header.data(endian, binary).unwrap().to_vec();
-                index_table.rodata = section_index.0;
             }
             SECTION_NAME_TDATA if section_tls && section_type == object::elf::SHT_PROGBITS => {
+                module.section_index_table.tdata = section_index.0;
+                module.section_size.tdata = section_header.sh_size(endian) as usize;
                 module.section_binary.tdata = section_header.data(endian, binary).unwrap().to_vec();
-                index_table.tdata = section_index.0;
             }
             SECTION_NAME_TBSS if section_tls && section_type == object::elf::SHT_NOBITS => {
-                module.tbss_size = section_header.sh_size(endian) as usize;
-                index_table.tbss = section_index.0;
+                module.section_index_table.tbss = section_index.0;
+                module.section_size.tbss = section_header.sh_size(endian) as usize;
             }
             SECTION_NAME_DATA if section_type == object::elf::SHT_PROGBITS => {
+                module.section_index_table.data = section_index.0;
+                module.section_size.data = section_header.sh_size(endian) as usize;
                 module.section_binary.data = section_header.data(endian, binary).unwrap().to_vec();
-                index_table.data = section_index.0;
             }
             SECTION_NAME_BSS if section_type == object::elf::SHT_NOBITS => {
-                module.bss_size = section_header.sh_size(endian) as usize;
-                index_table.bss = section_index.0;
+                module.section_index_table.bss = section_index.0;
+                module.section_size.bss = section_header.sh_size(endian) as usize;
             }
             SECTION_NAME_SYMTAB if section_type == object::elf::SHT_SYMTAB => {
                 // There are two similar symbol table sections:
@@ -129,7 +170,7 @@ pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
                 // But we don't need these two fields because the library we use (`object` crate)
                 // has already provided the `symbol_table.strings()` method to obtain the string table,
                 // and the number of local symbols can be counted by iterating over the `Vec<Symbol>`.
-                module.symbols = read_symbols(&symbol_table, &index_table, endian)?;
+                module.symbols = read_symbols(&symbol_table, &module.section_index_table, endian)?;
             }
             SECTION_NAME_RELA_TEXT
             | SECTION_NAME_RELA_RODATA
@@ -191,7 +232,7 @@ pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
 
 fn read_symbols(
     symbol_table: &SymbolTable<object::elf::FileHeader64<Endianness>>,
-    index_table: &SectionIndexTable,
+    section_index_table: &SectionIndexTable,
     endian: Endianness,
 ) -> Result<Vec<Symbol>, LinkerError> {
     // Symbols Example
@@ -238,7 +279,7 @@ fn read_symbols(
                 Symbol::new_external(symbol_name)
             }
         } else {
-            match index_table.get_symbol_section(section_header_index as usize) {
+            match section_index_table.get_symbol_section_type(section_header_index as usize) {
                 Some(symbol_section) => {
                     // The `st_info` field encodes both the symbol bind and type:
                     // - high 4 bits is the bind (e.g. STB_GLOBAL, STB_LOCAL, and STB_WEAK).
@@ -359,54 +400,6 @@ fn read_relocations(
     Ok(relocations)
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct SectionIndexTable {
-    code: usize,
-    rodata: usize,
-    tdata: usize,
-    tbss: usize,
-    data: usize,
-    bss: usize,
-}
-
-/// The index of sections
-///
-/// This table is used to determine the section where a symbol
-/// is defined based on the `st_shndx` field in the symbol table.
-/// This table does not hold complete sections, but only the sesstions
-/// which can define symbols (e.g. `.text`, `.rodata`, `.tdata`,
-/// `.tbss`, `.data`, and `.bss`).
-impl SectionIndexTable {
-    fn new() -> Self {
-        Self {
-            code: 0,
-            rodata: 0,
-            tdata: 0,
-            tbss: 0,
-            data: 0,
-            bss: 0,
-        }
-    }
-
-    fn get_symbol_section(&self, index: usize) -> Option<SymbolSection> {
-        if index == self.code {
-            Some(SymbolSection::Text)
-        } else if index == self.rodata {
-            Some(SymbolSection::RoData)
-        } else if index == self.tdata {
-            Some(SymbolSection::TData)
-        } else if index == self.tbss {
-            Some(SymbolSection::TBss)
-        } else if index == self.data {
-            Some(SymbolSection::Data)
-        } else if index == self.bss {
-            Some(SymbolSection::Bss)
-        } else {
-            None
-        }
-    }
-}
-
 fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, LinkerError> {
     match relocation_type_raw {
         object::elf::R_X86_64_PC32 => Ok(RelocationType::R_X86_64_PC32),
@@ -423,7 +416,7 @@ fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, Lin
 mod tests {
     use std::fs;
 
-    use crate::elf::relocatable_reader::read_relocatable;
+    use crate::elf::reader::read_relocatable;
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
@@ -484,8 +477,8 @@ mod tests {
     }
 
     #[test]
-    fn test_read_relocate_data() {
-        let binary = get_example_file_binary("relocate-data.o");
+    fn test_read_relocate_within_data() {
+        let binary = get_example_file_binary("relocate-within-data.o");
         let module = read_relocatable(&binary).unwrap();
         println!("{:#?}", module);
     }

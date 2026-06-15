@@ -4,6 +4,79 @@
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
+use object::elf;
+
+// https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
+#[derive(Debug)]
+pub struct FileHeader {
+    pub os_abi: OSABI,
+    pub machine: Machine,
+    pub file_type: FileType,
+    pub entry_point: usize,
+    pub number_of_program_headers: usize,
+    pub number_of_section_headers: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OSABI {
+    SystemV, // ELFOSABI_NONE/ELFOSABI_SYSV
+    // NetBSD,  // ELFOSABI_NETBSD
+    // FreeBSD, // ELFOSABI_FREEBSD
+    // OpenBSD, // ELFOSABI_OPENBSD
+    // Hurd,    // ELFOSABI_HURD
+    Other(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Machine {
+    X86_64,    // EM_X86_64
+    Aarch64,   // EM_AARCH64
+    RiscV,     // EM_RISCV
+    LoongArch, // EM_LOONGARCH
+    // S390,      // EM_S390
+    Other(u16),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileType {
+    Relocatable,  // ET_REL
+    Executable,   // ET_EXEC
+    SharedObject, // ET_DYN
+    Other(u16),
+}
+
+impl From<u8> for OSABI {
+    fn from(value: u8) -> Self {
+        match value {
+            elf::ELFOSABI_SYSV => OSABI::SystemV,
+            other => OSABI::Other(other),
+        }
+    }
+}
+
+impl From<u16> for Machine {
+    fn from(value: u16) -> Self {
+        match value {
+            elf::EM_X86_64 => Machine::X86_64,
+            elf::EM_AARCH64 => Machine::Aarch64,
+            elf::EM_RISCV => Machine::RiscV,
+            elf::EM_LOONGARCH => Machine::LoongArch,
+            other => Machine::Other(other),
+        }
+    }
+}
+
+impl From<u16> for FileType {
+    fn from(value: u16) -> Self {
+        match value {
+            elf::ET_REL => FileType::Relocatable,
+            elf::ET_EXEC => FileType::Executable,
+            elf::ET_DYN => FileType::SharedObject,
+            other => FileType::Other(other),
+        }
+    }
+}
+
 /// A module represents essential elements of an object file,
 /// which contains code, data, symbols, and relocation.
 ///
@@ -26,13 +99,9 @@
 /// Other sections and details of the object file are ignored without notice.
 #[derive(Debug)]
 pub struct Module {
-    pub section_binary: SectionBinary,
 
-    /// The thread-local uninitialized data section of the module, which contains uninitialized thread-local variables.
-    pub tbss_size: usize,
-
-    /// The bss section of the module, which contains uninitialized data.
-    pub bss_size: usize,
+    pub section_size: SectionSize,
+    pub section_index_table: SectionIndexTable,
 
     /// The symbol table of the module, which contains the symbols defined in the module.
     ///
@@ -59,6 +128,8 @@ pub struct Module {
     /// The relocation entries for the thread-local data section.
     pub relocations_tdata: Vec<Relocation>,
 
+    pub section_binary: SectionBinary,
+
     /// The section offsets in the final executable, which are calculated during the linking process.
     pub section_offsets: SectionOffset,
 
@@ -69,26 +140,36 @@ pub struct Module {
 impl Module {
     pub fn new() -> Self {
         Self {
-            section_binary: SectionBinary::new(),
-            tbss_size: 0,
-            bss_size: 0,
+            section_size: SectionSize::default(),
+            section_index_table: SectionIndexTable::default(),
             symbols: Vec::new(),
             relocations_text: Vec::new(),
             relocations_rodata: Vec::new(),
             relocations_data: Vec::new(),
             relocations_tdata: Vec::new(),
-            section_offsets: SectionOffset::new(),
-            section_virtual_addresses: SectionVirtualAddress::new(),
+            section_binary: SectionBinary::default(),
+            section_offsets: SectionOffset::default(),
+            section_virtual_addresses: SectionVirtualAddress::default(),
         }
     }
 
     pub fn has_tls(&self) -> bool {
-        !self.section_binary.tdata.is_empty() || self.tbss_size > 0
+        !self.section_binary.tdata.is_empty() || self.section_size.tbss > 0
     }
 }
 
+#[derive(Debug, Default)]
+pub struct SectionSize {
+    pub text: usize,
+    pub rodata: usize,
+    pub tdata: usize,
+    pub tbss: usize, // this is the memory size of the .tbss section
+    pub data: usize,
+    pub bss: usize, // this is the memory size of the .bss section
+}
+
 /// Sections that a symbol can belong to.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default)]
 pub struct SectionBinary {
     /// The code section of the module, which contains the machine code instructions.
     pub text: Vec<u8>,
@@ -100,20 +181,57 @@ pub struct SectionBinary {
     pub data: Vec<u8>,
 }
 
-impl SectionBinary {
-    pub fn new() -> Self {
-        Self {
-            text: Vec::new(),
-            rodata: Vec::new(),
-            tdata: Vec::new(),
-            data: Vec::new(),
+// impl SectionBinary {
+//     pub fn new() -> Self {
+//         Self {
+//             text: Vec::new(),
+//             rodata: Vec::new(),
+//             tdata: Vec::new(),
+//             data: Vec::new(),
+//         }
+//     }
+// }
+
+/// The index of sections
+///
+/// This table is used to determine the section where a symbol
+/// is defined based on the `st_shndx` field in the symbol table.
+/// This table does not hold complete sections, but only the sesstions
+/// which can define symbols (e.g. `.text`, `.rodata`, `.tdata`,
+/// `.tbss`, `.data`, and `.bss`).
+#[derive(Debug, Default)]
+pub struct SectionIndexTable {
+    pub code: usize,
+    pub rodata: usize,
+    pub tdata: usize,
+    pub tbss: usize,
+    pub data: usize,
+    pub bss: usize,
+}
+
+impl SectionIndexTable {
+    pub fn get_symbol_section_type(&self, index: usize) -> Option<SymbolSectionType> {
+        if index == self.code {
+            Some(SymbolSectionType::Text)
+        } else if index == self.rodata {
+            Some(SymbolSectionType::RoData)
+        } else if index == self.tdata {
+            Some(SymbolSectionType::TData)
+        } else if index == self.tbss {
+            Some(SymbolSectionType::TBss)
+        } else if index == self.data {
+            Some(SymbolSectionType::Data)
+        } else if index == self.bss {
+            Some(SymbolSectionType::Bss)
+        } else {
+            None
         }
     }
 }
 
 /// Sections that a symbol can belong to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SymbolSection {
+pub enum SymbolSectionType {
     Text,   // `.text` section
     RoData, // `.rodata` section
     TData,  // `.tdata` section
@@ -135,7 +253,7 @@ pub enum Symbol {
         // The name of the symbol
         // This name may be empty for symbols that represent sections (e.g. the symbol for the `.text` section).
         name: String,
-        symbol_section: SymbolSection,
+        symbol_section_type: SymbolSectionType,
         scope: SymbolScope,
 
         // The offset of the symbol in its original section in the object file.
@@ -153,13 +271,13 @@ pub enum Symbol {
 impl Symbol {
     pub fn new_defined(
         name: &str,
-        symbol_section: SymbolSection,
+        symbol_section_type: SymbolSectionType,
         scope: SymbolScope,
         offset_original: usize,
     ) -> Self {
         Self::Defined {
             name: name.to_string(),
-            symbol_section,
+            symbol_section_type,
             scope,
             offset_original,
             offset_in_merged_section: 0,
@@ -315,7 +433,7 @@ impl Relocation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct SectionOffset {
     /// The offset of the code section in the final executable,
     /// which is calculated during the linking process.
@@ -337,18 +455,18 @@ pub struct SectionOffset {
     pub bss: usize,
 }
 
-impl SectionOffset {
-    pub fn new() -> Self {
-        Self {
-            text: 0,
-            rodata: 0,
-            tdata: 0,
-            tbss: 0,
-            data: 0,
-            bss: 0,
-        }
-    }
-}
+// impl SectionOffset {
+//     pub fn new() -> Self {
+//         Self {
+//             text: 0,
+//             rodata: 0,
+//             tdata: 0,
+//             tbss: 0,
+//             data: 0,
+//             bss: 0,
+//         }
+//     }
+// }
 
 /// The virtual addresses of the sections in the final executable,
 /// which are calculated during the linking process based on the section offsets and the load address.
@@ -356,7 +474,7 @@ impl SectionOffset {
 /// For most sections, `virtual address = load address + section offset`,
 /// but start from the `.data` section, the virtual address is also affected by the
 /// size of the previous section `.bss` (which is not present in the file, but occupies space in memory).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct SectionVirtualAddress {
     /// The virtual address of the code section in the final executable.
     pub text: usize,
@@ -377,15 +495,15 @@ pub struct SectionVirtualAddress {
     pub bss: usize,
 }
 
-impl SectionVirtualAddress {
-    pub fn new() -> Self {
-        Self {
-            text: 0,
-            rodata: 0,
-            tdata: 0,
-            tbss: 0,
-            data: 0,
-            bss: 0,
-        }
-    }
-}
+// impl SectionVirtualAddress {
+//     pub fn new() -> Self {
+//         Self {
+//             text: 0,
+//             rodata: 0,
+//             tdata: 0,
+//             tbss: 0,
+//             data: 0,
+//             bss: 0,
+//         }
+//     }
+// }
