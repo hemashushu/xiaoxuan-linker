@@ -4,38 +4,42 @@
 // Thread-Local Storage (TLS) example
 //
 // Demonstrates:
-//   - .tdata: initialized TLS variable (tls_var_a = 11, tls_var_b = 13)
-//   - .tbss:  zero-initialized TLS variable (tls_var_c = 0)
-//   - .data:  regular global variable (my_var = 42)
+//   - .tdata: initialized TLS variables (foo = 11, bar = 13)
+//   - .tbss:  zero-initialized TLS variable (x = 0)
+//   - .data:  regular global variable (abc = 42)
 //
-// Logic: read tls_var_a, write its value into tls_var_c, then
-// read tls_var_b and my_var, add them together, and return the result as the exit code.
+// Logic: decrement `foo`, increment `bar`, store their sum in `x`, then add
+// `abc` and return the final result as the exit code.
 //
 // TLS model notes:
-//   local-exec  -- offset from thread pointer is a link-time constant (R_X86_64_TPOFF32).
+//   local-exec  -- offset from thread pointer is encoded with the relocation pair
+//                 R_AARCH64_TLSLE_ADD_TPREL_HI12 + R_AARCH64_TLSLE_ADD_TPREL_LO12_NC.
 //                 Valid for executables (both non-PIE ET_EXEC and PIE ET_DYN). Simplest.
-//   initial-exec -- offset loaded from GOT at runtime (R_X86_64_GOTTPOFF).
-//                 Valid for executables and shared libs loaded at startup (not dlopen).
-//   global-dynamic -- calls __tls_get_addr() at runtime (R_X86_64_TLSGD).
-//                 Required only for dlopen'd shared libs. NOT needed for PIE executables.
+//   initial-exec -- offset is typically loaded via the GOT for symbols that may be
+//                 resolved by the dynamic linker.
+//   global-dynamic -- may call __tls_get_addr() for fully dynamic TLS lookups.
+//                 That model is required only when the TLS variable is not known to be local.
 //
 //   PIC/PIE and local-exec are orthogonal: -fpie + -ftls-model=local-exec is valid.
 //   GCC automatically uses local-exec for PIE executables when the variable is in the
 //   same module, so the TLS relocations are identical with or without -fpie.
+//   In this self-contained example, even `-ftls-model=global-dynamic` is relaxed
+//   back to local-exec style relocations because all TLS symbols are defined locally.
 //
 // Build commands:
 //
-//   [1.1] Compile to relocatable object (with local-exec model, generates R_X86_64_TPOFF32):
+//   [1.1] Compile to relocatable object (with local-exec model, generates the
+//         AArch64 TLSLE HI12/LO12 relocation pair):
 //     gcc -c -ftls-model=local-exec -o tls.o tls.c
 //
 //   [1.2] Link to non-PIE executable (ET_EXEC):
 //     gcc -ftls-model=local-exec -o tls.elf tls.c
 //
-//   [2.1] Compile with global-dynamic (generates R_X86_64_TLSGD):
-//     gcc -c -ftls-model=global-dynamic -o tls_gd.o tls.c
+//   [2.1] Compile with a global-dynamic request:
+//     gcc -c -ftls-model=global-dynamic -o tls-gd.o tls.c
 //
 //   [2.2] Link to non-PIE executable (ET_EXEC):
-//     gcc -ftls-model=global-dynamic -o tls_gd.elf tls_gd.o
+//     gcc -ftls-model=global-dynamic -o tls-gd.elf tls-gd.o
 
 #include <stdlib.h>
 
