@@ -7,7 +7,7 @@
 use object::elf;
 
 // https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FileHeader {
     pub os_abi: OSABI,
     pub machine: Machine,
@@ -77,190 +77,64 @@ impl From<u16> for FileType {
     }
 }
 
-/// A module represents essential elements of an object file,
-/// which contains code, data, symbols, and relocation.
-///
-/// In addition, this module is also used for storing the calculated values
-/// during the linking process, such as the section offsets in the final executable.
-///
-/// This module is a simplified representation of an object file,
-/// and it is not intended to be a complete representation of all the details of an object file.
-/// It assumes that an object file contains only:
-///
-/// - At most one code section `.text`
-/// - At most one read-only data section `.rodata`
-/// - At most one data section `.data`/`.tdata`
-/// - At most one bss section `.bss`/`.tbss`
-/// - At most one symbol table `.symtab`
-/// - At most one relocation table `.rela.text`/`.rela.rodata`/`.rela.data`/`.rela.tdata`
-/// - At most one string table `.strtab` (for symbol names)
-/// - One section header table `.shstrtab` (for section names)
-///
-/// Other sections and details of the object file are ignored without notice.
-#[derive(Debug)]
-pub struct Module {
+#[derive(Debug, PartialEq)]
+pub struct SectionHeader<'data> {
+    pub name: String,
+    pub section_type: SectionType,
 
-    pub section_size: SectionSize,
-    pub section_index_table: SectionIndexTable,
+    // the offset of the section in the file
+    pub offset: usize,
 
-    /// The symbol table of the module, which contains the symbols defined in the module.
-    ///
-    /// This list is translated from the symbol table in the object file directly,
-    /// and the first symbol is always the null symbol, which is a special symbol
-    /// that represents the absence of a symbol.
-    pub symbols: Vec<Symbol>,
+    // the size of the section (in bytes), note that
+    // it is not the size in file, but the size in memory,
+    // for example, the size of the `.bss` section is 0 in file,
+    // but it may be non-zero in memory.
+    pub size: usize,
 
-    /// The relocation entries of the module, which contain the information about how to adjust the code and data when linking.
-    ///
-    /// This list is translated from the relocation table in the object file directly,
-    /// and the `Relocation.symbol_index` field refers to the index of the symbol in the `symbols` list.
-    pub relocations_text: Vec<Relocation>,
+    pub align: usize,
 
-    /// The relocation entries for the read-only data section.
-    ///
-    /// Relocations on the data sections (`.rodata`, `.data`, `.tdata`) are
-    /// usually the pointers to symbols (other data or functions).
-    pub relocations_rodata: Vec<Relocation>,
-
-    /// The relocation entries for the data section.
-    pub relocations_data: Vec<Relocation>,
-
-    /// The relocation entries for the thread-local data section.
-    pub relocations_tdata: Vec<Relocation>,
-
-    pub section_binary: SectionBinary,
-
-    /// The section offsets in the final executable, which are calculated during the linking process.
-    pub section_offsets: SectionOffset,
-
-    /// The section virtual addresses in the final executable, which are calculated during the linking process.
-    pub section_virtual_addresses: SectionVirtualAddress,
+    pub binary: &'data [u8],
 }
 
-impl Module {
-    pub fn new() -> Self {
-        Self {
-            section_size: SectionSize::default(),
-            section_index_table: SectionIndexTable::default(),
-            symbols: Vec::new(),
-            relocations_text: Vec::new(),
-            relocations_rodata: Vec::new(),
-            relocations_data: Vec::new(),
-            relocations_tdata: Vec::new(),
-            section_binary: SectionBinary::default(),
-            section_offsets: SectionOffset::default(),
-            section_virtual_addresses: SectionVirtualAddress::default(),
-        }
-    }
-
-    pub fn has_tls(&self) -> bool {
-        !self.section_binary.tdata.is_empty() || self.section_size.tbss > 0
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SectionType {
+    Null,     // SHT_NULL
+    Progbits, // SHT_PROGBITS
+    Symtab,   // SHT_SYMTAB
+    Strtab,   // SHT_STRTAB
+    Rela,     // SHT_RELA
+    Nobits,   // SHT_NOBITS
+    Other(u32),
 }
 
-#[derive(Debug, Default)]
-pub struct SectionSize {
-    pub text: usize,
-    pub rodata: usize,
-    pub tdata: usize,
-    pub tbss: usize, // this is the memory size of the .tbss section
-    pub data: usize,
-    pub bss: usize, // this is the memory size of the .bss section
-}
-
-/// Sections that a symbol can belong to.
-#[derive(Debug, Default)]
-pub struct SectionBinary {
-    /// The code section of the module, which contains the machine code instructions.
-    pub text: Vec<u8>,
-    /// The read-only data section of the module, which contains constants and other immutable data.
-    pub rodata: Vec<u8>,
-    /// The thread-local data section of the module, which contains initialized thread-local variables.
-    pub tdata: Vec<u8>,
-    /// The data section of the module, which contains initialized data.
-    pub data: Vec<u8>,
-}
-
-// impl SectionBinary {
-//     pub fn new() -> Self {
-//         Self {
-//             text: Vec::new(),
-//             rodata: Vec::new(),
-//             tdata: Vec::new(),
-//             data: Vec::new(),
-//         }
-//     }
-// }
-
-/// The index of sections
-///
-/// This table is used to determine the section where a symbol
-/// is defined based on the `st_shndx` field in the symbol table.
-/// This table does not hold complete sections, but only the sesstions
-/// which can define symbols (e.g. `.text`, `.rodata`, `.tdata`,
-/// `.tbss`, `.data`, and `.bss`).
-#[derive(Debug, Default)]
-pub struct SectionIndexTable {
-    pub code: usize,
-    pub rodata: usize,
-    pub tdata: usize,
-    pub tbss: usize,
-    pub data: usize,
-    pub bss: usize,
-}
-
-impl SectionIndexTable {
-    pub fn get_symbol_section_type(&self, index: usize) -> Option<SymbolSectionType> {
-        if index == self.code {
-            Some(SymbolSectionType::Text)
-        } else if index == self.rodata {
-            Some(SymbolSectionType::RoData)
-        } else if index == self.tdata {
-            Some(SymbolSectionType::TData)
-        } else if index == self.tbss {
-            Some(SymbolSectionType::TBss)
-        } else if index == self.data {
-            Some(SymbolSectionType::Data)
-        } else if index == self.bss {
-            Some(SymbolSectionType::Bss)
-        } else {
-            None
+impl From<u32> for SectionType {
+    fn from(value: u32) -> Self {
+        match value {
+            elf::SHT_NULL => SectionType::Null,
+            elf::SHT_PROGBITS => SectionType::Progbits,
+            elf::SHT_SYMTAB => SectionType::Symtab,
+            elf::SHT_STRTAB => SectionType::Strtab,
+            elf::SHT_RELA => SectionType::Rela,
+            elf::SHT_NOBITS => SectionType::Nobits,
+            other => SectionType::Other(other),
         }
     }
 }
 
-/// Sections that a symbol can belong to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SymbolSectionType {
-    Text,   // `.text` section
-    RoData, // `.rodata` section
-    TData,  // `.tdata` section
-    TBss,   // `.tbss` section
-    Data,   // `.data` section
-    Bss,    // `.bss` section
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SymbolScope {
-    Local,
-    Global,
-    Weak,
-}
-
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Symbol {
     Defined {
         // The name of the symbol
         // This name may be empty for symbols that represent sections (e.g. the symbol for the `.text` section).
         name: String,
-        symbol_section_type: SymbolSectionType,
-        scope: SymbolScope,
+        bind: SymbolBind,
+        symbol_type: SymbolType,
+
+        // the index of the section where the symbol is defined, which can be used to determine the symbol's section type
+        section_index: usize,
 
         // The offset of the symbol in its original section in the object file.
-        offset_original: usize,
-
-        offset_in_merged_section: usize, // calculated during linking, used for relocation
-        virtual_address_in_merged_section: usize, // calculated during linking, used for relocation
+        offset: usize,
     },
     External(/* name */ String),
 
@@ -268,30 +142,63 @@ pub enum Symbol {
     Other,
 }
 
-impl Symbol {
-    pub fn new_defined(
-        name: &str,
-        symbol_section_type: SymbolSectionType,
-        scope: SymbolScope,
-        offset_original: usize,
-    ) -> Self {
-        Self::Defined {
-            name: name.to_string(),
-            symbol_section_type,
-            scope,
-            offset_original,
-            offset_in_merged_section: 0,
-            virtual_address_in_merged_section: 0,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolBind {
+    Local,
+    Global,
+    Weak,
+    Other(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolType {
+    Notype,  // Note that some assembler emit symbols with STT_NOTYPE type for functions and data.
+    Object,  // Data object, e.g. global variable
+    Func,    // Function
+    Section, // Section
+    File,    // File
+    TLS,     // Thread-local storage
+    Other(u8),
+}
+
+impl From<u8> for SymbolBind {
+    fn from(value: u8) -> Self {
+        match value {
+            elf::STB_LOCAL => SymbolBind::Local,
+            elf::STB_GLOBAL => SymbolBind::Global,
+            elf::STB_WEAK => SymbolBind::Weak,
+            other => SymbolBind::Other(other),
         }
     }
+}
 
-    pub fn new_external(name: &str) -> Self {
-        Self::External(name.to_string())
+impl From<u8> for SymbolType {
+    fn from(value: u8) -> Self {
+        match value {
+            elf::STT_NOTYPE => SymbolType::Notype,
+            elf::STT_OBJECT => SymbolType::Object,
+            elf::STT_FUNC => SymbolType::Func,
+            elf::STT_SECTION => SymbolType::Section,
+            elf::STT_FILE => SymbolType::File,
+            elf::STT_TLS => SymbolType::TLS,
+            other => SymbolType::Other(other),
+        }
     }
+}
 
-    pub fn new_other() -> Self {
-        Self::Other
-    }
+#[derive(Debug, PartialEq)]
+pub struct RelocationSection {
+    pub name: String,
+    pub target_section_index: usize,
+    pub relocations: Vec<Relocation>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Relocation {
+    pub relocation_type: RelocationType,
+    pub placeholder_offset: usize,
+    pub symbol_index: usize,
+    pub addend: isize,
 }
 
 /// The `RelocationType` enum represents the type of relocation that needs to be applied to
@@ -409,101 +316,53 @@ pub enum RelocationType {
     R_X86_64_TPOFF32,
 }
 
-#[derive(Debug)]
-pub struct Relocation {
-    pub relocation_type: RelocationType,
-    pub placeholder_offset: usize,
-    pub symbol_index: usize,
-    pub addend: isize,
+#[derive(Debug, PartialEq)]
+pub struct ProgramHeader {
+    pub segment_type: SegmentType,
+    pub segment_flags: Vec<SegmentFlag>,
+    pub offset: usize,
+    pub file_size: usize,
+    pub memory_size: usize,
+    pub virtual_address: usize,
+    pub align: usize,
 }
 
-impl Relocation {
-    pub fn new(
-        relocation_type: RelocationType,
-        placeholder_offset: usize,
-        symbol_index: usize,
-        addend: isize,
-    ) -> Self {
-        Self {
-            relocation_type,
-            placeholder_offset,
-            symbol_index,
-            addend,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentType {
+    Null,
+    PHDR,
+    Load,
+    TLS,
+    Other(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentFlag {
+    Execute,
+    Write,
+    Read,
+    Other(u32),
+}
+
+impl From<u32> for SegmentType {
+    fn from(value: u32) -> Self {
+        match value {
+            elf::PT_NULL => SegmentType::Null,
+            elf::PT_PHDR => SegmentType::PHDR,
+            elf::PT_LOAD => SegmentType::Load,
+            elf::PT_TLS => SegmentType::TLS,
+            other => SegmentType::Other(other),
         }
     }
 }
 
-#[derive(Debug, Default)]
-pub struct SectionOffset {
-    /// The offset of the code section in the final executable,
-    /// which is calculated during the linking process.
-    pub text: usize,
-
-    /// The offset of the read-only data section in the final executable.
-    pub rodata: usize,
-
-    /// The offset of the thread-local data section in the final executable.
-    pub tdata: usize,
-
-    /// The offset of the thread-local uninitialized data section in the final executable.
-    pub tbss: usize,
-
-    /// The offset of the data section in the final executable.
-    pub data: usize,
-
-    /// The offset of the bss section in the final executable.
-    pub bss: usize,
+impl From<u32> for SegmentFlag {
+    fn from(value: u32) -> Self {
+        match value {
+            elf::PF_X => SegmentFlag::Execute,
+            elf::PF_W => SegmentFlag::Write,
+            elf::PF_R => SegmentFlag::Read,
+            other => SegmentFlag::Other(other),
+        }
+    }
 }
-
-// impl SectionOffset {
-//     pub fn new() -> Self {
-//         Self {
-//             text: 0,
-//             rodata: 0,
-//             tdata: 0,
-//             tbss: 0,
-//             data: 0,
-//             bss: 0,
-//         }
-//     }
-// }
-
-/// The virtual addresses of the sections in the final executable,
-/// which are calculated during the linking process based on the section offsets and the load address.
-///
-/// For most sections, `virtual address = load address + section offset`,
-/// but start from the `.data` section, the virtual address is also affected by the
-/// size of the previous section `.bss` (which is not present in the file, but occupies space in memory).
-#[derive(Debug, Default)]
-pub struct SectionVirtualAddress {
-    /// The virtual address of the code section in the final executable.
-    pub text: usize,
-
-    /// The virtual address of the read-only data section in the final executable.
-    pub rodata: usize,
-
-    /// The virtual address of the thread-local data section in the final executable.
-    pub tdata: usize,
-
-    /// The virtual address of the thread-local uninitialized data section in the final executable.
-    pub tbss: usize,
-
-    /// The virtual address of the data section in the final executable.
-    pub data: usize,
-
-    /// The virtual address of the bss section in the final executable.
-    pub bss: usize,
-}
-
-// impl SectionVirtualAddress {
-//     pub fn new() -> Self {
-//         Self {
-//             text: 0,
-//             rodata: 0,
-//             tdata: 0,
-//             tbss: 0,
-//             data: 0,
-//             bss: 0,
-//         }
-//     }
-// }

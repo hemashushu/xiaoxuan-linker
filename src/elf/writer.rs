@@ -23,7 +23,7 @@ use crate::{
             PROGRAM_HEADER_ENTRY_SIZE, SYMTAB_ALIGN, TEXT_ALIGN, TLS_SEGMENT_ALIGN,
         },
         linker::LinkResult,
-        module::Module,
+        relocatable::RelocatableModule,
     },
     error::LinkerError,
 };
@@ -33,7 +33,7 @@ use crate::{
 /// Note that the type of the output ELF file is ET_EXEC, not ET_DYN (PIE/DSO),
 /// and there is no symbol or relocation in our final executable.
 pub fn write_executable(
-    modules: &mut [Module],
+    modules: &mut [RelocatableModule],
     link_result: &LinkResult,
     output_buffer: &mut dyn WritableBuffer,
 ) -> Result<(), LinkerError> {
@@ -133,14 +133,16 @@ pub fn write_executable(
     // -------------------------------------------------------------------------
 
     // Reserve space for section `.text`
-    let actual_section_offset_text = writer.reserve(link_result.merged_section_size.text, PAGE_SIZE);
+    let actual_section_offset_text =
+        writer.reserve(link_result.merged_section_size.text, PAGE_SIZE);
     debug_assert_eq!(
         actual_section_offset_text, modules[0].section_offsets.text,
         ".text offset mismatch"
     );
 
     // Reserve space for section `.rodata`
-    let actual_section_offset_rodata = writer.reserve(link_result.merged_section_size.rodata, PAGE_SIZE);
+    let actual_section_offset_rodata =
+        writer.reserve(link_result.merged_section_size.rodata, PAGE_SIZE);
     debug_assert_eq!(
         actual_section_offset_rodata, modules[0].section_offsets.rodata,
         ".rodata offset mismatch"
@@ -148,7 +150,8 @@ pub fn write_executable(
 
     // Reserve space for section `.tdata`
     if link_result.existing_tls {
-        let actual_section_offset_tdata = writer.reserve(link_result.merged_section_size.tdata, PAGE_SIZE);
+        let actual_section_offset_tdata =
+            writer.reserve(link_result.merged_section_size.tdata, PAGE_SIZE);
         debug_assert_eq!(
             actual_section_offset_tdata, modules[0].section_offsets.tdata,
             ".tdata offset mismatch"
@@ -274,7 +277,8 @@ pub fn write_executable(
         (
             modules[0].section_offsets.tdata,
             modules[0].section_virtual_addresses.tdata,
-            align_up(link_result.merged_section_size.tdata, DATA_ALIGN) + link_result.merged_section_size.data,
+            align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
+                + link_result.merged_section_size.data,
             align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
                 + align_up(link_result.merged_section_size.tbss, DATA_ALIGN)
                 + align_up(link_result.merged_section_size.data, DATA_ALIGN)
@@ -285,7 +289,8 @@ pub fn write_executable(
             modules[0].section_offsets.data,
             modules[0].section_virtual_addresses.data,
             link_result.merged_section_size.data,
-            align_up(link_result.merged_section_size.data, DATA_ALIGN) + link_result.merged_section_size.bss,
+            align_up(link_result.merged_section_size.data, DATA_ALIGN)
+                + link_result.merged_section_size.bss,
         )
     };
 
@@ -303,8 +308,8 @@ pub fn write_executable(
     // Write TLS segment header if there is TLS data
     if link_result.existing_tls {
         let segment_tls_file_size = link_result.merged_section_size.tdata;
-        let segment_tls_memory_size =
-            align_up(link_result.merged_section_size.tdata, DATA_ALIGN) + link_result.merged_section_size.tbss;
+        let segment_tls_memory_size = align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
+            + link_result.merged_section_size.tbss;
 
         writer.write_program_header(&ProgramHeader {
             p_type: PT_LOAD,
@@ -546,8 +551,9 @@ mod tests {
     use object::write::{StreamingBuffer, WritableBuffer};
 
     use crate::elf::{
-        writer::write_executable, linker::link, module::Module,
-        reader::read_relocatable,
+        linker::link,
+        relocatable::{RelocatableModule, read_relocatable},
+        writer::write_executable,
     };
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
@@ -559,12 +565,12 @@ mod tests {
         fs::read(file_path).unwrap()
     }
 
-    fn get_example_file_module(file_name: &str) -> Module {
+    fn get_example_file_module(file_name: &str) -> RelocatableModule {
         let file_binary = get_example_file_binary(file_name);
         read_relocatable(&file_binary).unwrap()
     }
 
-    fn get_example_file_modules(file_names: &[&str]) -> Vec<Module> {
+    fn get_example_file_modules(file_names: &[&str]) -> Vec<RelocatableModule> {
         file_names
             .iter()
             .map(|file_name| get_example_file_module(file_name))
@@ -572,7 +578,7 @@ mod tests {
     }
 
     fn link_example_files(file_names: &[&str], output_buffer: &mut dyn WritableBuffer) {
-        let mut modules: Vec<Module> = get_example_file_modules(file_names);
+        let mut modules: Vec<RelocatableModule> = get_example_file_modules(file_names);
         let link_result = link(&mut modules).unwrap();
         write_executable(&mut modules, &link_result, output_buffer).unwrap();
     }
@@ -617,6 +623,9 @@ mod tests {
 
     #[test]
     fn test_write_relocate_within_data() {
-        link_example_file_to_executable(&["relocate-within-data.o"], "test-relocate-within-data.elf");
+        link_example_file_to_executable(
+            &["relocate-within-data.o"],
+            "test-relocate-within-data.elf",
+        );
     }
 }

@@ -7,32 +7,18 @@
 use object::{
     Endianness,
     elf::FileHeader64,
-    read::elf::{FileHeader, Rela, SectionHeader, Sym, SymbolTable},
+    read::elf::{FileHeader, ProgramHeader, Rela, SectionHeader, Sym, SymbolTable},
 };
 
 use crate::{
     elf::module::{
-        FileType, Machine, Module, OSABI, Relocation, RelocationType, SectionIndexTable, Symbol,
-        SymbolScope, SymbolSectionType,
+        FileType, Machine, OSABI, Relocation, RelocationType, SectionType, SegmentFlag,
+        SegmentType, Symbol, SymbolBind, SymbolType,
     },
     error::LinkerError,
 };
 
-const SECTION_NAME_TEXT: &str = ".text";
-const SECTION_NAME_RODATA: &str = ".rodata";
-
-const SECTION_NAME_TDATA: &str = ".tdata";
-const SECTION_NAME_TBSS: &str = ".tbss";
-const SECTION_NAME_DATA: &str = ".data";
-const SECTION_NAME_BSS: &str = ".bss";
-
-const SECTION_NAME_SYMTAB: &str = ".symtab";
-const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
-const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
-const SECTION_NAME_RELA_DATA: &str = ".rela.data";
-const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
-
-pub fn parse(binary: &[u8]) -> Result<&FileHeader64<Endianness>, LinkerError> {
+pub fn read_file(binary: &[u8]) -> Result<&FileHeader64<Endianness>, LinkerError> {
     let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
         return Err(LinkerError::new("Failed to parse ELF64 file"));
     };
@@ -65,49 +51,29 @@ pub fn read_file_header(
     })
 }
 
-pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
-    let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
-        return Err(LinkerError::new("Failed to parse ELF64 file"));
-    };
-
+pub fn read_section_headers<'a>(
+    elf: &'a FileHeader64<Endianness>,
+    binary: &'a [u8],
+) -> Result<Vec<super::module::SectionHeader<'a>>, LinkerError> {
     let Ok(endian) = elf.endian() else {
         return Err(LinkerError::new("Failed to determine endianness"));
     };
-
-    // -------------------------------------------------------------------------
-    // Read file header
-    // -------------------------------------------------------------------------
-
-    // ET_*, expect `ET_REL`
-    if elf.e_type(endian) != object::elf::ET_REL {
-        return Err(LinkerError::new("Unsupported ELF type, expected ET_REL"));
-    }
-
-    // EM_*, expect `EM_X86_64`, it determines the relocation types (e.g. R_X86_64_PC32, R_X86_64_PLT32)
-    if elf.e_machine(endian) != object::elf::EM_X86_64 {
-        return Err(LinkerError::new(
-            "Unsupported ELF machine, expected EM_X86_64",
-        ));
-    }
-
-    // -------------------------------------------------------------------------
-    // Read section headers
-    // -------------------------------------------------------------------------
 
     let Ok(section_table) = elf.sections(endian, binary) else {
         return Err(LinkerError::new("Failed to read section headers"));
     };
 
-    // let mut index_table = SectionIndexTable::new();
-    let mut module = Module::new();
+    let mut sections = vec![];
 
-    for (section_index, section_header) in section_table.enumerate() {
+    for (_section_index, section_header) in section_table.enumerate() {
         // The section name is stored in the section header string table (shstrtab),
         // and the index of the section name in the shstrtab is given by the `sh_name` field in the section header.
         let section_name =
             str::from_utf8(section_table.section_name(endian, section_header).unwrap()).unwrap();
-        let section_type = section_header.sh_type(endian);
-        let section_tls = (section_header.sh_flags(endian) as u32) & object::elf::SHF_TLS != 0;
+
+        let offset = section_header.sh_offset(endian) as usize;
+        let size = section_header.sh_size(endian) as usize;
+        let align = section_header.sh_addralign(endian) as usize;
 
         // Common section type (sh_type) includes:
         // - object::elf::SHT_NULL => "NULL"
@@ -116,123 +82,74 @@ pub fn read_relocatable(binary: &[u8]) -> Result<Module, LinkerError> {
         // - object::elf::SHT_STRTAB => "STRTAB"
         // - object::elf::SHT_RELA => "RELA"
         // - object::elf::SHT_NOBITS => "NOBITS"
+        let section_type = SectionType::from(section_header.sh_type(endian));
 
-        match section_name {
-            SECTION_NAME_TEXT if section_type == object::elf::SHT_PROGBITS => {
-                module.section_index_table.code = section_index.0;
-                module.section_size.text = section_header.sh_size(endian) as usize;
-                module.section_binary.text = section_header.data(endian, binary).unwrap().to_vec();
-            }
-            SECTION_NAME_RODATA if section_type == object::elf::SHT_PROGBITS => {
-                module.section_index_table.rodata = section_index.0;
-                module.section_size.rodata = section_header.sh_size(endian) as usize;
-                module.section_binary.rodata =
-                    section_header.data(endian, binary).unwrap().to_vec();
-            }
-            SECTION_NAME_TDATA if section_tls && section_type == object::elf::SHT_PROGBITS => {
-                module.section_index_table.tdata = section_index.0;
-                module.section_size.tdata = section_header.sh_size(endian) as usize;
-                module.section_binary.tdata = section_header.data(endian, binary).unwrap().to_vec();
-            }
-            SECTION_NAME_TBSS if section_tls && section_type == object::elf::SHT_NOBITS => {
-                module.section_index_table.tbss = section_index.0;
-                module.section_size.tbss = section_header.sh_size(endian) as usize;
-            }
-            SECTION_NAME_DATA if section_type == object::elf::SHT_PROGBITS => {
-                module.section_index_table.data = section_index.0;
-                module.section_size.data = section_header.sh_size(endian) as usize;
-                module.section_binary.data = section_header.data(endian, binary).unwrap().to_vec();
-            }
-            SECTION_NAME_BSS if section_type == object::elf::SHT_NOBITS => {
-                module.section_index_table.bss = section_index.0;
-                module.section_size.bss = section_header.sh_size(endian) as usize;
-            }
-            SECTION_NAME_SYMTAB if section_type == object::elf::SHT_SYMTAB => {
-                // There are two similar symbol table sections:
-                // - SHT_SYMTAB: for linkers (development tools)
-                // - SHT_DYNSYM: for dynamic linking (loader)
-                //
-                // In general, one relocatable object file (ET_REL) only has one symbol table section (SHT_SYMTAB),
-                // which name is usually `.symtab`.
+        // let section_tls = (section_header.sh_flags(endian) as u32) & object::elf::SHF_TLS != 0;
+        let binary = section_header.data(endian, binary).unwrap();
 
-                let Ok(Some(symbol_table)) =
-                    section_header.symbols(endian, binary, &section_table, section_index)
-                else {
-                    return Err(LinkerError::new("Failed to read symbol table"));
-                };
+        let section = super::module::SectionHeader {
+            name: section_name.to_string(),
+            offset,
+            size,
+            align,
+            section_type,
+            binary,
+        };
 
-                // There are two useful fields in the symbol table section header:
-                // - `sh_link`: it gives the index of the string table section (`.strtab`) linked by
-                //   the symbol table section, and the symbol names are stored in the strtab.
-                // - `sh_info`: it indicates the number of local symbols in the symbol table (or,
-                //   the index of the first global symbol in the symbol table)
-                //
-                // But we don't need these two fields because the library we use (`object` crate)
-                // has already provided the `symbol_table.strings()` method to obtain the string table,
-                // and the number of local symbols can be counted by iterating over the `Vec<Symbol>`.
-                module.symbols = read_symbols(&symbol_table, &module.section_index_table, endian)?;
-            }
-            SECTION_NAME_RELA_TEXT
-            | SECTION_NAME_RELA_RODATA
-            | SECTION_NAME_RELA_DATA
-            | SECTION_NAME_RELA_TDATA
-                if section_type == object::elf::SHT_RELA =>
-            {
-                // There are two types of relocation sections:
-                // SHT_REL: relocation entries without addends, the addend is stored in the "placeholder".
-                // SHT_RELA: relocation entries with addends, the addend is stored in the relocation entry.
-                //
-                // In general, one relocatable object file (ET_REL) may have multiple relocation sections (SHT_REL or SHT_RELA),
-                // each of them corresponds to a section that contains placeholders (e.g. `.text`),
-                // and the name of the relocation section is usually `.rel.text` or `.rela.text`.
+        sections.push(section);
+    }
 
-                let is_mips64el = elf.is_mips64el(endian);
+    Ok(sections)
+}
 
-                let Ok(Some((relas, _linked_symbol_table_section_index))) =
-                    section_header.rela(endian, binary)
-                else {
-                    return Err(LinkerError::new("Failed to read relocation entries"));
-                };
+pub fn read_symbols(
+    elf: &FileHeader64<Endianness>,
+    binary: &[u8],
+) -> Result<Vec<Symbol>, LinkerError> {
+    let Ok(endian) = elf.endian() else {
+        return Err(LinkerError::new("Failed to determine endianness"));
+    };
 
-                // There are two fields provide more information about the relocation section:
-                // - `sh_link`: it gives the index of the symbol table section linked by the
-                //   relocation section, and the relocation entries refer to the symbols in that symbol table.
-                // - `sh_info`: it gives the index of the section to which the relocation entries apply
-                //   (e.g. the `.text` section).
-                // But we don't need these two fields because we assume that there is
-                // only one symbol table section and one code section.
+    let Ok(section_table) = elf.sections(endian, binary) else {
+        return Err(LinkerError::new("Failed to read section headers"));
+    };
 
-                match section_name {
-                    SECTION_NAME_RELA_TEXT => {
-                        module.relocations_text = read_relocations(relas, endian, is_mips64el)?;
-                    }
-                    SECTION_NAME_RELA_RODATA => {
-                        module.relocations_rodata = read_relocations(relas, endian, is_mips64el)?;
-                    }
-                    SECTION_NAME_RELA_DATA => {
-                        module.relocations_data = read_relocations(relas, endian, is_mips64el)?;
-                    }
-                    SECTION_NAME_RELA_TDATA => {
-                        module.relocations_tdata = read_relocations(relas, endian, is_mips64el)?;
-                    }
-                    _ => {
-                        // Unreachable, because we have already matched the section name in the outer match statement.
-                        unreachable!()
-                    }
-                }
-            }
-            _ => {
-                // Ignore other sections.
-            }
+    for (section_index, section_header) in section_table.enumerate() {
+        let section_type = section_header.sh_type(endian);
+
+        if section_type == object::elf::SHT_SYMTAB {
+            // There are two similar symbol table sections:
+            // - SHT_SYMTAB: for linkers (development tools)
+            // - SHT_DYNSYM: for dynamic linking (loader)
+            //
+            // In general, one relocatable object file (ET_REL) only has one symbol table section (SHT_SYMTAB),
+            // which name is usually `.symtab`.
+
+            let Ok(Some(symbol_table)) =
+                section_header.symbols(endian, binary, &section_table, section_index)
+            else {
+                return Err(LinkerError::new("Failed to read symbol table"));
+            };
+
+            // There are two useful fields in the symbol table section header:
+            // - `sh_link`: it gives the index of the string table section (`.strtab`) linked by
+            //   the symbol table section, and the symbol names are stored in the strtab.
+            // - `sh_info`: it indicates the number of local symbols in the symbol table (or,
+            //   the index of the first global symbol in the symbol table)
+            //
+            // But we don't need these two fields because the library we use (`object` crate)
+            // has already provided the `symbol_table.strings()` method to obtain the string table,
+            // and the number of local symbols can be counted by iterating over the `Vec<Symbol>`.
+            let symbols = parse_symbol_table(&symbol_table, endian)?;
+            return Ok(symbols);
         }
     }
 
-    Ok(module)
+    Err(LinkerError::new("Failed to find symbol table"))
 }
 
-fn read_symbols(
+fn parse_symbol_table(
     symbol_table: &SymbolTable<object::elf::FileHeader64<Endianness>>,
-    section_index_table: &SectionIndexTable,
     endian: Endianness,
 ) -> Result<Vec<Symbol>, LinkerError> {
     // Symbols Example
@@ -269,73 +186,70 @@ fn read_symbols(
         // The `st_shndx` field indicates the section index of the symbol definition:
         // - If `st_shndx` is a valid section index, it indicates the section where the symbol is defined, and the symbol value is the offset within that section.
         // - If `st_shndx` is `SHN_UNDEF`, it indicates an undefined symbol, which is referenced but not defined in the module, and the symbol value is 0.
-        let section_header_index = sym.st_shndx(endian);
-        let symbol = if section_header_index == object::elf::SHN_UNDEF {
-            if symbol_index.0 == 0 {
+        let section_index = sym.st_shndx(endian);
+        let symbol = match section_index {
+            object::elf::SHN_UNDEF if symbol_index.0 == 0 => {
                 // The first symbol table entry (index 0) is reserved and must be undefined.
                 Symbol::Other
-            } else {
-                // External symbol
-                Symbol::new_external(symbol_name)
             }
-        } else {
-            match section_index_table.get_symbol_section_type(section_header_index as usize) {
-                Some(symbol_section) => {
-                    // The `st_info` field encodes both the symbol bind and type:
-                    // - high 4 bits is the bind (e.g. STB_GLOBAL, STB_LOCAL, and STB_WEAK).
-                    // - low 4 bits is the type (e.g. STT_FUNC, STT_OBJECT, STT_SECTION, STT_FILE, and STT_COMMON).
-                    //
-                    // Obtains symbol bind and type from the `st_info` field:
-                    //
-                    // ```rust
-                    // let info = symbol.st_info();
-                    // let symbol_bind = info >> 4;
-                    // let symbol_type = info & 0x0f;
-                    // ```
-                    //
-                    // Or using `symbol` trait methods:
-                    //
-                    // ```rust
-                    // symbol.st_bind(),
-                    // symbol.st_type()
-                    // ```
-                    let scope = match sym.st_bind() {
-                        object::elf::STB_LOCAL => SymbolScope::Local,
-                        object::elf::STB_GLOBAL => SymbolScope::Global,
-                        object::elf::STB_WEAK => SymbolScope::Weak,
-                        bind => {
-                            return Err(LinkerError::new(&format!(
-                                "Unsupported symbol bind: {bind}, expected STB_LOCAL, STB_GLOBAL, or STB_WEAK"
-                            )));
-                        }
-                    };
+            object::elf::SHN_UNDEF => {
+                // External symbol
+                Symbol::External(symbol_name.to_string())
+            }
+            _ if section_index >= object::elf::SHN_LORESERVE => {
+                // Other section index, such as `SHN_ABS` (absolute symbol) and
+                // `SHN_COMMON` (common symbol), or an invalid section index.
+                Symbol::Other
+            }
+            _ => {
+                // The `st_info` field encodes both the symbol bind and type:
+                // - high 4 bits is the bind (e.g. STB_GLOBAL, STB_LOCAL, and STB_WEAK).
+                // - low 4 bits is the type (e.g. STT_FUNC, STT_OBJECT, STT_SECTION, STT_FILE, and STT_COMMON).
+                //
+                // Obtains symbol bind and type from the `st_info` field:
+                //
+                // ```rust
+                // let info = symbol.st_info();
+                // let symbol_bind = info >> 4;
+                // let symbol_type = info & 0x0f;
+                // ```
+                //
+                // Or using `symbol` trait methods:
+                //
+                // ```rust
+                // symbol.st_bind(),
+                // symbol.st_type()
+                // ```
+                let bind = SymbolBind::from(sym.st_bind());
 
-                    // Common symbol type (st_type) includes:
-                    // - object::elf::STT_NOTYPE => "NOTYPE"
-                    // - object::elf::STT_OBJECT => "OBJECT"
-                    // - object::elf::STT_FUNC => "FUNC"
-                    // - object::elf::STT_SECTION => "SECTION"
-                    // - object::elf::STT_FILE => "FILE"
-                    // - object::elf::STT_COMMON => "COMMON"
-                    //
-                    // Since the symbol type does not affect the linking process in this linker,
-                    // we don't need to check the symbol type, but we can print it for debugging purposes.
+                // Common symbol type (st_type) includes:
+                // - object::elf::STT_NOTYPE => "NOTYPE"
+                // - object::elf::STT_OBJECT => "OBJECT"
+                // - object::elf::STT_FUNC => "FUNC"
+                // - object::elf::STT_SECTION => "SECTION"
+                // - object::elf::STT_FILE => "FILE"
+                // - object::elf::STT_COMMON => "COMMON"
+                //
+                // Since the symbol type does not affect the linking process in this linker,
+                // we don't need to check the symbol type, but we can print it for debugging purposes.
+                let symbol_type = SymbolType::from(sym.st_type());
 
-                    // The low 2 bits of the `st_other` field encode the symbol visibility:
-                    // - STV_DEFAULT: the symbol is visible to all modules.
-                    // - STV_INTERNAL: the symbol is visible only within the module.
-                    // - STV_HIDDEN: the symbol is hidden from other modules.
-                    // - STV_PROTECTED: the symbol is visible to other modules but cannot be overridden.
-                    //
-                    // This linker only supports STV_DEFAULT, which is the default visibility for symbols.
+                // The low 2 bits of the `st_other` field encode the symbol visibility:
+                // - STV_DEFAULT: the symbol is visible to all modules.
+                // - STV_INTERNAL: the symbol is visible only within the module.
+                // - STV_HIDDEN: the symbol is hidden from other modules.
+                // - STV_PROTECTED: the symbol is visible to other modules but cannot be overridden.
+                //
+                // This linker only supports STV_DEFAULT, which is the default visibility for symbols.
 
-                    let offset_original = sym.st_value(endian) as usize;
-                    Symbol::new_defined(symbol_name, symbol_section, scope, offset_original)
-                }
-                None => {
-                    // Other section index, such as `SHN_ABS` (absolute symbol) and
-                    // `SHN_COMMON` (common symbol), or an invalid section index.
-                    Symbol::Other
+                let offset = sym.st_value(endian) as usize;
+
+                Symbol::Defined {
+                    name: symbol_name.to_string(),
+                    section_index: section_index as usize,
+                    bind,
+                    symbol_type,
+                    offset,
                 }
             }
         };
@@ -346,7 +260,70 @@ fn read_symbols(
     Ok(symbols)
 }
 
-fn read_relocations(
+pub fn read_relocation_sections(
+    elf: &FileHeader64<Endianness>,
+    binary: &[u8],
+) -> Result<Vec<super::module::RelocationSection>, LinkerError> {
+    let Ok(endian) = elf.endian() else {
+        return Err(LinkerError::new("Failed to determine endianness"));
+    };
+
+    let Ok(section_table) = elf.sections(endian, binary) else {
+        return Err(LinkerError::new("Failed to read section headers"));
+    };
+
+    let is_mips64el = elf.is_mips64el(endian);
+
+    let mut relocation_sections = vec![];
+
+    for (_section_index, section_header) in section_table.enumerate() {
+        let section_type = section_header.sh_type(endian);
+
+        if section_type == object::elf::SHT_RELA {
+            // There are two types of relocation sections:
+            // SHT_REL: relocation entries without addends, the addend is stored in the "placeholder".
+            // SHT_RELA: relocation entries with addends, the addend is stored in the relocation entry.
+            //
+            // In general, one relocatable object file (ET_REL) may have multiple relocation sections (SHT_REL or SHT_RELA),
+            // each of them corresponds to a section that contains placeholders (e.g. `.text`),
+            // and the name of the relocation section is usually `.rel.text` or `.rela.text`.
+
+            let Ok(Some((relas, _linked_symbol_table_section_index))) =
+                section_header.rela(endian, binary)
+            else {
+                return Err(LinkerError::new("Failed to read relocation entries"));
+            };
+
+            let relocations = parse_relocations(relas, endian, is_mips64el)?;
+
+            // There are two fields provide more information about the relocation section:
+            // - `sh_link`: it gives the index of the symbol table section linked by the
+            //   relocation section, and the relocation entries refer to the symbols in that symbol table.
+            // - `sh_info`: it gives the index of the section to which the relocation entries apply
+            //   (e.g. the `.text` section).
+            // But we don't need these two fields because we assume that there is
+            // only one symbol table section and one code section.
+
+            let target_section_index = section_header.sh_info(endian) as usize;
+
+            let section_name =
+                str::from_utf8(section_table.section_name(endian, section_header).unwrap())
+                    .unwrap();
+
+            let relocation_section = super::module::RelocationSection {
+                name: section_name.to_string(),
+                target_section_index,
+                relocations,
+            };
+
+            relocation_sections.push(relocation_section);
+        }
+    }
+
+    Ok(relocation_sections)
+}
+
+fn parse_relocations(
     relas: &[object::elf::Rela64<Endianness>],
     endian: Endianness,
     is_mips64el: bool,
@@ -412,11 +389,71 @@ fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, Lin
     }
 }
 
+pub fn read_program_headers(
+    elf: &FileHeader64<Endianness>,
+    binary: &[u8],
+) -> Result<Vec<super::module::ProgramHeader>, LinkerError> {
+    let Ok(endian) = elf.endian() else {
+        return Err(LinkerError::new("Failed to determine endianness"));
+    };
+
+    let Ok(segments) = elf.program_headers(endian, binary) else {
+        return Err(LinkerError::new("Failed to read program headers"));
+    };
+
+    let mut program_headers = vec![];
+
+    for segment in segments {
+        let segment_type = SegmentType::from(segment.p_type(endian));
+        let mut segment_flags = vec![];
+
+        let flags = segment.p_flags(endian);
+        if flags & object::elf::PF_X != 0 {
+            segment_flags.push(SegmentFlag::Execute);
+        }
+        if flags & object::elf::PF_W != 0 {
+            segment_flags.push(SegmentFlag::Write);
+        }
+        if flags & object::elf::PF_R != 0 {
+            segment_flags.push(SegmentFlag::Read);
+        }
+
+        let offset = segment.p_offset(endian) as usize;
+        let virtual_address = segment.p_vaddr(endian) as usize;
+        let file_size = segment.p_filesz(endian) as usize;
+        let memory_size = segment.p_memsz(endian) as usize;
+        let align = segment.p_align(endian) as usize;
+
+        let program_header = super::module::ProgramHeader {
+            segment_type,
+            segment_flags,
+            offset,
+            virtual_address,
+            file_size,
+            memory_size,
+            align,
+        };
+
+        program_headers.push(program_header);
+    }
+
+    Ok(program_headers)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use pretty_assertions::assert_eq;
+    use std::{fs, vec};
 
-    use crate::elf::reader::read_relocatable;
+    use crate::elf::{
+        module::{
+            FileHeader, FileType, Machine, OSABI, Relocation, RelocationType, SectionType, Symbol,
+            SymbolBind, SymbolType,
+        },
+        reader::{
+            read_file, read_file_header, read_program_headers, read_relocation_sections, read_section_headers, read_symbols
+        },
+    };
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
@@ -428,58 +465,560 @@ mod tests {
     }
 
     #[test]
-    fn test_read_minimal() {
-        let binary = get_example_file_binary("minimal.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+    fn test_read_file_header() {
+        // Read file header of `minimal.o`
+        // Manually check with command `readelf -h minimal.o`
+        {
+            let binary = get_example_file_binary("minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let file_header = read_file_header(elf).unwrap();
+
+            assert_eq!(
+                file_header,
+                FileHeader {
+                    os_abi: OSABI::SystemV,
+                    machine: Machine::X86_64,
+                    file_type: FileType::Relocatable,
+                    entry_point: 0,
+                    number_of_program_headers: 0,
+                    number_of_section_headers: 5,
+                }
+            );
+        }
+
+        // Read file header of `minimal.elf`
+        // Manually check with command `readelf -h minimal.elf`
+        {
+            let binary = get_example_file_binary("minimal.elf");
+            let elf = read_file(&binary).unwrap();
+            let file_header = read_file_header(elf).unwrap();
+
+            assert_eq!(
+                file_header,
+                FileHeader {
+                    os_abi: OSABI::SystemV,
+                    machine: Machine::X86_64,
+                    file_type: FileType::Executable,
+                    entry_point: 0x401000,
+                    number_of_program_headers: 2,
+                    number_of_section_headers: 5,
+                }
+            );
+        }
     }
 
     #[test]
-    fn test_read_function() {
-        let binary = get_example_file_binary("function.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+    fn test_read_section_header() {
+        // Read section headers of `minimal.o`
+        // Manually check with command `readelf -S minimal.o`
+        {
+            let binary = get_example_file_binary("minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+
+            assert_eq!(sections.len(), 5);
+            assert_eq!(
+                sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
+                vec!["", ".text", ".shstrtab", ".symtab", ".strtab"]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
+                vec![
+                    SectionType::Null,
+                    SectionType::Progbits,
+                    SectionType::Strtab,
+                    SectionType::Symtab,
+                    SectionType::Strtab
+                ]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.size).collect::<Vec<_>>(),
+                vec![0, 0xc, 0x21, 0x60, 0x14]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.binary.len()).collect::<Vec<_>>(),
+                vec![0, 0xc, 0x21, 0x60, 0x14]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.align).collect::<Vec<_>>(),
+                vec![0, 16, 1, 8, 1]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.offset).collect::<Vec<_>>(),
+                vec![0, 0x180, 0x190, 0x1c0, 0x220]
+            );
+        }
+
+        // Read section headers of `data.o`
+        // Manually check with command `readelf -S data.o`
+        {
+            let binary = get_example_file_binary("data.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+
+            assert_eq!(sections.len(), 9);
+            assert_eq!(
+                sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
+                vec![
+                    "",
+                    ".rodata",
+                    ".data",
+                    ".bss",
+                    ".text",
+                    ".shstrtab",
+                    ".symtab",
+                    ".strtab",
+                    ".rela.text"
+                ]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
+                vec![
+                    SectionType::Null,
+                    SectionType::Progbits,
+                    SectionType::Progbits,
+                    SectionType::Nobits,
+                    SectionType::Progbits,
+                    SectionType::Strtab,
+                    SectionType::Symtab,
+                    SectionType::Strtab,
+                    SectionType::Rela
+                ]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.size).collect::<Vec<_>>(),
+                vec![0, 0x10, 0x10, 0x10, 0x58, 0x3f, 0x138, 0x21, 0xf0]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.binary.len()).collect::<Vec<_>>(),
+                vec![0, 0x10, 0x10, 0x0, 0x58, 0x3f, 0x138, 0x21, 0xf0]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.align).collect::<Vec<_>>(),
+                vec![0, 4, 4, 4, 16, 1, 8, 1, 8]
+            );
+            assert_eq!(
+                sections.iter().map(|s| s.offset).collect::<Vec<_>>(),
+                vec![0, 0x280, 0x290, 0x2a0, 0x2a0, 0x300, 0x340, 0x480, 0x4b0]
+            );
+        }
     }
 
     #[test]
-    fn test_read_data() {
-        let binary = get_example_file_binary("data.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+    fn test_read_symbols() {
+        // Read symbols of `minimal.o`
+        // Manually check with command `readelf -s minimal.o`
+        {
+            let binary = get_example_file_binary("minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            assert_eq!(symbols.len(), 4);
+
+            assert_eq!(symbols[0], Symbol::Other);
+            assert_eq!(symbols[1], Symbol::Other);
+            assert_eq!(
+                symbols[2],
+                Symbol::Defined {
+                    name: String::new(),
+                    section_index: 1,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+            assert_eq!(
+                symbols[3],
+                Symbol::Defined {
+                    name: "_start".to_string(),
+                    section_index: 1,
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Notype,
+                    offset: 0,
+                }
+            );
+        }
+
+        // Read symbols of `data.o`
+        // Manually check with command `readelf -s data.o`
+        {
+            let binary = get_example_file_binary("data.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            assert_eq!(symbols.len(), 13);
+
+            assert_eq!(symbols[0], Symbol::Other);
+            assert_eq!(symbols[1], Symbol::Other);
+            assert_eq!(
+                symbols[2],
+                Symbol::Defined {
+                    name: String::new(),
+                    section_index: 1,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+            assert_eq!(
+                symbols[3],
+                Symbol::Defined {
+                    name: String::new(),
+                    section_index: 2,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+            assert_eq!(
+                symbols[4],
+                Symbol::Defined {
+                    name: String::new(),
+                    section_index: 3,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+            assert_eq!(
+                symbols[5],
+                Symbol::Defined {
+                    name: String::new(),
+                    section_index: 4,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+
+            assert_eq!(
+                symbols[6],
+                Symbol::Defined {
+                    name: "foo".to_string(),
+                    section_index: 1,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Notype,
+                    offset: 0,
+                }
+            );
+            assert_eq!(
+                symbols[7],
+                Symbol::Defined {
+                    name: "bar".to_string(),
+                    section_index: 1,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Notype,
+                    offset: 0x8,
+                }
+            );
+
+            assert_eq!(
+                symbols[8],
+                Symbol::Defined {
+                    name: "a".to_string(),
+                    section_index: 2,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Notype,
+                    offset: 0,
+                }
+            );
+            assert_eq!(
+                symbols[9],
+                Symbol::Defined {
+                    name: "b".to_string(),
+                    section_index: 2,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Notype,
+                    offset: 0x8,
+                }
+            );
+
+            assert_eq!(
+                symbols[10],
+                Symbol::Defined {
+                    name: "x".to_string(),
+                    section_index: 3,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Notype,
+                    offset: 0,
+                }
+            );
+            assert_eq!(
+                symbols[11],
+                Symbol::Defined {
+                    name: "y".to_string(),
+                    section_index: 3,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Notype,
+                    offset: 0x8,
+                }
+            );
+
+            assert_eq!(
+                symbols[12],
+                Symbol::Defined {
+                    name: "_start".to_string(),
+                    section_index: 4,
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Notype,
+                    offset: 0,
+                }
+            );
+        }
+
+        // Read symbols of `symbol-import.o`
+        // Manually check with command `readelf -s symbol-import.o`
+        {
+            let binary = get_example_file_binary("symbol-import.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            assert_eq!(symbols.len(), 12);
+
+            assert_eq!(symbols[0], Symbol::Other);
+            assert_eq!(symbols[1], Symbol::Other);
+            assert_eq!(
+                symbols[2],
+                Symbol::Defined {
+                    name: String::new(),
+                    section_index: 1,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+
+            assert_eq!(symbols[3], Symbol::External("foo".to_string()));
+            assert_eq!(symbols[4], Symbol::External("bar".to_string()));
+
+            assert_eq!(symbols[5], Symbol::External("a".to_string()));
+            assert_eq!(symbols[6], Symbol::External("b".to_string()));
+
+            assert_eq!(symbols[7], Symbol::External("x".to_string()));
+            assert_eq!(symbols[8], Symbol::External("y".to_string()));
+
+            assert_eq!(symbols[9], Symbol::External("dec".to_string()));
+            assert_eq!(symbols[10], Symbol::External("inc".to_string()));
+
+            assert_eq!(
+                symbols[11],
+                Symbol::Defined {
+                    name: "_start".to_string(),
+                    section_index: 1,
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Notype,
+                    offset: 0,
+                }
+            );
+        }
+
+        // Read symbols of `override-weak.o`
+        // Manually check with command `readelf -s override-weak.o`
+        {
+            let binary = get_example_file_binary("override-weak.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            assert_eq!(symbols.len(), 5);
+
+            assert_eq!(symbols[0], Symbol::Other);
+            assert_eq!(symbols[1], Symbol::Other);
+            assert_eq!(
+                symbols[2],
+                Symbol::Defined {
+                    name: String::new(),
+                    section_index: 1,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+
+            assert_eq!(
+                symbols[3],
+                Symbol::Defined {
+                    name: "foo".to_string(),
+                    bind: SymbolBind::Weak,
+                    symbol_type: SymbolType::Notype,
+                    section_index: 1,
+                    offset: 0
+                }
+            );
+            assert_eq!(
+                symbols[4],
+                Symbol::Defined {
+                    name: "bar".to_string(),
+                    bind: SymbolBind::Weak,
+                    symbol_type: SymbolType::Notype,
+                    section_index: 1,
+                    offset: 0x6
+                }
+            );
+        }
     }
 
     #[test]
-    fn test_read_symbol_export() {
-        let binary = get_example_file_binary("symbol-export.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+    fn test_read_relocation_sections() {
+        // Read relocation sections of `minimal.o`
+        // Manually check with command `readelf -r minimal.o`
+        {
+            let binary = get_example_file_binary("minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+            assert_eq!(relocation_sections.len(), 0);
+        }
+
+        // Read relocation sections of `data.o`
+        // Manually check with command `readelf -r data.o`
+        {
+            let binary = get_example_file_binary("data.o");
+            let elf = read_file(&binary).unwrap();
+            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+            assert_eq!(relocation_sections.len(), 1);
+
+            let relocation_section = &relocation_sections[0];
+            assert_eq!(relocation_section.name, ".rela.text");
+            assert_eq!(relocation_section.target_section_index, 4); // `.text` section index
+
+            let relocations = &relocation_section.relocations;
+            assert_eq!(relocations.len(), 10);
+
+            assert_eq!(
+                relocations[0],
+                Relocation {
+                    relocation_type: RelocationType::R_X86_64_PC32,
+                    placeholder_offset: 0x3,
+                    symbol_index: 2, // section symbol of `.rodata` section
+                    addend: -4
+                }
+            );
+            assert_eq!(
+                relocations[1],
+                Relocation {
+                    relocation_type: RelocationType::R_X86_64_PC32,
+                    placeholder_offset: 0xe,
+                    symbol_index: 3, // section symbol of `.data` section
+                    addend: -4
+                }
+            );
+
+            // The rest of the relocation entries are similar,
+            // so we can just check the first two entries for testing purposes.
+        }
+
+        // Read relocation sections of `relocate-within-data.o`
+        // Manually check with command `readelf -r relocate-within-data.o`
+        {
+            let binary = get_example_file_binary("relocate-within-data.o");
+            let elf = read_file(&binary).unwrap();
+            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+            assert_eq!(relocation_sections.len(), 3);
+
+            // `.rela.text`
+            {
+                let relocation_section = &relocation_sections[0];
+                assert_eq!(relocation_section.name, ".rela.data");
+                assert_eq!(relocation_section.target_section_index, 1); // `.data` section index
+
+                let relocations = &relocation_section.relocations;
+                assert_eq!(relocations.len(), 2);
+
+                assert_eq!(
+                    relocations[0],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_64,
+                        placeholder_offset: 0x10,
+                        symbol_index: 4, // section symbol of `.text` section
+                        addend: 0
+                    }
+                );
+                assert_eq!(
+                    relocations[1],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_64,
+                        placeholder_offset: 0x18,
+                        symbol_index: 4, // section symbol of `.text` section
+                        addend: 8
+                    }
+                );
+            }
+
+            // `.rela.rodata`
+            {
+                let relocation_section = &relocation_sections[1];
+                assert_eq!(relocation_section.name, ".rela.rodata");
+                assert_eq!(relocation_section.target_section_index, 2); // `.rodata` section index
+
+                let relocations = &relocation_section.relocations;
+                assert_eq!(relocations.len(), 2);
+
+                assert_eq!(
+                    relocations[0],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_64,
+                        placeholder_offset: 0,
+                        symbol_index: 2, // section symbol of `.data` section
+                        addend: 0
+                    }
+                );
+                assert_eq!(
+                    relocations[1],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_64,
+                        placeholder_offset: 0x8,
+                        symbol_index: 2, // section symbol of `.data` section
+                        addend: 8
+                    }
+                );
+            }
+
+            // `.rela.text`
+            {
+                let relocation_section = &relocation_sections[2];
+                assert_eq!(relocation_section.name, ".rela.text");
+                assert_eq!(relocation_section.target_section_index, 3); // `.text` section index
+
+                let relocations = &relocation_section.relocations;
+                assert_eq!(relocations.len(), 6);
+
+                assert_eq!(
+                    relocations[0],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_PC32,
+                        placeholder_offset: 0x13,
+                        symbol_index: 3, // section symbol of `.rodata` section
+                        addend: -4
+                    }
+                );
+                assert_eq!(
+                    relocations[1],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_PC32,
+                        placeholder_offset: 0x1d,
+                        symbol_index: 2, // section symbol of `.data` section
+                        addend: 0xc
+                    }
+                );
+
+                // The rest of the relocation entries are similar,
+                // so we can just check the first two entries for testing purposes.
+            }
+        }
     }
 
     #[test]
-    fn test_read_symbol_import() {
-        let binary = get_example_file_binary("symbol-import.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
-    }
+    fn test_read_program_headers() {
+        // Read program headers of `minimal.o`
+        // Manually check with command `readelf -l minimal.o`
+        {
+            let binary = get_example_file_binary("minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
 
-    #[test]
-    fn test_read_override_weak() {
-        let binary = get_example_file_binary("override-weak.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
-    }
-
-    #[test]
-    fn test_read_override_strong() {
-        let binary = get_example_file_binary("override-strong.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
-    }
-
-    #[test]
-    fn test_read_relocate_within_data() {
-        let binary = get_example_file_binary("relocate-within-data.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+            assert_eq!(program_headers.len(), 0);
+        }
     }
 }

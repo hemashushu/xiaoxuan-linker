@@ -12,7 +12,8 @@ use crate::{
             DATA_ALIGN, ELF_HEADER_SIZE, LOAD_ADDR_BASE, PAGE_SIZE, PROGRAM_HEADER_ENTRY_SIZE,
             TEXT_ALIGN,
         },
-        module::{Module, RelocationType, Symbol, SymbolScope, SymbolSectionType},
+        module::{RelocationType, SymbolBind},
+        relocatable::{RelocatableModule, ResolveSymbol, SymbolSectionType},
     },
     error::LinkerError,
 };
@@ -49,7 +50,7 @@ pub struct MergedSectionSize {
 /// This process involves merging sections, resolving symbols, and applying relocations.
 ///
 /// THe parameter `modules` need to be mutable because we will patch all relocations in-place.
-pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
+pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError> {
     let existing_tls = modules.iter().any(|m| m.has_tls());
 
     let number_of_program_headers = if existing_tls {
@@ -75,7 +76,8 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     // | n * 64 | section headers |
 
     // The first section in file is started from the end of the program headers.
-    let file_and_program_headers_size = ELF_HEADER_SIZE + number_of_program_headers * PROGRAM_HEADER_ENTRY_SIZE;
+    let file_and_program_headers_size =
+        ELF_HEADER_SIZE + number_of_program_headers * PROGRAM_HEADER_ENTRY_SIZE;
 
     // Sections (in file order)
     //
@@ -220,7 +222,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
     // Calculate the offsets and virtual addresses for symbols.
     for module in modules.iter_mut() {
         for symbol in module.symbols.iter_mut() {
-            if let Symbol::Defined {
+            if let ResolveSymbol::Defined {
                 symbol_section_type: symbol_section,
                 offset_original: offset,
                 offset_in_merged_section,
@@ -281,7 +283,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
                 let symbol = &module.symbols[symbol_index];
 
                 let target_symbol = match symbol {
-                    Symbol::Defined {
+                    ResolveSymbol::Defined {
                         name,
                         scope,
                         symbol_section_type: symbol_section,
@@ -296,7 +298,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
                         };
 
                         // If the symbol is weak, we need to check if there is a strong symbol with the same name in other modules.
-                        if scope == &SymbolScope::Weak {
+                        if scope == &SymbolBind::Weak {
                             let name = name.to_string();
                             if let Some(found_symbol) = find_global_symbol(&name, modules, true) {
                                 target_symbol = found_symbol;
@@ -305,7 +307,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
 
                         target_symbol
                     }
-                    Symbol::External(name) => {
+                    ResolveSymbol::External(name) => {
                         if let Some(linker_generated_symbol) = linker_generated_symbols.get(name) {
                             linker_generated_symbol.clone()
                         } else if let Some(target_symbol) = find_global_symbol(name, modules, false)
@@ -318,7 +320,7 @@ pub fn link(modules: &mut [Module]) -> Result<LinkResult, LinkerError> {
                             )));
                         }
                     }
-                    Symbol::Other => {
+                    ResolveSymbol::Other => {
                         return Err(LinkerError::Message(format!(
                             "Invalid symbol referenced in .text section, module: {}, relocation index: {}, symbol index: {}",
                             module_index, relocation_index, symbol_index
@@ -471,18 +473,18 @@ fn align_up(val: usize, align: usize) -> usize {
 
 /// Check duplicated "strong" global symbols across modules.
 fn check_duplicated_strong_global_symbol(
-    modules: &[Module],
+    modules: &[RelocatableModule],
 ) -> Option<(/* module_index */ usize, /* symbol_name */ String)> {
     let mut symbol_map: HashMap<String, (/* module_index */ usize, /* is_strong */ bool)> =
         HashMap::new();
     for (module_index, module) in modules.iter().enumerate() {
         for symbol in &module.symbols {
-            if let Symbol::Defined { name, scope, .. } = symbol {
-                if scope == &SymbolScope::Local {
+            if let ResolveSymbol::Defined { name, scope, .. } = symbol {
+                if scope == &SymbolBind::Local {
                     continue; // Local symbols are not visible across modules, so we can skip them.
                 }
 
-                let is_strong = scope == &SymbolScope::Global;
+                let is_strong = scope == &SymbolBind::Global;
                 if let Some((existing_module_index, existing_is_strong)) = symbol_map.get_mut(name)
                 {
                     if is_strong {
@@ -512,14 +514,14 @@ struct FindSymbolResult {
 
 fn find_global_symbol(
     symbol_name: &str,
-    modules: &[Module],
+    modules: &[RelocatableModule],
     strong_only: bool,
 ) -> Option<FindSymbolResult> {
     let mut found_symbol: Option<(FindSymbolResult, /* is_strong */ bool)> = None;
 
     for module in modules {
         for symbol in &module.symbols {
-            if let Symbol::Defined {
+            if let ResolveSymbol::Defined {
                 name,
                 scope,
                 symbol_section_type: symbol_section,
@@ -528,10 +530,10 @@ fn find_global_symbol(
                 ..
             } = symbol
                 && name == symbol_name
-                && scope != &SymbolScope::Local
+                && scope != &SymbolBind::Local
             {
                 if let Some((_, existing_is_strong)) = found_symbol {
-                    if scope == &SymbolScope::Global {
+                    if scope == &SymbolBind::Global {
                         if existing_is_strong {
                             // We have found a duplicated strong symbol, which is an error.
                             // but we have already checked duplicated strong symbols in the
@@ -557,7 +559,7 @@ fn find_global_symbol(
                             offset_in_merged_section: *offset,
                             virtual_address_in_merged_section: *vaddr,
                         },
-                        scope == &SymbolScope::Global,
+                        scope == &SymbolBind::Global,
                     ));
                 }
             }
@@ -579,7 +581,10 @@ fn find_global_symbol(
 mod tests {
     use std::fs;
 
-    use crate::elf::{linker::link, module::Module, reader::read_relocatable};
+    use crate::elf::{
+        linker::link,
+        relocatable::{RelocatableModule, read_relocatable},
+    };
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
@@ -590,12 +595,12 @@ mod tests {
         fs::read(file_path).unwrap()
     }
 
-    fn get_example_file_module(file_name: &str) -> Module {
+    fn get_example_file_module(file_name: &str) -> RelocatableModule {
         let file_binary = get_example_file_binary(file_name);
         read_relocatable(&file_binary).unwrap()
     }
 
-    fn get_example_file_modules(file_names: &[&str]) -> Vec<Module> {
+    fn get_example_file_modules(file_names: &[&str]) -> Vec<RelocatableModule> {
         file_names
             .iter()
             .map(|file_name| get_example_file_module(file_name))
