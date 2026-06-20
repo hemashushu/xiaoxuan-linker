@@ -447,11 +447,12 @@ mod tests {
 
     use crate::elf::{
         module::{
-            FileHeader, FileType, Machine, OSABI, Relocation, RelocationType, SectionType, Symbol,
-            SymbolBind, SymbolType,
+            FileHeader, FileType, Machine, OSABI, ProgramHeader, Relocation, RelocationType,
+            SectionType, SegmentFlag, SegmentType, Symbol, SymbolBind, SymbolType,
         },
         reader::{
-            read_file, read_file_header, read_program_headers, read_relocation_sections, read_section_headers, read_symbols
+            read_file, read_file_header, read_program_headers, read_relocation_sections,
+            read_section_headers, read_symbols,
         },
     };
 
@@ -1019,6 +1020,104 @@ mod tests {
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
             assert_eq!(program_headers.len(), 0);
+        }
+
+        // Read program headers of `minimal.elf`
+        // Manually check with command `readelf -l minimal.elf`
+        {
+            let binary = get_example_file_binary("minimal.elf");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            assert_eq!(program_headers.len(), 2);
+
+            assert_eq!(
+                program_headers[0],
+                ProgramHeader {
+                    segment_type: SegmentType::Load,
+                    segment_flags: vec![SegmentFlag::Read,],
+                    offset: 0,
+                    virtual_address: 0x400000,
+                    file_size: 0xb0,
+                    memory_size: 0xb0,
+                    align: 0x1000
+                }
+            );
+
+            assert_eq!(
+                program_headers[1],
+                ProgramHeader {
+                    segment_type: SegmentType::Load,
+                    segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
+                    offset: 0x1000,
+                    virtual_address: 0x401000,
+                    file_size: 0xc,
+                    memory_size: 0xc,
+                    align: 0x1000
+                }
+            );
+        }
+
+        // Read program headers of `data.elf`
+        // Manually check with command `readelf -l data.elf`
+        {
+            let binary = get_example_file_binary("data.elf");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            assert_eq!(program_headers.len(), 4);
+
+            assert_eq!(
+                program_headers[0],
+                ProgramHeader {
+                    segment_type: SegmentType::Load,
+                    segment_flags: vec![SegmentFlag::Read,],
+                    offset: 0,
+                    virtual_address: 0x400000,
+                    file_size: 0x120,
+                    memory_size: 0x120,
+                    align: 0x1000
+                }
+            );
+
+            assert_eq!(
+                program_headers[1],
+                ProgramHeader {
+                    segment_type: SegmentType::Load,
+                    segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
+                    offset: 0x1000,
+                    virtual_address: 0x401000,
+                    file_size: 0x58,
+                    memory_size: 0x58,
+                    align: 0x1000
+                }
+            );
+
+            assert_eq!(
+                program_headers[2],
+                ProgramHeader {
+                    segment_type: SegmentType::Load,
+                    segment_flags: vec![SegmentFlag::Read],
+                    offset: 0x2000,
+                    virtual_address: 0x402000,
+                    file_size: 0x10,
+                    memory_size: 0x10,
+                    align: 0x1000
+                }
+            );
+
+            assert_eq!(
+                program_headers[3],
+                ProgramHeader {
+                    segment_type: SegmentType::Load,
+                    segment_flags: vec![SegmentFlag::Write, SegmentFlag::Read],
+                    offset: 0x2010,
+                    virtual_address: 0x403010,
+                    file_size: 0x10,
+                    memory_size: 0x20,
+                    align: 0x1000
+                }
+            );
         }
     }
 }

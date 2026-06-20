@@ -40,14 +40,17 @@ $LD -o override.elf override-weak.o override-strong.o
 $LD -o relocate-within-data.elf relocate-within-data.o
 
 # Compile C files to object files
-$GCC -c -O0 -fno-pie -o relocate-within-data-tls.o relocate-within-data-tls.c
+$GCC -c -O0 -o gcc.o gcc.c
+$GCC -c -O0 -o relocate-within-data-tls.o relocate-within-data-tls.c
+$GCC -c -O0 -fno-pie -o relocate-within-data-tls-no-pie.o relocate-within-data-tls.c
 $GCC -c -O0 -ftls-model=local-exec -o tls.o tls.c
 $GCC -c -O0 -ftls-model=global-dynamic -o tls-gd.o tls.c
 $GCC -c -O0 -o pie-export.o pie-export.c
 $GCC -c -O0 -o pie-import.o pie-import.c
 
 # Link object files to executables
-$GCC -O0 -o relocate-within-data-tls.elf relocate-within-data-tls.c
-$GCC -O0 -ftls-model=local-exec -o tls.elf tls.c
-$GCC -O0 -ftls-model=global-dynamic -o tls-gd.elf tls.c
+$GCC -O0 -o gcc.elf gcc.o
+$GCC -O0 -o relocate-within-data-tls.elf relocate-within-data-tls.o
+$GCC -O0 -ftls-model=local-exec -o tls.elf tls.o
+$GCC -O0 -ftls-model=global-dynamic -o tls-gd.elf tls-gd.o
 $GCC -O0 -o pie.elf pie-export.o pie-import.o

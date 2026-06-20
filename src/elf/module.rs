@@ -327,9 +327,10 @@ pub struct ProgramHeader {
     pub align: usize,
 }
 
+// ANLD does not care about some segment types such as
+// `PT_DYNAMIC`, `PT_INTERP`, `PT_NOTE` etc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentType {
-    Null,
     PHDR,
     Load,
     TLS,
@@ -347,7 +348,6 @@ pub enum SegmentFlag {
 impl From<u32> for SegmentType {
     fn from(value: u32) -> Self {
         match value {
-            elf::PT_NULL => SegmentType::Null,
             elf::PT_PHDR => SegmentType::PHDR,
             elf::PT_LOAD => SegmentType::Load,
             elf::PT_TLS => SegmentType::TLS,
