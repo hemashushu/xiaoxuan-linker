@@ -18,12 +18,13 @@ use object::{
 
 use crate::{
     elf::{
-        consts::{
-            DATA_ALIGN, ELF_HEADER_SIZE, LOAD_ADDR_BASE, PAGE_SIZE, PHDR_SEGMENT_ALIGN,
+        linker::{
+            DATA_ALIGN, ELF_HEADER_SIZE, LOAD_ADDR_BASE, LinkResult, PAGE_SIZE, PHDR_SEGMENT_ALIGN,
             PROGRAM_HEADER_ENTRY_SIZE, SYMTAB_ALIGN, TEXT_ALIGN, TLS_SEGMENT_ALIGN,
         },
-        linker::LinkResult,
-        relocatable::RelocatableModule,
+        relocatable::{
+            RelocatableModule, RelocatableSection, RelocatableSectionType, SectionBinary,
+        },
     },
     error::LinkerError,
 };
@@ -76,15 +77,28 @@ pub fn write_executable(
     // we don't need to add any string to the string table.
 
     let section_name_text = writer.add_section_name(b".text");
-    let section_name_rodata = writer.add_section_name(b".rodata");
+    let mut section_name_rodata_opt: Option<StringId> = None;
     let mut section_name_tdata_opt: Option<StringId> = None;
     let mut section_name_tbss_opt: Option<StringId> = None;
-    if link_result.existing_tls {
+    let mut section_name_data_opt: Option<StringId> = None;
+    let mut section_name_bss_opt: Option<StringId> = None;
+
+    if link_result.merged_section_size.rodata > 0 {
+        section_name_rodata_opt.replace(writer.add_section_name(b".rodata"));
+    }
+    if link_result.merged_section_size.tdata > 0 {
         section_name_tdata_opt.replace(writer.add_section_name(b".tdata"));
+    }
+    if link_result.merged_section_size.tbss > 0 {
         section_name_tbss_opt.replace(writer.add_section_name(b".tbss"));
     }
-    let section_name_data = writer.add_section_name(b".data");
-    let section_name_bss = writer.add_section_name(b".bss");
+    if link_result.merged_section_size.data > 0 {
+        section_name_data_opt.replace(writer.add_section_name(b".data"));
+    }
+    if link_result.merged_section_size.bss > 0 {
+        section_name_bss_opt.replace(writer.add_section_name(b".bss"));
+    }
+
     writer.add_section_name(b".symtab");
     writer.add_section_name(b".strtab");
     writer.add_section_name(b".shstrtab");
@@ -100,13 +114,24 @@ pub fn write_executable(
 
     writer.reserve_null_section_index(); // null section
     writer.reserve_section_index(); // .text section
-    writer.reserve_section_index(); // .rodata section
-    if link_result.existing_tls {
+
+    if link_result.merged_section_size.rodata > 0 {
+        writer.reserve_section_index(); // .rodata section
+    }
+    if link_result.merged_section_size.tdata > 0 {
         writer.reserve_section_index(); // .tdata section
+    }
+
+    if link_result.merged_section_size.tbss > 0 {
         writer.reserve_section_index(); // .tbss section
     }
-    writer.reserve_section_index(); // .data section
-    writer.reserve_section_index(); // .bss section
+    if link_result.merged_section_size.data > 0 {
+        writer.reserve_section_index(); // .data section
+    }
+    if link_result.merged_section_size.bss > 0 {
+        writer.reserve_section_index(); // .bss section
+    }
+
     writer.reserve_symtab_section_index(); // .symtab section
     writer.reserve_strtab_section_index(); // .strtab section
     writer.reserve_shstrtab_section_index(); // .shstrtab section
@@ -126,55 +151,70 @@ pub fn write_executable(
     // -------------------------------------------------------------------------
 
     writer.reserve_file_header();
-    writer.reserve_program_headers(link_result.number_of_program_headers as u32);
+    writer.reserve_program_headers(link_result.program_header_count as u32);
 
     // -------------------------------------------------------------------------
     // Phase 5: reserve file ranges for sections
     // -------------------------------------------------------------------------
 
     // Reserve space for section `.text`
-    let actual_section_offset_text =
-        writer.reserve(link_result.merged_section_size.text, PAGE_SIZE);
-    debug_assert_eq!(
-        actual_section_offset_text, modules[0].section_offsets.text,
-        ".text offset mismatch"
-    );
+    {
+        let actual_section_offset_text =
+            writer.reserve(link_result.merged_section_size.text, PAGE_SIZE);
+
+        let first_section_text =
+            get_first_not_null_section(modules, &RelocatableSectionType::Text).unwrap();
+        debug_assert_eq!(
+            actual_section_offset_text,
+            first_section_text.resolved_offset
+        );
+    }
 
     // Reserve space for section `.rodata`
-    let actual_section_offset_rodata =
-        writer.reserve(link_result.merged_section_size.rodata, PAGE_SIZE);
-    debug_assert_eq!(
-        actual_section_offset_rodata, modules[0].section_offsets.rodata,
-        ".rodata offset mismatch"
-    );
+    if link_result.merged_section_size.rodata > 0 {
+        let actual_section_offset_rodata =
+            writer.reserve(link_result.merged_section_size.rodata, PAGE_SIZE);
+        let first_section_rodata =
+            get_first_not_null_section(modules, &RelocatableSectionType::RoData).unwrap();
+        debug_assert_eq!(
+            actual_section_offset_rodata,
+            first_section_rodata.resolved_offset
+        );
+    }
 
     // Reserve space for section `.tdata`
-    if link_result.existing_tls {
+    if link_result.merged_section_size.tdata > 0 {
         let actual_section_offset_tdata =
             writer.reserve(link_result.merged_section_size.tdata, PAGE_SIZE);
+
+        let first_section_tdata =
+            get_first_not_null_section(modules, &RelocatableSectionType::TData).unwrap();
         debug_assert_eq!(
-            actual_section_offset_tdata, modules[0].section_offsets.tdata,
-            ".tdata offset mismatch"
+            actual_section_offset_tdata,
+            first_section_tdata.resolved_offset
         );
     }
 
     // Reserve space for section `.data`
+    if link_result.merged_section_size.data > 0 {
+        // If there is TLS data, the `.data` section must be aligned to `DATA_ALIGN` instead of `PAGE_SIZE`,
+        // because it is merged into the writable data segment.
+        let section_align_data = if link_result.merged_section_size.tdata > 0 {
+            DATA_ALIGN
+        } else {
+            PAGE_SIZE
+        };
 
-    let section_align_data = if link_result.existing_tls {
-        // If there is TLS data, the `.data` section must be aligned to `DATA_ALIGN` instead of `PAGE_SIZE`, because
-        // it may be merged with `.tdata` section, and the alignment of the merged
-        // section must satisfy the strictest alignment requirement among the merged sections.
-        DATA_ALIGN
-    } else {
-        PAGE_SIZE
-    };
+        let actual_section_offset_data =
+            writer.reserve(link_result.merged_section_size.data, section_align_data);
 
-    let actual_section_offset_data =
-        writer.reserve(link_result.merged_section_size.data, section_align_data);
-    debug_assert_eq!(
-        actual_section_offset_data, modules[0].section_offsets.data,
-        ".data offset mismatch"
-    );
+        let first_section_data =
+            get_first_not_null_section(modules, &RelocatableSectionType::Data).unwrap();
+        debug_assert_eq!(
+            actual_section_offset_data,
+            first_section_data.resolved_offset
+        );
+    }
 
     writer.reserve_symtab();
     writer.reserve_strtab();
@@ -206,7 +246,7 @@ pub fn write_executable(
 
     // Write PHDR segment header
     let segment_phdr_offset = ELF_HEADER_SIZE;
-    let segment_phdr_size = PROGRAM_HEADER_ENTRY_SIZE * link_result.number_of_program_headers;
+    let segment_phdr_size = PROGRAM_HEADER_ENTRY_SIZE * link_result.program_header_count;
     let segment_phdr_virtual_address = LOAD_ADDR_BASE + ELF_HEADER_SIZE;
 
     writer.write_program_header(&ProgramHeader {
@@ -221,15 +261,17 @@ pub fn write_executable(
     });
 
     // Common segment type (p_type) includes:
-    // - object::elf::PT_NULL => "NULL"
-    // - object::elf::PT_PHDR => "PHDR"
-    // - object::elf::PT_INTERP => "INTERP"
-    // - object::elf::PT_LOAD => "LOAD"
+    // - object::elf::PT_NULL
+    // - object::elf::PT_PHDR
+    // - object::elf::PT_LOAD
+    // - object::elf::PT_TLS
 
     // Write metadata segment header
+    // The metadata segment contains the ELF header and program headers,
+    // which are required for the loader to load the executable.
     let segment_metadata_offset = 0_usize;
     let segment_metadata_size =
-        ELF_HEADER_SIZE + PROGRAM_HEADER_ENTRY_SIZE * link_result.number_of_program_headers;
+        ELF_HEADER_SIZE + PROGRAM_HEADER_ENTRY_SIZE * link_result.program_header_count;
     let segment_metadata_virtual_address = LOAD_ADDR_BASE;
 
     writer.write_program_header(&ProgramHeader {
@@ -244,79 +286,93 @@ pub fn write_executable(
     });
 
     // Write code segment header
+    let first_section_text =
+        get_first_not_null_section(modules, &RelocatableSectionType::Text).unwrap();
     writer.write_program_header(&ProgramHeader {
         p_type: PT_LOAD,
         p_flags: PF_R | PF_X,
-        p_offset: modules[0].section_offsets.text as u64,
-        p_vaddr: modules[0].section_virtual_addresses.text as u64,
-        p_paddr: modules[0].section_virtual_addresses.text as u64,
+        p_offset: first_section_text.resolved_offset as u64,
+        p_vaddr: first_section_text.resolved_virtual_address as u64,
+        p_paddr: first_section_text.resolved_virtual_address as u64,
         p_filesz: link_result.merged_section_size.text as u64,
         p_memsz: link_result.merged_section_size.text as u64,
         p_align: PAGE_SIZE as u64,
     });
 
     // Write read-only data segment header
-    writer.write_program_header(&ProgramHeader {
-        p_type: PT_LOAD,
-        p_flags: PF_R,
-        p_offset: modules[0].section_offsets.rodata as u64,
-        p_vaddr: modules[0].section_virtual_addresses.rodata as u64,
-        p_paddr: modules[0].section_virtual_addresses.rodata as u64,
-        p_filesz: link_result.merged_section_size.rodata as u64,
-        p_memsz: link_result.merged_section_size.rodata as u64,
-        p_align: PAGE_SIZE as u64,
-    });
+    if link_result.has_read_only_data {
+        let first_section_rodata =
+            get_first_not_null_section(modules, &RelocatableSectionType::RoData).unwrap();
+        writer.write_program_header(&ProgramHeader {
+            p_type: PT_LOAD,
+            p_flags: PF_R,
+            p_offset: first_section_rodata.resolved_offset as u64,
+            p_vaddr: first_section_rodata.resolved_virtual_address as u64,
+            p_paddr: first_section_rodata.resolved_virtual_address as u64,
+            p_filesz: link_result.merged_section_size.rodata as u64,
+            p_memsz: link_result.merged_section_size.rodata as u64,
+            p_align: PAGE_SIZE as u64,
+        });
+    }
 
     // Write writable data segment header
-    let (
-        segment_writable_data_offset,
-        segment_writable_data_virtual_address,
-        segment_writable_data_file_size,
-        segment_writable_data_memory_size,
-    ) = if link_result.existing_tls {
-        (
-            modules[0].section_offsets.tdata,
-            modules[0].section_virtual_addresses.tdata,
+    if link_result.has_writable_data {
+        let first_writable_section =
+            get_first_not_null_section(modules, &RelocatableSectionType::TData)
+                .or_else(|| get_first_not_null_section(modules, &RelocatableSectionType::TBss))
+                .or_else(|| get_first_not_null_section(modules, &RelocatableSectionType::Data))
+                .or_else(|| get_first_not_null_section(modules, &RelocatableSectionType::Bss))
+                .unwrap();
+
+        let segment_writable_data_offset = first_writable_section.resolved_offset;
+        let segment_writable_data_virtual_address = first_writable_section.resolved_virtual_address;
+
+        let segment_writable_data_file_size = if link_result.has_tls {
             align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
-                + link_result.merged_section_size.data,
+                + link_result.merged_section_size.data
+        } else {
+            link_result.merged_section_size.data
+        };
+
+        let segment_writable_data_memory_size = if link_result.has_tls {
             align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
                 + align_up(link_result.merged_section_size.tbss, DATA_ALIGN)
                 + align_up(link_result.merged_section_size.data, DATA_ALIGN)
-                + link_result.merged_section_size.bss,
-        )
-    } else {
-        (
-            modules[0].section_offsets.data,
-            modules[0].section_virtual_addresses.data,
-            link_result.merged_section_size.data,
+                + link_result.merged_section_size.bss
+        } else {
             align_up(link_result.merged_section_size.data, DATA_ALIGN)
-                + link_result.merged_section_size.bss,
-        )
-    };
+                + link_result.merged_section_size.bss
+        };
 
-    writer.write_program_header(&ProgramHeader {
-        p_type: PT_LOAD,
-        p_flags: PF_R | PF_W, // writable data
-        p_offset: segment_writable_data_offset as u64,
-        p_vaddr: segment_writable_data_virtual_address as u64,
-        p_paddr: segment_writable_data_virtual_address as u64,
-        p_filesz: segment_writable_data_file_size as u64,
-        p_memsz: segment_writable_data_memory_size as u64,
-        p_align: PAGE_SIZE as u64,
-    });
+        writer.write_program_header(&ProgramHeader {
+            p_type: PT_LOAD,
+            p_flags: PF_R | PF_W, // writable data
+            p_offset: segment_writable_data_offset as u64,
+            p_vaddr: segment_writable_data_virtual_address as u64,
+            p_paddr: segment_writable_data_virtual_address as u64,
+            p_filesz: segment_writable_data_file_size as u64,
+            p_memsz: segment_writable_data_memory_size as u64,
+            p_align: PAGE_SIZE as u64,
+        });
+    }
 
     // Write TLS segment header if there is TLS data
-    if link_result.existing_tls {
+    if link_result.has_tls {
         let segment_tls_file_size = link_result.merged_section_size.tdata;
         let segment_tls_memory_size = align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
             + link_result.merged_section_size.tbss;
 
+        let first_writable_section =
+            get_first_not_null_section(modules, &RelocatableSectionType::TData)
+                .or_else(|| get_first_not_null_section(modules, &RelocatableSectionType::TBss))
+                .unwrap();
+
         writer.write_program_header(&ProgramHeader {
             p_type: PT_LOAD,
             p_flags: PF_R | PF_W,
-            p_offset: modules[0].section_offsets.tdata as u64,
-            p_vaddr: modules[0].section_virtual_addresses.tdata as u64,
-            p_paddr: modules[0].section_virtual_addresses.tdata as u64,
+            p_offset: first_writable_section.resolved_offset as u64,
+            p_vaddr: first_writable_section.resolved_virtual_address as u64,
+            p_paddr: first_writable_section.resolved_virtual_address as u64,
             p_filesz: segment_tls_file_size as u64,
             p_memsz: segment_tls_memory_size as u64,
             p_align: TLS_SEGMENT_ALIGN as u64,
@@ -330,38 +386,92 @@ pub fn write_executable(
     // Write .text section data
     writer.write_align(PAGE_SIZE);
     for module in modules.iter() {
-        writer.write_align(TEXT_ALIGN);
-        writer.write(&module.section_binary.text);
-    }
-
-    // Write .rodata section data
-    writer.write_align(PAGE_SIZE);
-    for module in modules.iter() {
-        writer.write_align(TEXT_ALIGN);
-        writer.write(&module.section_binary.rodata);
-    }
-
-    // Write .tdata section data
-    if link_result.existing_tls {
-        writer.write_align(PAGE_SIZE);
-        for module in modules.iter() {
-            writer.write_align(DATA_ALIGN);
-            writer.write(&module.section_binary.tdata);
+        if let Some(section) = module.sections.get(&RelocatableSectionType::Text)
+            && section.size > 0
+        {
+            writer.write_align(TEXT_ALIGN);
+            match section.binary {
+                SectionBinary::Reference(data) => {
+                    writer.write(data);
+                }
+                SectionBinary::Owned(ref data) => {
+                    writer.write(data);
+                }
+                SectionBinary::None => {
+                    //
+                }
+            }
         }
     }
 
-    // Note that there is no need to write .tbss and .bss section data,
-    // because they are zero-initialized
-
-    // Write .data section data
-    writer.write_align(section_align_data);
-    for module in modules.iter() {
-        writer.write_align(DATA_ALIGN);
-        writer.write(&module.section_binary.data);
+    // Write .rodata section data
+    if link_result.merged_section_size.rodata > 0 {
+        writer.write_align(PAGE_SIZE);
+        for module in modules.iter() {
+            if let Some(section) = module.sections.get(&RelocatableSectionType::RoData)
+                && section.size > 0
+            {
+                writer.write_align(DATA_ALIGN);
+                match section.binary {
+                    SectionBinary::Reference(data) => {
+                        writer.write(data);
+                    }
+                    SectionBinary::Owned(ref data) => {
+                        writer.write(data);
+                    }
+                    SectionBinary::None => {
+                        //
+                    }
+                }
+            }
+        }
     }
 
+    // Write .tdata and .data section data
+    //
     // Note that there is no need to write .tbss and .bss section data,
     // because they are zero-initialized
+    if link_result.merged_section_size.tdata > 0 || link_result.merged_section_size.data > 0 {
+        writer.write_align(PAGE_SIZE);
+
+        for module in modules.iter() {
+            if let Some(section) = module.sections.get(&RelocatableSectionType::TData)
+                && section.size > 0
+            {
+                writer.write_align(DATA_ALIGN);
+                match section.binary {
+                    SectionBinary::Reference(data) => {
+                        writer.write(data);
+                    }
+                    SectionBinary::Owned(ref data) => {
+                        writer.write(data);
+                    }
+                    SectionBinary::None => {
+                        //
+                    }
+                }
+            }
+        }
+
+        for module in modules.iter() {
+            if let Some(section) = module.sections.get(&RelocatableSectionType::Data)
+                && section.size > 0
+            {
+                writer.write_align(DATA_ALIGN);
+                match section.binary {
+                    SectionBinary::Reference(data) => {
+                        writer.write(data);
+                    }
+                    SectionBinary::Owned(ref data) => {
+                        writer.write(data);
+                    }
+                    SectionBinary::None => {
+                        //
+                    }
+                }
+            }
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Phase 9: write symbol table
@@ -424,52 +534,62 @@ pub fn write_executable(
     writer.write_null_section_header();
 
     // Write section header: .text
-    writer.write_section_header(&SectionHeader {
-        name: Some(section_name_text),
-        sh_type: SHT_PROGBITS,
-        sh_flags: (SHF_ALLOC | SHF_EXECINSTR) as u64,
-        sh_addr: modules[0].section_virtual_addresses.text as u64,
-        sh_offset: modules[0].section_offsets.text as u64,
-        sh_size: link_result.merged_section_size.text as u64,
+    {
+        let first_section_text =
+            get_first_not_null_section(modules, &RelocatableSectionType::Text).unwrap();
+        writer.write_section_header(&SectionHeader {
+            name: Some(section_name_text),
+            sh_type: SHT_PROGBITS,
+            sh_flags: (SHF_ALLOC | SHF_EXECINSTR) as u64,
+            sh_addr: first_section_text.resolved_virtual_address as u64,
+            sh_offset: first_section_text.resolved_offset as u64,
+            sh_size: link_result.merged_section_size.text as u64,
 
-        // depends on the section type, for SHT_PROGBITS it is usually 0
-        // for section `.rela.text`, it is the index of the section `.symtab` that holds the symbols.
-        // for section `.symtab`, it is the index of the associated string table section (`.strtab`),
-        sh_link: 0,
+            // depends on the section type, for SHT_PROGBITS it is usually 0
+            // for section `.rela.text`, it is the index of the section `.symtab` that holds the symbols.
+            // for section `.symtab`, it is the index of the associated string table section (`.strtab`),
+            sh_link: 0,
 
-        // depends on the section type, for SHT_PROGBITS it is usually 0
-        // for section `.rela.text`, it is the index of the section to which the relocations apply (e.g. `.text`)
-        // for section `.symtab`, it is the index of the first non-local symbol (i.e. the number of local symbols)
-        sh_info: 0,
+            // depends on the section type, for SHT_PROGBITS it is usually 0
+            // for section `.rela.text`, it is the index of the section to which the relocations apply (e.g. `.text`)
+            // for section `.symtab`, it is the index of the first non-local symbol (i.e. the number of local symbols)
+            sh_info: 0,
 
-        // code sections are usually aligned to 16 bytes
-        sh_addralign: TEXT_ALIGN as u64,
-        sh_entsize: 0,
-    });
+            // code sections are usually aligned to 16 bytes
+            sh_addralign: TEXT_ALIGN as u64,
+            sh_entsize: 0,
+        });
+    }
 
     // Write section header: .rodata
-    writer.write_section_header(&SectionHeader {
-        name: Some(section_name_rodata),
-        sh_type: SHT_PROGBITS,
-        sh_flags: SHF_ALLOC as u64,
-        sh_addr: modules[0].section_virtual_addresses.rodata as u64,
-        sh_offset: modules[0].section_offsets.rodata as u64,
-        sh_size: link_result.merged_section_size.rodata as u64,
-        sh_link: 0,
-        sh_info: 0,
-        // read-only data sections are usually aligned to 8 or 4 bytes
-        sh_addralign: DATA_ALIGN as u64,
-        sh_entsize: 0,
-    });
+    if link_result.merged_section_size.rodata > 0 {
+        let first_section_rodata =
+            get_first_not_null_section(modules, &RelocatableSectionType::RoData).unwrap();
+        writer.write_section_header(&SectionHeader {
+            name: section_name_rodata_opt,
+            sh_type: SHT_PROGBITS,
+            sh_flags: SHF_ALLOC as u64,
+            sh_addr: first_section_rodata.resolved_virtual_address as u64,
+            sh_offset: first_section_rodata.resolved_offset as u64,
+            sh_size: link_result.merged_section_size.rodata as u64,
+            sh_link: 0,
+            sh_info: 0,
+            // read-only data sections are usually aligned to 8 or 4 bytes
+            sh_addralign: DATA_ALIGN as u64,
+            sh_entsize: 0,
+        });
+    }
 
-    if link_result.existing_tls {
-        // Write section header: .tdata
+    // Write section header: .tdata
+    if link_result.merged_section_size.tdata > 0 {
+        let first_section_tdata =
+            get_first_not_null_section(modules, &RelocatableSectionType::TData).unwrap();
         writer.write_section_header(&SectionHeader {
             name: section_name_tdata_opt,
             sh_type: SHT_PROGBITS,
             sh_flags: (SHF_ALLOC | PF_W) as u64,
-            sh_addr: modules[0].section_virtual_addresses.tdata as u64,
-            sh_offset: modules[0].section_offsets.tdata as u64,
+            sh_addr: first_section_tdata.resolved_virtual_address as u64,
+            sh_offset: first_section_tdata.resolved_offset as u64,
             sh_size: link_result.merged_section_size.tdata as u64,
             sh_link: 0,
             sh_info: 0,
@@ -477,14 +597,18 @@ pub fn write_executable(
             sh_addralign: DATA_ALIGN as u64,
             sh_entsize: 0,
         });
+    }
 
-        // Write section header: .tbss
+    // Write section header: .tbss
+    if link_result.merged_section_size.tbss > 0 {
+        let first_section_tbss =
+            get_first_not_null_section(modules, &RelocatableSectionType::TBss).unwrap();
         writer.write_section_header(&SectionHeader {
             name: section_name_tbss_opt,
             sh_type: SHT_NOBITS,
             sh_flags: (SHF_ALLOC | PF_W) as u64,
-            sh_addr: modules[0].section_virtual_addresses.tbss as u64,
-            sh_offset: modules[0].section_offsets.tbss as u64,
+            sh_addr: first_section_tbss.resolved_virtual_address as u64,
+            sh_offset: first_section_tbss.resolved_offset as u64,
             // .bss has no data in the file
             sh_size: 0,
             sh_link: 0,
@@ -496,39 +620,47 @@ pub fn write_executable(
     }
 
     // Write section header: .data
-    writer.write_section_header(&SectionHeader {
-        name: Some(section_name_data),
-        sh_type: SHT_PROGBITS,
-        sh_flags: (SHF_ALLOC | PF_W) as u64,
-        sh_addr: modules[0].section_virtual_addresses.data as u64,
-        sh_offset: modules[0].section_offsets.data as u64,
-        sh_size: link_result.merged_section_size.data as u64,
-        sh_link: 0,
-        sh_info: 0,
-        // data sections are usually aligned to 8 or 4 bytes
-        sh_addralign: DATA_ALIGN as u64,
-        sh_entsize: 0,
-    });
+    if link_result.merged_section_size.data > 0 {
+        let first_section_data =
+            get_first_not_null_section(modules, &RelocatableSectionType::Data).unwrap();
+        writer.write_section_header(&SectionHeader {
+            name: section_name_data_opt,
+            sh_type: SHT_PROGBITS,
+            sh_flags: (SHF_ALLOC | PF_W) as u64,
+            sh_addr: first_section_data.resolved_virtual_address as u64,
+            sh_offset: first_section_data.resolved_offset as u64,
+            sh_size: link_result.merged_section_size.data as u64,
+            sh_link: 0,
+            sh_info: 0,
+            // data sections are usually aligned to 8 or 4 bytes
+            sh_addralign: DATA_ALIGN as u64,
+            sh_entsize: 0,
+        });
+    }
 
     // Write section header: .bss
-    writer.write_section_header(&SectionHeader {
-        name: Some(section_name_bss),
-        sh_type: SHT_NOBITS,
-        sh_flags: (SHF_ALLOC | PF_W) as u64,
-        sh_addr: modules[0].section_virtual_addresses.bss as u64,
-        sh_offset: modules[0].section_offsets.bss as u64,
-        // .bss has no data in the file
-        sh_size: 0,
-        sh_link: 0,
-        sh_info: 0,
-        // .bss sections are usually aligned to 8 or 4 bytes
-        sh_addralign: DATA_ALIGN as u64,
-        sh_entsize: 0,
-    });
+    if link_result.merged_section_size.bss > 0 {
+        let first_section_bss =
+            get_first_not_null_section(modules, &RelocatableSectionType::Bss).unwrap();
+        writer.write_section_header(&SectionHeader {
+            name: section_name_bss_opt,
+            sh_type: SHT_NOBITS,
+            sh_flags: (SHF_ALLOC | PF_W) as u64,
+            sh_addr: first_section_bss.resolved_virtual_address as u64,
+            sh_offset: first_section_bss.resolved_offset as u64,
+            // .bss has no data in the file
+            sh_size: 0,
+            sh_link: 0,
+            sh_info: 0,
+            // .bss sections are usually aligned to 8 or 4 bytes
+            sh_addralign: DATA_ALIGN as u64,
+            sh_entsize: 0,
+        });
+    }
 
     // Write section header: .symtab
-    let num_local = 1; // only one symbol `null`
-    writer.write_symtab_section_header(num_local);
+    let local_symbol_count = 1; // only one symbol - `null`
+    writer.write_symtab_section_header(local_symbol_count);
 
     // Write section header: .strtab
     writer.write_strtab_section_header();
@@ -541,6 +673,22 @@ pub fn write_executable(
 
 fn align_up(val: usize, align: usize) -> usize {
     (val + align - 1) & !(align - 1)
+}
+
+fn get_first_not_null_section<'a>(
+    modules: &'a [RelocatableModule],
+    section_type: &RelocatableSectionType,
+) -> Option<&'a RelocatableSection<'a>> {
+    for module in modules {
+        if let Some((_, section)) = module
+            .sections
+            .iter()
+            .find(|(t, s)| *t == section_type && s.size > 0)
+        {
+            return Some(section);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -565,20 +713,28 @@ mod tests {
         fs::read(file_path).unwrap()
     }
 
-    fn get_example_file_module(file_name: &str) -> RelocatableModule {
-        let file_binary = get_example_file_binary(file_name);
-        read_relocatable(&file_binary).unwrap()
-    }
-
-    fn get_example_file_modules(file_names: &[&str]) -> Vec<RelocatableModule> {
+    fn get_example_file_binaries(file_names: &[&str]) -> Vec<Vec<u8>> {
         file_names
             .iter()
-            .map(|file_name| get_example_file_module(file_name))
+            .map(|file_name| get_example_file_binary(file_name))
+            .collect()
+    }
+
+    fn get_example_file_module<'a>(file_binary: &'a [u8]) -> RelocatableModule<'a> {
+        read_relocatable(file_binary).unwrap()
+    }
+
+    fn get_example_file_modules<'a>(file_binaries: &[&'a [u8]]) -> Vec<RelocatableModule<'a>> {
+        file_binaries
+            .iter()
+            .map(|file_binary| get_example_file_module(file_binary))
             .collect()
     }
 
     fn link_example_files(file_names: &[&str], output_buffer: &mut dyn WritableBuffer) {
-        let mut modules: Vec<RelocatableModule> = get_example_file_modules(file_names);
+        let file_binaries = get_example_file_binaries(file_names);
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let mut modules: Vec<RelocatableModule> = get_example_file_modules(&file_binaries_ref);
         let link_result = link(&mut modules).unwrap();
         write_executable(&mut modules, &link_result, output_buffer).unwrap();
     }

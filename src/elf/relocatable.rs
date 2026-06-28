@@ -4,189 +4,183 @@
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
-use object::read::elf::FileHeader;
+//! The `RelocatableModule` is a simplified representation of an object file,
+//! and it is not intended to be a complete representation of all the details of an object file.
+//! It assumes that an object file contains only:
+//!
+//! - At most one code section `.text`
+//! - At most one read-only data section `.rodata`
+//! - At most one thread local data section `.tdata`
+//! - At most one thread local uninitialized section `.tbss`
+//! - At most one data section `.data`
+//! - At most one uninitialized data section `.bss`
+//! - At most one symbol table `.symtab`
+//! - At most one relocation table `.rela.text`
+//! - At most one relocation table `.rela.rodata`
+//! - At most one relocation table `.rela.data`
+//! - At most one relocation table `.rela.tdata`
+//! - At most one string table `.strtab` (for symbol names)
+//! - One section header string table `.shstrtab` (for section names)
+//!
+//! Other sections and details of the object file are ignored without notice.
+
+use std::collections::HashMap;
 
 use crate::{
-    elf::module::{Relocation, SymbolBind},
+    elf::{
+        module::{FileType, Relocation, Symbol, SymbolBind},
+        reader::{
+            read_file, read_file_header, read_relocation_sections, read_section_headers,
+            read_symbols,
+        },
+    },
     error::LinkerError,
 };
+
+// The names of the sections that are relevant for merging.
+const SECTION_NAME_TEXT: &str = ".text";
+const SECTION_NAME_RODATA: &str = ".rodata";
+const SECTION_NAME_TDATA: &str = ".tdata";
+const SECTION_NAME_TBSS: &str = ".tbss";
+const SECTION_NAME_DATA: &str = ".data";
+const SECTION_NAME_BSS: &str = ".bss";
+
+// The names of the relocation sections that are relevant for relocation.
+const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
+const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
+const SECTION_NAME_RELA_DATA: &str = ".rela.data";
+const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
 
 /// A module represents essential elements of an object file,
 /// which contains code, data, symbols, and relocation.
 ///
 /// In addition, this module is also used for storing the calculated values
-/// during the linking process, such as the section offsets in the final executable.
-///
-/// This module is a simplified representation of an object file,
-/// and it is not intended to be a complete representation of all the details of an object file.
-/// It assumes that an object file contains only:
-///
-/// - At most one code section `.text`
-/// - At most one read-only data section `.rodata`
-/// - At most one data section `.data`/`.tdata`
-/// - At most one bss section `.bss`/`.tbss`
-/// - At most one symbol table `.symtab`
-/// - At most one relocation table `.rela.text`/`.rela.rodata`/`.rela.data`/`.rela.tdata`
-/// - At most one string table `.strtab` (for symbol names)
-/// - One section header table `.shstrtab` (for section names)
-///
-/// Other sections and details of the object file are ignored without notice.
-#[derive(Debug)]
-pub struct RelocatableModule {
-    pub section_size: SectionSize,
-    pub section_index_table: SectionIndexTable,
+/// during the linking process, such as the section offsets in the merged sections.
+#[derive(Debug, PartialEq)]
+pub struct RelocatableModule<'a> {
+    /// The relevant sections of the module
+    pub sections: HashMap<RelocatableSectionType, RelocatableSection<'a>>,
 
     /// The symbol table of the module, which contains the symbols defined in the module.
     ///
     /// This list is translated from the symbol table in the object file directly,
     /// and the first symbol is always the null symbol, which is a special symbol
     /// that represents the absence of a symbol.
-    pub symbols: Vec<ResolveSymbol>,
-
-    /// The relocation entries of the module, which contain the information about how to adjust the code and data when linking.
     ///
-    /// This list is translated from the relocation table in the object file directly,
-    /// and the `Relocation.symbol_index` field refers to the index of the symbol in the `symbols` list.
-    pub relocations_text: Vec<Relocation>,
+    /// Note that `Relocation.symbol_index` is the index of the symbol in this list.
+    pub symbols: Vec<RelocatableSymbol>,
 
-    /// The relocation entries for the read-only data section.
-    ///
-    /// Relocations on the data sections (`.rodata`, `.data`, `.tdata`) are
-    /// usually the pointers to symbols (other data or functions).
-    pub relocations_rodata: Vec<Relocation>,
-
-    /// The relocation entries for the data section.
-    pub relocations_data: Vec<Relocation>,
-
-    /// The relocation entries for the thread-local data section.
-    pub relocations_tdata: Vec<Relocation>,
-
-    pub section_binary: SectionBinary,
-
-    /// The section offsets in the final executable, which are calculated during the linking process.
-    pub section_offsets: SectionOffset,
-
-    /// The section virtual addresses in the final executable, which are calculated during the linking process.
-    pub section_virtual_addresses: SectionVirtualAddress,
+    /// The relocation entries of the module, which contain the information about
+    /// how to adjust the code and data when linking.
+    pub relocations: HashMap<RelocationEntrySectionType, Vec<Relocation>>,
 }
 
-impl RelocatableModule {
-    pub fn new() -> Self {
-        Self {
-            section_size: SectionSize::default(),
-            section_index_table: SectionIndexTable::default(),
-            symbols: Vec::new(),
-            relocations_text: Vec::new(),
-            relocations_rodata: Vec::new(),
-            relocations_data: Vec::new(),
-            relocations_tdata: Vec::new(),
-            section_binary: SectionBinary::default(),
-            section_offsets: SectionOffset::default(),
-            section_virtual_addresses: SectionVirtualAddress::default(),
-        }
+impl<'a> RelocatableModule<'a> {
+    pub fn has_read_only_data(&self) -> bool {
+        let existing_rodata = matches!(self.sections.get(&RelocatableSectionType::RoData),
+        Some(section) if section.size > 0);
+
+        existing_rodata
+    }
+
+    pub fn has_writable_data(&self) -> bool {
+        let existing_data = matches!(self.sections.get(&RelocatableSectionType::Data),
+        Some(section) if section.size > 0);
+
+        let existing_bss = matches!(self.sections.get(&RelocatableSectionType::Bss),
+        Some(section) if section.size > 0);
+
+        existing_data || existing_bss || self.has_tls()
     }
 
     pub fn has_tls(&self) -> bool {
-        !self.section_binary.tdata.is_empty() || self.section_size.tbss > 0
+        let existing_tdata = matches!(self.sections.get(&RelocatableSectionType::TData),
+        Some(section) if section.size > 0);
+
+        let existing_tbss = matches!(self.sections.get(&RelocatableSectionType::TBss),
+        Some(section) if section.size > 0);
+
+        existing_tdata || existing_tbss
     }
 }
 
-#[derive(Debug, Default)]
-pub struct SectionSize {
-    pub text: usize,
-    pub rodata: usize,
-    pub tdata: usize,
-    pub tbss: usize, // this is the memory size of the .tbss section
-    pub data: usize,
-    pub bss: usize, // this is the memory size of the .bss section
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RelocatableSectionType {
+    Text,
+    RoData,
+    TData,
+    TBss,
+    Data,
+    Bss,
 }
 
-/// Sections that a symbol can belong to.
-#[derive(Debug, Default)]
-pub struct SectionBinary {
-    /// The code section of the module, which contains the machine code instructions.
-    pub text: Vec<u8>,
-    /// The read-only data section of the module, which contains constants and other immutable data.
-    pub rodata: Vec<u8>,
-    /// The thread-local data section of the module, which contains initialized thread-local variables.
-    pub tdata: Vec<u8>,
-    /// The data section of the module, which contains initialized data.
-    pub data: Vec<u8>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RelocationEntrySectionType {
+    Text,
+    RoData,
+    Data,
+    TData,
 }
 
-// impl SectionBinary {
-//     pub fn new() -> Self {
-//         Self {
-//             text: Vec::new(),
-//             rodata: Vec::new(),
-//             tdata: Vec::new(),
-//             data: Vec::new(),
-//         }
-//     }
-// }
+#[derive(Debug, PartialEq)]
+pub struct RelocatableSection<'a> {
+    /// The index of the section in the section header table of the object file.
+    pub index: usize,
 
-/// The index of sections
-///
-/// This table is used to determine the section where a symbol
-/// is defined based on the `st_shndx` field in the symbol table.
-/// This table does not hold complete sections, but only the sesstions
-/// which can define symbols (e.g. `.text`, `.rodata`, `.tdata`,
-/// `.tbss`, `.data`, and `.bss`).
-#[derive(Debug, Default)]
-pub struct SectionIndexTable {
-    pub code: usize,
-    pub rodata: usize,
-    pub tdata: usize,
-    pub tbss: usize,
-    pub data: usize,
-    pub bss: usize,
+    /// The size of the section.
+    /// For the `.bss` and `.tbss` sections, this is the memory size of the section,
+    /// which is not present in the file, but occupies space in memory.
+    pub size: usize,
+
+    /// The binary data of the section.
+    pub binary: SectionBinary<'a>,
+
+    /// The section offset in the final executable, which are calculated during the linking process.
+    pub resolved_offset: usize,
+
+    /// The virtual addresses of the sections in the final executable,
+    /// which are calculated during the linking process based on the section offsets and the load address.
+    ///
+    /// For most sections, `virtual address = load address + section offset`,
+    /// but start from the `.data` section, the virtual address is also affected by the
+    /// size of the previous section `.bss` (which is not present in the file, but occupies space in memory).
+    pub resolved_virtual_address: usize,
 }
 
-impl SectionIndexTable {
-    pub fn get_symbol_section_type(&self, index: usize) -> Option<SymbolSectionType> {
-        if index == self.code {
-            Some(SymbolSectionType::Text)
-        } else if index == self.rodata {
-            Some(SymbolSectionType::RoData)
-        } else if index == self.tdata {
-            Some(SymbolSectionType::TData)
-        } else if index == self.tbss {
-            Some(SymbolSectionType::TBss)
-        } else if index == self.data {
-            Some(SymbolSectionType::Data)
-        } else if index == self.bss {
-            Some(SymbolSectionType::Bss)
-        } else {
-            None
-        }
-    }
+/// Section binary data
+#[derive(Debug, PartialEq)]
+pub enum SectionBinary<'a> {
+    Reference(&'a [u8]),
+
+    Owned(Vec<u8>),
+
+    /// Only `.text`, `.rodata`, `.tdata`, and `.data` sections
+    /// are relevant for linking (merging and relocation).
+    None,
 }
 
-/// Sections that a symbol can belong to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SymbolSectionType {
-    Text,   // `.text` section
-    RoData, // `.rodata` section
-    TData,  // `.tdata` section
-    TBss,   // `.tbss` section
-    Data,   // `.data` section
-    Bss,    // `.bss` section
-}
-
-#[derive(Debug)]
-pub enum ResolveSymbol {
+#[derive(Debug, PartialEq)]
+pub enum RelocatableSymbol {
     Defined {
-        // The name of the symbol
-        // This name may be empty for symbols that represent sections (e.g. the symbol for the `.text` section).
+        /// The name of the symbol
+        /// This name may be empty for symbols that represent sections
+        /// (e.g. the symbol which represents a section).
         name: String,
-        symbol_section_type: SymbolSectionType,
-        scope: SymbolBind,
 
-        // The offset of the symbol in its original section in the object file.
-        offset_original: usize,
+        /// The binding of the symbol, which determines the linkage of the symbol.
+        bind: SymbolBind,
 
-        offset_in_merged_section: usize, // calculated during linking, used for relocation
-        virtual_address_in_merged_section: usize, // calculated during linking, used for relocation
+        /// The section that the symbol belongs to.
+        section_type: RelocatableSectionType,
+
+        /// The offset of the symbol in its original section in the object file.
+        offset: usize,
+
+        /// The offset of the symbol in the merged section in the final executable,
+        resolved_offset: usize,
+
+        /// The virtual address of the symbol in the merged section in the final executable,
+        resolved_virtual_address: usize,
     },
     External(/* name */ String),
 
@@ -194,150 +188,138 @@ pub enum ResolveSymbol {
     Other,
 }
 
-// impl ResolveSymbol {
-//     pub fn new_defined(
-//         name: &str,
-//         symbol_section_type: SymbolSectionType,
-//         scope: SymbolScope,
-//         offset_original: usize,
-//     ) -> Self {
-//         Self::Defined {
-//             name: name.to_string(),
-//             symbol_section_type,
-//             scope,
-//             offset_original,
-//             offset_in_merged_section: 0,
-//             virtual_address_in_merged_section: 0,
-//         }
-//     }
-
-//     pub fn new_external(name: &str) -> Self {
-//         Self::External(name.to_string())
-//     }
-
-//     pub fn new_other() -> Self {
-//         Self::Other
-//     }
-// }
-
-#[derive(Debug, Default)]
-pub struct SectionOffset {
-    /// The offset of the code section in the final executable,
-    /// which is calculated during the linking process.
-    pub text: usize,
-
-    /// The offset of the read-only data section in the final executable.
-    pub rodata: usize,
-
-    /// The offset of the thread-local data section in the final executable.
-    pub tdata: usize,
-
-    /// The offset of the thread-local uninitialized data section in the final executable.
-    pub tbss: usize,
-
-    /// The offset of the data section in the final executable.
-    pub data: usize,
-
-    /// The offset of the bss section in the final executable.
-    pub bss: usize,
+/// This function is used to determine the section where a symbol
+/// is defined based on the `st_shndx` field of the symbol.
+fn get_section_type(
+    sections: &HashMap<RelocatableSectionType, RelocatableSection>,
+    section_index: usize,
+) -> Option<RelocatableSectionType> {
+    sections
+        .iter()
+        .find(|(_, section)| section.index == section_index)
+        .map(|(section_type, _)| *section_type)
 }
 
-// impl SectionOffset {
-//     pub fn new() -> Self {
-//         Self {
-//             text: 0,
-//             rodata: 0,
-//             tdata: 0,
-//             tbss: 0,
-//             data: 0,
-//             bss: 0,
-//         }
-//     }
-// }
+pub fn read_relocatable<'a>(binary: &'a [u8]) -> Result<RelocatableModule<'a>, LinkerError> {
+    let elf = read_file(binary)?;
+    let file_header = read_file_header(elf)?;
 
-/// The virtual addresses of the sections in the final executable,
-/// which are calculated during the linking process based on the section offsets and the load address.
-///
-/// For most sections, `virtual address = load address + section offset`,
-/// but start from the `.data` section, the virtual address is also affected by the
-/// size of the previous section `.bss` (which is not present in the file, but occupies space in memory).
-#[derive(Debug, Default)]
-pub struct SectionVirtualAddress {
-    /// The virtual address of the code section in the final executable.
-    pub text: usize,
-
-    /// The virtual address of the read-only data section in the final executable.
-    pub rodata: usize,
-
-    /// The virtual address of the thread-local data section in the final executable.
-    pub tdata: usize,
-
-    /// The virtual address of the thread-local uninitialized data section in the final executable.
-    pub tbss: usize,
-
-    /// The virtual address of the data section in the final executable.
-    pub data: usize,
-
-    /// The virtual address of the bss section in the final executable.
-    pub bss: usize,
-}
-
-// impl SectionVirtualAddress {
-//     pub fn new() -> Self {
-//         Self {
-//             text: 0,
-//             rodata: 0,
-//             tdata: 0,
-//             tbss: 0,
-//             data: 0,
-//             bss: 0,
-//         }
-//     }
-// }
-
-const SECTION_NAME_TEXT: &str = ".text";
-const SECTION_NAME_RODATA: &str = ".rodata";
-
-const SECTION_NAME_TDATA: &str = ".tdata";
-const SECTION_NAME_TBSS: &str = ".tbss";
-const SECTION_NAME_DATA: &str = ".data";
-const SECTION_NAME_BSS: &str = ".bss";
-
-const SECTION_NAME_SYMTAB: &str = ".symtab";
-const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
-const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
-const SECTION_NAME_RELA_DATA: &str = ".rela.data";
-const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
-
-pub fn read_relocatable(binary: &[u8]) -> Result<RelocatableModule, LinkerError> {
-    let Ok(elf) = object::elf::FileHeader64::<object::Endianness>::parse(binary) else {
-        return Err(LinkerError::new("Failed to parse ELF64 file"));
-    };
-
-    let Ok(endian) = elf.endian() else {
-        return Err(LinkerError::new("Failed to determine endianness"));
-    };
-
-    // -------------------------------------------------------------------------
-    // Read file header
-    // -------------------------------------------------------------------------
-
-    // ET_*, expect `ET_REL`
-    if elf.e_type(endian) != object::elf::ET_REL {
-        return Err(LinkerError::new("Unsupported ELF type, expected ET_REL"));
-    }
-
-    // EM_*, expect `EM_X86_64`, it determines the relocation types (e.g. R_X86_64_PC32, R_X86_64_PLT32)
-    if elf.e_machine(endian) != object::elf::EM_X86_64 {
+    if file_header.file_type != FileType::Relocatable {
         return Err(LinkerError::new(
-            "Unsupported ELF machine, expected EM_X86_64",
+            "Unsupported ELF type, expected relocatable (ET_REL) file",
         ));
     }
 
-    // let mut index_table = SectionIndexTable::new();
-    let mut module = RelocatableModule::new();
+    let mut relocatable_sections: HashMap<RelocatableSectionType, RelocatableSection<'a>> =
+        HashMap::new();
+    let section_headers = read_section_headers(elf, binary)?;
 
-    Ok(module)
+    // Iterate over the section headers and read the sections that are relevant for linking.
+    for (section_index, section_header) in section_headers.iter().enumerate() {
+        match section_header.name.as_str() {
+            SECTION_NAME_TEXT | SECTION_NAME_RODATA | SECTION_NAME_TDATA | SECTION_NAME_DATA => {
+                // Read the `.text`, `.rodata`, `.tdata`, and `.data` sections
+                // These sections contain the actual code and data of the module.
+                let relocatable_section = RelocatableSection {
+                    index: section_index,
+                    size: section_header.size,
+                    binary: SectionBinary::Reference(section_header.binary),
+                    resolved_offset: 0,
+                    resolved_virtual_address: 0,
+                };
+                let relocatable_section_type = match section_header.name.as_str() {
+                    SECTION_NAME_TEXT => RelocatableSectionType::Text,
+                    SECTION_NAME_RODATA => RelocatableSectionType::RoData,
+                    SECTION_NAME_TDATA => RelocatableSectionType::TData,
+                    SECTION_NAME_DATA => RelocatableSectionType::Data,
+                    _ => unreachable!(),
+                };
+                relocatable_sections.insert(relocatable_section_type, relocatable_section);
+            }
+            SECTION_NAME_TBSS | SECTION_NAME_BSS => {
+                // Read the `.tbss` and `.bss` sections
+                let relocatable_section = RelocatableSection {
+                    index: section_index,
+                    size: section_header.size,
+                    binary: SectionBinary::None,
+                    resolved_offset: 0,
+                    resolved_virtual_address: 0,
+                };
+                let relocatable_section_type = match section_header.name.as_str() {
+                    SECTION_NAME_TBSS => RelocatableSectionType::TBss,
+                    SECTION_NAME_BSS => RelocatableSectionType::Bss,
+                    _ => unreachable!(),
+                };
+                relocatable_sections.insert(relocatable_section_type, relocatable_section);
+            }
+            _ => {
+                // Ignore other sections
+            }
+        }
+    }
+
+    let mut relocatable_symbols: Vec<RelocatableSymbol> = Vec::new();
+    let symbols = read_symbols(elf, binary)?;
+
+    // Translate the symbols from the object file to the `RelocatableSymbol` representation.
+    for symbol in symbols {
+        let relocatable_symbol = match symbol {
+            Symbol::Defined {
+                name,
+                bind,
+                symbol_type: _,
+                section_index,
+                offset,
+            } => {
+                let section_type_opt = get_section_type(&relocatable_sections, section_index);
+                let Some(section_type) = section_type_opt else {
+                    return Err(LinkerError::new(&format!(
+                        "Symbol '{}' is defined in an unsupported section, section index {}",
+                        name, section_index
+                    )));
+                };
+                RelocatableSymbol::Defined {
+                    name,
+                    section_type,
+                    bind,
+                    offset,
+                    resolved_offset: 0,
+                    resolved_virtual_address: 0,
+                }
+            }
+            Symbol::External(name) => RelocatableSymbol::External(name),
+            Symbol::Other => RelocatableSymbol::Other,
+        };
+        relocatable_symbols.push(relocatable_symbol);
+    }
+
+    let mut relocatable_relocations: HashMap<RelocationEntrySectionType, Vec<Relocation>> =
+        HashMap::new();
+    let relocation_sections = read_relocation_sections(elf, binary)?;
+
+    // Translate the relocation sections from the object file to HashMap.
+    for relocation_section in relocation_sections {
+        let section_type = match relocation_section.name.as_str() {
+            SECTION_NAME_RELA_TEXT => RelocationEntrySectionType::Text,
+            SECTION_NAME_RELA_RODATA => RelocationEntrySectionType::RoData,
+            SECTION_NAME_RELA_DATA => RelocationEntrySectionType::Data,
+            SECTION_NAME_RELA_TDATA => RelocationEntrySectionType::TData,
+            _ => {
+                return Err(LinkerError::new(&format!(
+                    "Unsupported relocation section '{}'",
+                    relocation_section.name
+                )));
+            }
+        };
+        relocatable_relocations.insert(section_type, relocation_section.relocations);
+    }
+
+    let relocatable_module = RelocatableModule {
+        sections: relocatable_sections,
+        symbols: relocatable_symbols,
+        relocations: relocatable_relocations,
+    };
+    Ok(relocatable_module)
 }
 
 #[cfg(test)]

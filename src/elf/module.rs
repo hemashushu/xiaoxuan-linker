@@ -13,8 +13,8 @@ pub struct FileHeader {
     pub machine: Machine,
     pub file_type: FileType,
     pub entry_point: usize,
-    pub number_of_program_headers: usize,
-    pub number_of_section_headers: usize,
+    pub program_header_count: usize,
+    pub section_header_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,12 +125,14 @@ impl From<u32> for SectionType {
 pub enum Symbol {
     Defined {
         // The name of the symbol
-        // This name may be empty for symbols that represent sections (e.g. the symbol for the `.text` section).
+        // This name may be empty for symbols that represent sections
+        // (e.g. the symbol for the `.text` section).
         name: String,
         bind: SymbolBind,
         symbol_type: SymbolType,
 
-        // the index of the section where the symbol is defined, which can be used to determine the symbol's section type
+        // the index of the section where the symbol is defined,
+        // which can be used to determine the symbol's section type
         section_index: usize,
 
         // The offset of the symbol in its original section in the object file.

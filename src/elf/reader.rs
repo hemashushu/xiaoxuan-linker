@@ -38,16 +38,16 @@ pub fn read_file_header(
     let machine = Machine::from(elf.e_machine(endian));
 
     let entry_point = elf.e_entry(endian) as usize;
-    let number_of_program_headers = elf.e_phnum(endian) as usize;
-    let number_of_section_headers = elf.e_shnum(endian) as usize;
+    let program_header_count = elf.e_phnum(endian) as usize;
+    let section_header_count = elf.e_shnum(endian) as usize;
 
     Ok(super::module::FileHeader {
         os_abi,
         machine,
         file_type,
         entry_point,
-        number_of_program_headers,
-        number_of_section_headers,
+        program_header_count,
+        section_header_count,
     })
 }
 
@@ -481,8 +481,8 @@ mod tests {
                     machine: Machine::X86_64,
                     file_type: FileType::Relocatable,
                     entry_point: 0,
-                    number_of_program_headers: 0,
-                    number_of_section_headers: 5,
+                    program_header_count: 0,
+                    section_header_count: 5,
                 }
             );
         }
@@ -501,8 +501,8 @@ mod tests {
                     machine: Machine::X86_64,
                     file_type: FileType::Executable,
                     entry_point: 0x401000,
-                    number_of_program_headers: 2,
-                    number_of_section_headers: 5,
+                    program_header_count: 2,
+                    section_header_count: 5,
                 }
             );
         }
