@@ -694,7 +694,12 @@ fn get_first_not_null_section<'a>(
 #[cfg(test)]
 mod tests {
 
-    use std::{fs, os::unix::fs::PermissionsExt};
+    use std::{
+        fs, io,
+        os::unix::fs::PermissionsExt,
+        path::{Path, PathBuf},
+        time::Duration,
+    };
 
     use object::write::{StreamingBuffer, WritableBuffer};
 
@@ -739,49 +744,97 @@ mod tests {
         write_executable(&mut modules, &link_result, output_buffer).unwrap();
     }
 
-    fn link_example_file_to_executable(file_names: &[&str], output_file_path: &str) {
+    fn link_example_file_to_executable(file_names: &[&str], output_file_name: &str) -> PathBuf {
         let tmp_dir = std::env::temp_dir();
-        let path = tmp_dir.join(output_file_path);
+        let path = tmp_dir.join(output_file_name);
         let mut file = fs::File::create(&path).unwrap();
         let mut buffer = StreamingBuffer::new(&mut file);
         link_example_files(file_names, &mut buffer);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .expect("failed to set permissions");
+        path
+    }
+
+    fn execute_and_assert(file_path: &PathBuf, expected_exit_code: i32, expected_output: &str) {
+        // Sleep 5ms to avoid `Os { code: 26, kind: ExecutableFileBusy, message: "Text file busy" }` error.
+        const RETRY_INTERVAL: Duration = Duration::from_millis(5);
+        std::thread::sleep(RETRY_INTERVAL);
+
+        let output = std::process::Command::new(file_path)
+            .output()
+            .expect("failed to execute process");
+
+        let exit_code = output.status.code().unwrap();
+
+        assert_eq!(
+            exit_code, expected_exit_code,
+            "Executable returned unexpected exit code. expected: {}, actual: {}",
+            expected_exit_code, exit_code
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        assert_eq!(
+            stdout, expected_output,
+            "Executable returned unexpected output. expected: {}, actual: {}",
+            expected_output, stdout
+        );
+    }
+
+    fn delete_temporary_file(path: &Path) {
+        if path.exists() {
+            std::fs::remove_file(path).expect("failed to delete temporary file");
+        }
     }
 
     #[test]
     fn test_write_minimal() {
-        link_example_file_to_executable(&["minimal.o"], "test-minimal.elf");
+        let file = link_example_file_to_executable(&["minimal.o"], "test-minimal.elf");
+        execute_and_assert(&file, 42, "");
+        delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_function() {
-        link_example_file_to_executable(&["function.o"], "test-function.elf");
+        let file = link_example_file_to_executable(&["function.o"], "test-function.elf");
+        execute_and_assert(&file, 0, "Hello, world!\n");
+        delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_data() {
-        link_example_file_to_executable(&["data.o"], "test-data.elf");
+        let file = link_example_file_to_executable(&["data.o"], "test-data.elf");
+        execute_and_assert(&file, 24, "");
+        delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_symbol() {
-        link_example_file_to_executable(&["symbol-export.o", "symbol-import.o"], "test-symbol.elf");
+        let file = link_example_file_to_executable(
+            &["symbol-export.o", "symbol-import.o"],
+            "test-symbol.elf",
+        );
+        execute_and_assert(&file, 24, "");
+        delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_override() {
-        link_example_file_to_executable(
+        let file = link_example_file_to_executable(
             &["override-weak.o", "override-strong.o"],
             "test-override.elf",
         );
+        execute_and_assert(&file, 53, "");
+        delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_relocate_within_data() {
-        link_example_file_to_executable(
+        let file = link_example_file_to_executable(
             &["relocate-within-data.o"],
             "test-relocate-within-data.elf",
         );
+        execute_and_assert(&file, 24, "");
+        delete_temporary_file(&file);
     }
 }

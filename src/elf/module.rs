@@ -251,6 +251,9 @@ pub enum RelocationType {
     /// - `P` is the address of the relocation site (the `placeholder_offset` field in the `Relocation` struct).
     R_X86_64_PC32,
 
+    R_X86_64_PLT32,
+    // R_X86_64_GOT32,
+
     /// The `R_X86_64_64` relocation type represents a 64-bit absolute relocation.
     /// It is produced by the assembler/compiler whenever a full 64-bit address is stored
     /// in a data section, for example:

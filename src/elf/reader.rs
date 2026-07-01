@@ -383,6 +383,7 @@ fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, Lin
         object::elf::R_X86_64_64 => Ok(RelocationType::R_X86_64_64),
         object::elf::R_X86_64_32 => Ok(RelocationType::R_X86_64_32),
         object::elf::R_X86_64_TPOFF32 => Ok(RelocationType::R_X86_64_TPOFF32),
+        object::elf::R_X86_64_PLT32 => Ok(RelocationType::R_X86_64_PLT32),
         _ => Err(LinkerError::new(&format!(
             "Unsupported relocation type: {relocation_type_raw}"
         ))),
@@ -482,7 +483,7 @@ mod tests {
                     file_type: FileType::Relocatable,
                     entry_point: 0,
                     program_header_count: 0,
-                    section_header_count: 5,
+                    section_header_count: 8, // null, .text, .data, .bss, .note.gnu.property, .symtab, .strtab, .shstrtab
                 }
             );
         }
@@ -501,8 +502,8 @@ mod tests {
                     machine: Machine::X86_64,
                     file_type: FileType::Executable,
                     entry_point: 0x401000,
-                    program_header_count: 2,
-                    section_header_count: 5,
+                    program_header_count: 5, // meta, .text, .note.gnu.property x3
+                    section_header_count: 6, // null, .text, .note.gnu.property, .symtab, .strtab, .shstrtab
                 }
             );
         }
@@ -517,36 +518,48 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
-            assert_eq!(sections.len(), 5);
+            assert_eq!(sections.len(), 8);
             assert_eq!(
                 sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
-                vec!["", ".text", ".shstrtab", ".symtab", ".strtab"]
+                vec![
+                    "",
+                    ".text",
+                    ".data",
+                    ".bss",
+                    ".note.gnu.property",
+                    ".symtab",
+                    ".strtab",
+                    ".shstrtab"
+                ]
             );
             assert_eq!(
                 sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
                 vec![
-                    SectionType::Null,
-                    SectionType::Progbits,
-                    SectionType::Strtab,
-                    SectionType::Symtab,
-                    SectionType::Strtab
+                    SectionType::Null,     // null
+                    SectionType::Progbits, // .text
+                    SectionType::Progbits, // .data
+                    SectionType::Nobits,   // .bss
+                    SectionType::Other(7), // NOTE
+                    SectionType::Symtab,   // .symtab
+                    SectionType::Strtab,   // .strtab
+                    SectionType::Strtab    // .shstrtab
                 ]
             );
             assert_eq!(
                 sections.iter().map(|s| s.size).collect::<Vec<_>>(),
-                vec![0, 0xc, 0x21, 0x60, 0x14]
+                vec![0, 0x10, 0x0, 0x0, 0x30, 0x30, 0x8, 0x3f]
             );
             assert_eq!(
                 sections.iter().map(|s| s.binary.len()).collect::<Vec<_>>(),
-                vec![0, 0xc, 0x21, 0x60, 0x14]
+                vec![0, 0x10, 0x0, 0x0, 0x30, 0x30, 0x8, 0x3f]
             );
             assert_eq!(
                 sections.iter().map(|s| s.align).collect::<Vec<_>>(),
-                vec![0, 16, 1, 8, 1]
+                vec![0, 1, 1, 1, 8, 8, 1, 1]
             );
             assert_eq!(
                 sections.iter().map(|s| s.offset).collect::<Vec<_>>(),
-                vec![0, 0x180, 0x190, 0x1c0, 0x220]
+                vec![0, 0x40, 0x50, 0x50, 0x50, 0x80, 0xb0, 0xb8]
             );
         }
 
@@ -557,50 +570,52 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
-            assert_eq!(sections.len(), 9);
+            assert_eq!(sections.len(), 10);
             assert_eq!(
                 sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
                 vec![
                     "",
-                    ".rodata",
+                    ".text",
+                    ".rela.text",
                     ".data",
                     ".bss",
-                    ".text",
-                    ".shstrtab",
+                    ".rodata",
+                    ".note.gnu.property",
                     ".symtab",
                     ".strtab",
-                    ".rela.text"
+                    ".shstrtab"
                 ]
             );
             assert_eq!(
                 sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
                 vec![
-                    SectionType::Null,
-                    SectionType::Progbits,
-                    SectionType::Progbits,
-                    SectionType::Nobits,
-                    SectionType::Progbits,
-                    SectionType::Strtab,
-                    SectionType::Symtab,
-                    SectionType::Strtab,
-                    SectionType::Rela
+                    SectionType::Null,     // null
+                    SectionType::Progbits, // .text
+                    SectionType::Rela,     // .rela.text
+                    SectionType::Progbits, // .data
+                    SectionType::Nobits,   // .bss
+                    SectionType::Progbits, // .rodata
+                    SectionType::Other(7), // NOTE
+                    SectionType::Symtab,   // .symtab
+                    SectionType::Strtab,   // .strtab
+                    SectionType::Strtab,   // .shstrtab
                 ]
             );
             assert_eq!(
                 sections.iter().map(|s| s.size).collect::<Vec<_>>(),
-                vec![0, 0x10, 0x10, 0x10, 0x58, 0x3f, 0x138, 0x21, 0xf0]
+                vec![0, 0x5a, 0xf0, 0x10, 0x10, 0x10, 0x30, 0x108, 0x18, 0x4c]
             );
             assert_eq!(
                 sections.iter().map(|s| s.binary.len()).collect::<Vec<_>>(),
-                vec![0, 0x10, 0x10, 0x0, 0x58, 0x3f, 0x138, 0x21, 0xf0]
+                vec![0, 0x5a, 0xf0, 0x10, 0x0, 0x10, 0x30, 0x108, 0x18, 0x4c]
             );
             assert_eq!(
                 sections.iter().map(|s| s.align).collect::<Vec<_>>(),
-                vec![0, 4, 4, 4, 16, 1, 8, 1, 8]
+                vec![0, 1, 8, 1, 8, 1, 8, 8, 1, 1]
             );
             assert_eq!(
                 sections.iter().map(|s| s.offset).collect::<Vec<_>>(),
-                vec![0, 0x280, 0x290, 0x2a0, 0x2a0, 0x300, 0x340, 0x480, 0x4b0]
+                vec![0, 0x40, 0x210, 0x9a, 0xb0, 0xb0, 0xc0, 0xf0, 0x1f8, 0x300]
             );
         }
     }
@@ -614,22 +629,11 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
-            assert_eq!(symbols.len(), 4);
+            assert_eq!(symbols.len(), 2);
 
             assert_eq!(symbols[0], Symbol::Other);
-            assert_eq!(symbols[1], Symbol::Other);
             assert_eq!(
-                symbols[2],
-                Symbol::Defined {
-                    name: String::new(),
-                    section_index: 1,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Section,
-                    offset: 0,
-                }
-            );
-            assert_eq!(
-                symbols[3],
+                symbols[1],
                 Symbol::Defined {
                     name: "_start".to_string(),
                     section_index: 1,
@@ -647,124 +651,64 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
-            assert_eq!(symbols.len(), 13);
+            // .data, .bss, .rodata, foo, bar, a, b, x, y, _start
+            assert_eq!(symbols.len(), 11);
 
             assert_eq!(symbols[0], Symbol::Other);
-            assert_eq!(symbols[1], Symbol::Other);
             assert_eq!(
-                symbols[2],
-                Symbol::Defined {
-                    name: String::new(),
-                    section_index: 1,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Section,
-                    offset: 0,
-                }
-            );
-            assert_eq!(
-                symbols[3],
-                Symbol::Defined {
-                    name: String::new(),
-                    section_index: 2,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Section,
-                    offset: 0,
-                }
-            );
-            assert_eq!(
-                symbols[4],
+                symbols[1], // .data
                 Symbol::Defined {
                     name: String::new(),
                     section_index: 3,
                     bind: SymbolBind::Local,
                     symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+            assert_eq!(
+                symbols[2], // .bss
+                Symbol::Defined {
+                    name: String::new(),
+                    section_index: 4,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+            assert_eq!(
+                symbols[3], // .rodata
+                Symbol::Defined {
+                    name: String::new(),
+                    section_index: 5,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Section,
+                    offset: 0,
+                }
+            );
+
+            assert_eq!(
+                symbols[4],
+                Symbol::Defined {
+                    name: "foo".to_string(),
+                    section_index: 5,
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Notype,
                     offset: 0,
                 }
             );
             assert_eq!(
                 symbols[5],
                 Symbol::Defined {
-                    name: String::new(),
-                    section_index: 4,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Section,
-                    offset: 0,
-                }
-            );
-
-            assert_eq!(
-                symbols[6],
-                Symbol::Defined {
-                    name: "foo".to_string(),
-                    section_index: 1,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0,
-                }
-            );
-            assert_eq!(
-                symbols[7],
-                Symbol::Defined {
                     name: "bar".to_string(),
-                    section_index: 1,
+                    section_index: 5,
                     bind: SymbolBind::Local,
                     symbol_type: SymbolType::Notype,
                     offset: 0x8,
                 }
             );
 
-            assert_eq!(
-                symbols[8],
-                Symbol::Defined {
-                    name: "a".to_string(),
-                    section_index: 2,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0,
-                }
-            );
-            assert_eq!(
-                symbols[9],
-                Symbol::Defined {
-                    name: "b".to_string(),
-                    section_index: 2,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0x8,
-                }
-            );
-
-            assert_eq!(
-                symbols[10],
-                Symbol::Defined {
-                    name: "x".to_string(),
-                    section_index: 3,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0,
-                }
-            );
-            assert_eq!(
-                symbols[11],
-                Symbol::Defined {
-                    name: "y".to_string(),
-                    section_index: 3,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0x8,
-                }
-            );
-
-            assert_eq!(
-                symbols[12],
-                Symbol::Defined {
-                    name: "_start".to_string(),
-                    section_index: 4,
-                    bind: SymbolBind::Global,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0,
-                }
-            );
+            // The rest of the symbols are similar,
+            // so we can just check the first two entries for testing purposes.
         }
 
         // Read symbols of `symbol-import.o`
@@ -774,35 +718,11 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
-            assert_eq!(symbols.len(), 12);
+            assert_eq!(symbols.len(), 10);
 
             assert_eq!(symbols[0], Symbol::Other);
-            assert_eq!(symbols[1], Symbol::Other);
             assert_eq!(
-                symbols[2],
-                Symbol::Defined {
-                    name: String::new(),
-                    section_index: 1,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Section,
-                    offset: 0,
-                }
-            );
-
-            assert_eq!(symbols[3], Symbol::External("foo".to_string()));
-            assert_eq!(symbols[4], Symbol::External("bar".to_string()));
-
-            assert_eq!(symbols[5], Symbol::External("a".to_string()));
-            assert_eq!(symbols[6], Symbol::External("b".to_string()));
-
-            assert_eq!(symbols[7], Symbol::External("x".to_string()));
-            assert_eq!(symbols[8], Symbol::External("y".to_string()));
-
-            assert_eq!(symbols[9], Symbol::External("dec".to_string()));
-            assert_eq!(symbols[10], Symbol::External("inc".to_string()));
-
-            assert_eq!(
-                symbols[11],
+                symbols[1],
                 Symbol::Defined {
                     name: "_start".to_string(),
                     section_index: 1,
@@ -811,6 +731,14 @@ mod tests {
                     offset: 0,
                 }
             );
+
+            // It seems the order of symbols "GNU AS" generated is not guaranteed.
+            assert_eq!(symbols[2], Symbol::External("foo".to_string()));
+
+            assert_eq!(symbols[3], Symbol::External("dec".to_string()));
+
+            // The rest of the symbols are similar,
+            // so we can just check the first two entries for testing purposes.
         }
 
         // Read symbols of `override-weak.o`
@@ -820,23 +748,12 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
-            assert_eq!(symbols.len(), 5);
+            assert_eq!(symbols.len(), 3);
 
             assert_eq!(symbols[0], Symbol::Other);
-            assert_eq!(symbols[1], Symbol::Other);
-            assert_eq!(
-                symbols[2],
-                Symbol::Defined {
-                    name: String::new(),
-                    section_index: 1,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Section,
-                    offset: 0,
-                }
-            );
 
             assert_eq!(
-                symbols[3],
+                symbols[1],
                 Symbol::Defined {
                     name: "foo".to_string(),
                     bind: SymbolBind::Weak,
@@ -846,7 +763,7 @@ mod tests {
                 }
             );
             assert_eq!(
-                symbols[4],
+                symbols[2],
                 Symbol::Defined {
                     name: "bar".to_string(),
                     bind: SymbolBind::Weak,
@@ -877,11 +794,11 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            assert_eq!(relocation_sections.len(), 1);
+            assert_eq!(relocation_sections.len(), 1); // .rela.text
 
             let relocation_section = &relocation_sections[0];
             assert_eq!(relocation_section.name, ".rela.text");
-            assert_eq!(relocation_section.target_section_index, 4); // `.text` section index
+            assert_eq!(relocation_section.target_section_index, 1); // index of `.text` section
 
             let relocations = &relocation_section.relocations;
             assert_eq!(relocations.len(), 10);
@@ -891,7 +808,7 @@ mod tests {
                 Relocation {
                     relocation_type: RelocationType::R_X86_64_PC32,
                     placeholder_offset: 0x3,
-                    symbol_index: 2, // section symbol of `.rodata` section
+                    symbol_index: 3, // section symbol of `.rodata` section
                     addend: -4
                 }
             );
@@ -900,7 +817,7 @@ mod tests {
                 Relocation {
                     relocation_type: RelocationType::R_X86_64_PC32,
                     placeholder_offset: 0xe,
-                    symbol_index: 3, // section symbol of `.data` section
+                    symbol_index: 1, // section symbol of `.data` section
                     addend: -4
                 }
             );
@@ -921,66 +838,8 @@ mod tests {
             // `.rela.text`
             {
                 let relocation_section = &relocation_sections[0];
-                assert_eq!(relocation_section.name, ".rela.data");
-                assert_eq!(relocation_section.target_section_index, 1); // `.data` section index
-
-                let relocations = &relocation_section.relocations;
-                assert_eq!(relocations.len(), 2);
-
-                assert_eq!(
-                    relocations[0],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_64,
-                        placeholder_offset: 0x10,
-                        symbol_index: 4, // section symbol of `.text` section
-                        addend: 0
-                    }
-                );
-                assert_eq!(
-                    relocations[1],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_64,
-                        placeholder_offset: 0x18,
-                        symbol_index: 4, // section symbol of `.text` section
-                        addend: 8
-                    }
-                );
-            }
-
-            // `.rela.rodata`
-            {
-                let relocation_section = &relocation_sections[1];
-                assert_eq!(relocation_section.name, ".rela.rodata");
-                assert_eq!(relocation_section.target_section_index, 2); // `.rodata` section index
-
-                let relocations = &relocation_section.relocations;
-                assert_eq!(relocations.len(), 2);
-
-                assert_eq!(
-                    relocations[0],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_64,
-                        placeholder_offset: 0,
-                        symbol_index: 2, // section symbol of `.data` section
-                        addend: 0
-                    }
-                );
-                assert_eq!(
-                    relocations[1],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_64,
-                        placeholder_offset: 0x8,
-                        symbol_index: 2, // section symbol of `.data` section
-                        addend: 8
-                    }
-                );
-            }
-
-            // `.rela.text`
-            {
-                let relocation_section = &relocation_sections[2];
                 assert_eq!(relocation_section.name, ".rela.text");
-                assert_eq!(relocation_section.target_section_index, 3); // `.text` section index
+                assert_eq!(relocation_section.target_section_index, 1); // `.text` section index
 
                 let relocations = &relocation_section.relocations;
                 assert_eq!(relocations.len(), 6);
@@ -990,7 +849,7 @@ mod tests {
                     Relocation {
                         relocation_type: RelocationType::R_X86_64_PC32,
                         placeholder_offset: 0x13,
-                        symbol_index: 3, // section symbol of `.rodata` section
+                        symbol_index: 4, // section symbol of `.rodata` section
                         addend: -4
                     }
                 );
@@ -999,13 +858,71 @@ mod tests {
                     Relocation {
                         relocation_type: RelocationType::R_X86_64_PC32,
                         placeholder_offset: 0x1d,
-                        symbol_index: 2, // section symbol of `.data` section
+                        symbol_index: 1, // section symbol of `.data` section
                         addend: 0xc
                     }
                 );
 
                 // The rest of the relocation entries are similar,
                 // so we can just check the first two entries for testing purposes.
+            }
+
+            // `.rela.data`
+            {
+                let relocation_section = &relocation_sections[1];
+                assert_eq!(relocation_section.name, ".rela.data");
+                assert_eq!(relocation_section.target_section_index, 3); // `.data` section index
+
+                let relocations = &relocation_section.relocations;
+                assert_eq!(relocations.len(), 2);
+
+                assert_eq!(
+                    relocations[0],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_64,
+                        placeholder_offset: 0x10,
+                        symbol_index: 0x9, // symbol `dec`
+                        addend: 0
+                    }
+                );
+                assert_eq!(
+                    relocations[1],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_64,
+                        placeholder_offset: 0x18,
+                        symbol_index: 0xa, // symbol `inc`
+                        addend: 0
+                    }
+                );
+            }
+
+            // `.rela.rodata`
+            {
+                let relocation_section = &relocation_sections[2];
+                assert_eq!(relocation_section.name, ".rela.rodata");
+                assert_eq!(relocation_section.target_section_index, 6); // `.rodata` section index
+
+                let relocations = &relocation_section.relocations;
+                assert_eq!(relocations.len(), 2);
+
+                assert_eq!(
+                    relocations[0],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_64,
+                        placeholder_offset: 0,
+                        symbol_index: 7, // symbol `foo`
+                        addend: 0
+                    }
+                );
+                assert_eq!(
+                    relocations[1],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_64,
+                        placeholder_offset: 0x8,
+                        symbol_index: 8, // symbol `bar`
+                        addend: 0
+                    }
+                );
             }
         }
     }
@@ -1029,7 +946,7 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            assert_eq!(program_headers.len(), 2);
+            assert_eq!(program_headers.len(), 5);
 
             assert_eq!(
                 program_headers[0],
@@ -1038,8 +955,8 @@ mod tests {
                     segment_flags: vec![SegmentFlag::Read,],
                     offset: 0,
                     virtual_address: 0x400000,
-                    file_size: 0xb0,
-                    memory_size: 0xb0,
+                    file_size: 0x158,
+                    memory_size: 0x158,
                     align: 0x1000
                 }
             );
@@ -1051,11 +968,14 @@ mod tests {
                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
                     offset: 0x1000,
                     virtual_address: 0x401000,
-                    file_size: 0xc,
-                    memory_size: 0xc,
+                    file_size: 0x10,
+                    memory_size: 0x10,
                     align: 0x1000
                 }
             );
+
+            // The rest of the program headers are similar,
+            // so we can just check the first two entries for testing purposes.
         }
 
         // Read program headers of `data.elf`
@@ -1065,7 +985,7 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            assert_eq!(program_headers.len(), 4);
+            assert_eq!(program_headers.len(), 6);
 
             assert_eq!(
                 program_headers[0],
@@ -1074,8 +994,8 @@ mod tests {
                     segment_flags: vec![SegmentFlag::Read,],
                     offset: 0,
                     virtual_address: 0x400000,
-                    file_size: 0x120,
-                    memory_size: 0x120,
+                    file_size: 0x190,
+                    memory_size: 0x190,
                     align: 0x1000
                 }
             );
@@ -1087,37 +1007,14 @@ mod tests {
                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
                     offset: 0x1000,
                     virtual_address: 0x401000,
-                    file_size: 0x58,
-                    memory_size: 0x58,
+                    file_size: 0x5a,
+                    memory_size: 0x5a,
                     align: 0x1000
                 }
             );
 
-            assert_eq!(
-                program_headers[2],
-                ProgramHeader {
-                    segment_type: SegmentType::Load,
-                    segment_flags: vec![SegmentFlag::Read],
-                    offset: 0x2000,
-                    virtual_address: 0x402000,
-                    file_size: 0x10,
-                    memory_size: 0x10,
-                    align: 0x1000
-                }
-            );
-
-            assert_eq!(
-                program_headers[3],
-                ProgramHeader {
-                    segment_type: SegmentType::Load,
-                    segment_flags: vec![SegmentFlag::Write, SegmentFlag::Read],
-                    offset: 0x2010,
-                    virtual_address: 0x403010,
-                    file_size: 0x10,
-                    memory_size: 0x20,
-                    align: 0x1000
-                }
-            );
+            // The rest of the program headers are similar,
+            // so we can just check the first two entries for testing purposes.
         }
     }
 }

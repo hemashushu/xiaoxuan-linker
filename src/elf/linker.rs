@@ -425,7 +425,7 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
                             patch_value: PatchValue::Value32(relocated_value as u32),
                         }
                     }
-                    RelocationType::R_X86_64_PC32 => {
+                    RelocationType::R_X86_64_PC32 | RelocationType::R_X86_64_PLT32 => {
                         // R_X86_64_PC32: S + A - P
                         let section_text =
                             module.sections.get(&RelocatableSectionType::Text).unwrap();
