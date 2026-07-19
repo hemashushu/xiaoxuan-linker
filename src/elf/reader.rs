@@ -457,10 +457,26 @@ mod tests {
         },
     };
 
+    #[cfg(target_arch = "x86_64")]
+    fn get_arch_dir_name() -> &'static str {
+        "x86_64-linux"
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn get_arch_dir_name() -> &'static str {
+        "aarch64-linux"
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn get_arch_dir_name() -> &'static str {
+        "riscv64-linux"
+    }
+
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
-            .join("resources/examples/x86_64-linux")
+            .join("resources/examples")
+            .join(get_arch_dir_name())
             .join(file_name);
 
         fs::read(file_path).unwrap()
@@ -475,6 +491,7 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let file_header = read_file_header(elf).unwrap();
 
+            #[cfg(target_arch = "x86_64")]
             assert_eq!(
                 file_header,
                 FileHeader {
@@ -486,6 +503,19 @@ mod tests {
                     section_header_count: 8, // null, .text, .data, .bss, .note.gnu.property, .symtab, .strtab, .shstrtab
                 }
             );
+
+            #[cfg(target_arch = "aarch64")]
+            assert_eq!(
+                file_header,
+                FileHeader {
+                    os_abi: OSABI::SystemV,
+                    machine: Machine::AArch64,
+                    file_type: FileType::Relocatable,
+                    entry_point: 0,
+                    program_header_count: 0,
+                    section_header_count: 7, // null, .text, .data, .bss, .symtab, .strtab, .shstrtab
+                }
+            );
         }
 
         // Read file header of `minimal.elf`
@@ -495,6 +525,7 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let file_header = read_file_header(elf).unwrap();
 
+            #[cfg(target_arch = "x86_64")]
             assert_eq!(
                 file_header,
                 FileHeader {
@@ -504,6 +535,19 @@ mod tests {
                     entry_point: 0x401000,
                     program_header_count: 5, // meta, .text, .note.gnu.property x3
                     section_header_count: 6, // null, .text, .note.gnu.property, .symtab, .strtab, .shstrtab
+                }
+            );
+
+            #[cfg(target_arch = "aarch64")]
+            assert_eq!(
+                file_header,
+                FileHeader {
+                    os_abi: OSABI::SystemV,
+                    machine: Machine::AArch64,
+                    file_type: FileType::Executable,
+                    entry_point: 0x400078,
+                    program_header_count: 1, // .text
+                    section_header_count: 5, // null, .text, .symtab, .strtab, .shstrtab
                 }
             );
         }
@@ -518,49 +562,69 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
-            assert_eq!(sections.len(), 8);
-            assert_eq!(
-                sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
-                vec![
-                    "",
-                    ".text",
-                    ".data",
-                    ".bss",
-                    ".note.gnu.property",
-                    ".symtab",
-                    ".strtab",
-                    ".shstrtab"
-                ]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
-                vec![
-                    SectionType::Null,     // null
-                    SectionType::Progbits, // .text
-                    SectionType::Progbits, // .data
-                    SectionType::Nobits,   // .bss
-                    SectionType::Other(7), // NOTE
-                    SectionType::Symtab,   // .symtab
-                    SectionType::Strtab,   // .strtab
-                    SectionType::Strtab    // .shstrtab
-                ]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.size).collect::<Vec<_>>(),
-                vec![0, 0x10, 0x0, 0x0, 0x30, 0x30, 0x8, 0x3f]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.binary.len()).collect::<Vec<_>>(),
-                vec![0, 0x10, 0x0, 0x0, 0x30, 0x30, 0x8, 0x3f]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.align).collect::<Vec<_>>(),
-                vec![0, 1, 1, 1, 8, 8, 1, 1]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.offset).collect::<Vec<_>>(),
-                vec![0, 0x40, 0x50, 0x50, 0x50, 0x80, 0xb0, 0xb8]
-            );
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_eq!(sections.len(), 8);
+                assert_eq!(
+                    sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
+                    vec![
+                        "",
+                        ".text",
+                        ".data",
+                        ".bss",
+                        ".note.gnu.property",
+                        ".symtab",
+                        ".strtab",
+                        ".shstrtab"
+                    ]
+                );
+                assert_eq!(
+                    sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
+                    vec![
+                        SectionType::Null,     // null
+                        SectionType::Progbits, // .text
+                        SectionType::Progbits, // .data
+                        SectionType::Nobits,   // .bss
+                        SectionType::Other(7), // NOTE
+                        SectionType::Symtab,   // .symtab
+                        SectionType::Strtab,   // .strtab
+                        SectionType::Strtab    // .shstrtab
+                    ]
+                );
+
+                // Fields such as `size`, `binary`, `align`, and `offset` are not guaranteed
+                // to be the same across different versions of the assembler and platforms,
+                // so check these fields manually.
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                assert_eq!(sections.len(), 7);
+                assert_eq!(
+                    sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
+                    vec![
+                        "",
+                        ".text",
+                        ".data",
+                        ".bss",
+                        ".symtab",
+                        ".strtab",
+                        ".shstrtab"
+                    ]
+                );
+                assert_eq!(
+                    sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
+                    vec![
+                        SectionType::Null,     // null
+                        SectionType::Progbits, // .text
+                        SectionType::Progbits, // .data
+                        SectionType::Nobits,   // .bss
+                        SectionType::Symtab,   // .symtab
+                        SectionType::Strtab,   // .strtab
+                        SectionType::Strtab    // .shstrtab
+                    ]
+                );
+            }
         }
 
         // Read section headers of `data.o`
@@ -570,53 +634,77 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
-            assert_eq!(sections.len(), 10);
-            assert_eq!(
-                sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
-                vec![
-                    "",
-                    ".text",
-                    ".rela.text",
-                    ".data",
-                    ".bss",
-                    ".rodata",
-                    ".note.gnu.property",
-                    ".symtab",
-                    ".strtab",
-                    ".shstrtab"
-                ]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
-                vec![
-                    SectionType::Null,     // null
-                    SectionType::Progbits, // .text
-                    SectionType::Rela,     // .rela.text
-                    SectionType::Progbits, // .data
-                    SectionType::Nobits,   // .bss
-                    SectionType::Progbits, // .rodata
-                    SectionType::Other(7), // NOTE
-                    SectionType::Symtab,   // .symtab
-                    SectionType::Strtab,   // .strtab
-                    SectionType::Strtab,   // .shstrtab
-                ]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.size).collect::<Vec<_>>(),
-                vec![0, 0x5a, 0xf0, 0x10, 0x10, 0x10, 0x30, 0x108, 0x18, 0x4c]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.binary.len()).collect::<Vec<_>>(),
-                vec![0, 0x5a, 0xf0, 0x10, 0x0, 0x10, 0x30, 0x108, 0x18, 0x4c]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.align).collect::<Vec<_>>(),
-                vec![0, 1, 8, 1, 8, 1, 8, 8, 1, 1]
-            );
-            assert_eq!(
-                sections.iter().map(|s| s.offset).collect::<Vec<_>>(),
-                vec![0, 0x40, 0x210, 0x9a, 0xb0, 0xb0, 0xc0, 0xf0, 0x1f8, 0x300]
-            );
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_eq!(sections.len(), 10);
+                assert_eq!(
+                    sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
+                    vec![
+                        "",
+                        ".text",
+                        ".rela.text",
+                        ".data",
+                        ".bss",
+                        ".rodata",
+                        ".note.gnu.property",
+                        ".symtab",
+                        ".strtab",
+                        ".shstrtab"
+                    ]
+                );
+                assert_eq!(
+                    sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
+                    vec![
+                        SectionType::Null,     // null
+                        SectionType::Progbits, // .text
+                        SectionType::Rela,     // .rela.text
+                        SectionType::Progbits, // .data
+                        SectionType::Nobits,   // .bss
+                        SectionType::Progbits, // .rodata
+                        SectionType::Other(7), // NOTE
+                        SectionType::Symtab,   // .symtab
+                        SectionType::Strtab,   // .strtab
+                        SectionType::Strtab,   // .shstrtab
+                    ]
+                );
+
+                // Fields such as `size`, `binary`, `align`, and `offset` are not guaranteed
+                // to be the same across different versions of the assembler and platforms,
+                // so check these fields manually.
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                assert_eq!(sections.len(), 9);
+                assert_eq!(
+                    sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
+                    vec![
+                        "",
+                        ".text",
+                        ".rela.text",
+                        ".data",
+                        ".bss",
+                        ".rodata",
+                        ".symtab",
+                        ".strtab",
+                        ".shstrtab"
+                    ]
+                );
+                assert_eq!(
+                    sections.iter().map(|s| s.section_type).collect::<Vec<_>>(),
+                    vec![
+                        SectionType::Null,     // null
+                        SectionType::Progbits, // .text
+                        SectionType::Rela,     // .rela.text
+                        SectionType::Progbits, // .data
+                        SectionType::Nobits,   // .bss
+                        SectionType::Progbits, // .rodata
+                        SectionType::Symtab,   // .symtab
+                        SectionType::Strtab,   // .strtab
+                        SectionType::Strtab,   // .shstrtab
+                    ]
+                );
+            }
         }
     }
 
@@ -629,19 +717,51 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
-            assert_eq!(symbols.len(), 2);
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_eq!(symbols.len(), 2);
+                assert_eq!(symbols[0], Symbol::Other);
+                assert_eq!(
+                    symbols[1],
+                    Symbol::Defined {
+                        name: "_start".to_string(),
+                        section_index: 1,
+                        bind: SymbolBind::Global,
+                        symbol_type: SymbolType::Notype,
+                        offset: 0,
+                    }
+                );
+            }
 
-            assert_eq!(symbols[0], Symbol::Other);
-            assert_eq!(
-                symbols[1],
-                Symbol::Defined {
-                    name: "_start".to_string(),
-                    section_index: 1,
-                    bind: SymbolBind::Global,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0,
-                }
-            );
+            #[cfg(target_arch = "aarch64")]
+            {
+                assert_eq!(symbols.len(), 6);
+                assert_eq!(symbols[0], Symbol::Other);
+                assert_eq!(
+                    symbols[1], // .text
+                    Symbol::Defined {
+                        name: String::new(),
+                        section_index: 1,
+                        bind: SymbolBind::Local,
+                        symbol_type: SymbolType::Section,
+                        offset: 0,
+                    }
+                );
+
+                // There are other local and global symbols in aarch64,
+                // we only check the last symbol `_start` for testing purposes.
+
+                assert_eq!(
+                    symbols[5],
+                    Symbol::Defined {
+                        name: "_start".to_string(),
+                        section_index: 1,
+                        bind: SymbolBind::Global,
+                        symbol_type: SymbolType::Notype,
+                        offset: 0,
+                    }
+                );
+            }
         }
 
         // Read symbols of `data.o`
@@ -651,64 +771,99 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
-            // .data, .bss, .rodata, foo, bar, a, b, x, y, _start
-            assert_eq!(symbols.len(), 11);
+            #[cfg(target_arch = "x86_64")]
+            {
+                // .data, .bss, .rodata, foo, bar, a, b, x, y, _start
+                assert_eq!(symbols.len(), 11);
 
-            assert_eq!(symbols[0], Symbol::Other);
-            assert_eq!(
-                symbols[1], // .data
-                Symbol::Defined {
-                    name: String::new(),
-                    section_index: 3,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Section,
-                    offset: 0,
-                }
-            );
-            assert_eq!(
-                symbols[2], // .bss
-                Symbol::Defined {
-                    name: String::new(),
-                    section_index: 4,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Section,
-                    offset: 0,
-                }
-            );
-            assert_eq!(
-                symbols[3], // .rodata
-                Symbol::Defined {
-                    name: String::new(),
-                    section_index: 5,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Section,
-                    offset: 0,
-                }
-            );
+                assert_eq!(symbols[0], Symbol::Other);
+                assert_eq!(
+                    symbols[1], // .data
+                    Symbol::Defined {
+                        name: String::new(),
+                        section_index: 3,
+                        bind: SymbolBind::Local,
+                        symbol_type: SymbolType::Section,
+                        offset: 0,
+                    }
+                );
+                assert_eq!(
+                    symbols[2], // .bss
+                    Symbol::Defined {
+                        name: String::new(),
+                        section_index: 4,
+                        bind: SymbolBind::Local,
+                        symbol_type: SymbolType::Section,
+                        offset: 0,
+                    }
+                );
+                assert_eq!(
+                    symbols[3], // .rodata
+                    Symbol::Defined {
+                        name: String::new(),
+                        section_index: 5,
+                        bind: SymbolBind::Local,
+                        symbol_type: SymbolType::Section,
+                        offset: 0,
+                    }
+                );
 
-            assert_eq!(
-                symbols[4],
-                Symbol::Defined {
-                    name: "foo".to_string(),
-                    section_index: 5,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0,
-                }
-            );
-            assert_eq!(
-                symbols[5],
-                Symbol::Defined {
-                    name: "bar".to_string(),
-                    section_index: 5,
-                    bind: SymbolBind::Local,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0x8,
-                }
-            );
+                assert_eq!(
+                    symbols[4],
+                    Symbol::Defined {
+                        name: "foo".to_string(),
+                        section_index: 5,
+                        bind: SymbolBind::Local,
+                        symbol_type: SymbolType::Notype,
+                        offset: 0,
+                    }
+                );
+                assert_eq!(
+                    symbols[5],
+                    Symbol::Defined {
+                        name: "bar".to_string(),
+                        section_index: 5,
+                        bind: SymbolBind::Local,
+                        symbol_type: SymbolType::Notype,
+                        offset: 0x8,
+                    }
+                );
 
-            // The rest of the symbols are similar,
-            // so we can just check the first two entries for testing purposes.
+                // The rest of the symbols are similar,
+                // so we can just check the first two entries for testing purposes.
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                // .data, .bss, .rodata, foo, bar, a, b, x, y, _start
+                assert_eq!(symbols.len(), 16);
+
+                assert_eq!(symbols[0], Symbol::Other);
+                assert_eq!(
+                    symbols[1], // .text
+                    Symbol::Defined {
+                        name: String::new(),
+                        section_index: 1,
+                        bind: SymbolBind::Local,
+                        symbol_type: SymbolType::Section,
+                        offset: 0,
+                    }
+                );
+
+                // There are other local and global symbols in aarch64,
+                // we only check the last symbol `_start` for testing purposes.
+
+                assert_eq!(
+                    symbols[15],
+                    Symbol::Defined {
+                        name: "_start".to_string(),
+                        section_index: 1,
+                        bind: SymbolBind::Global,
+                        symbol_type: SymbolType::Notype,
+                        offset: 0,
+                    }
+                );
+            }
         }
 
         // Read symbols of `symbol-import.o`
@@ -718,27 +873,51 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
-            assert_eq!(symbols.len(), 10);
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_eq!(symbols.len(), 10);
 
-            assert_eq!(symbols[0], Symbol::Other);
-            assert_eq!(
-                symbols[1],
-                Symbol::Defined {
-                    name: "_start".to_string(),
-                    section_index: 1,
-                    bind: SymbolBind::Global,
-                    symbol_type: SymbolType::Notype,
-                    offset: 0,
-                }
-            );
+                assert_eq!(symbols[0], Symbol::Other);
+                assert_eq!(
+                    symbols[1],
+                    Symbol::Defined {
+                        name: "_start".to_string(),
+                        section_index: 1,
+                        bind: SymbolBind::Global,
+                        symbol_type: SymbolType::Notype,
+                        offset: 0,
+                    }
+                );
 
-            // It seems the order of symbols "GNU AS" generated is not guaranteed.
-            assert_eq!(symbols[2], Symbol::External("foo".to_string()));
+                // It seems the order of symbols "GNU AS" generated is not guaranteed.
+                assert_eq!(symbols[2], Symbol::External("foo".to_string()));
+                assert_eq!(symbols[3], Symbol::External("dec".to_string()));
 
-            assert_eq!(symbols[3], Symbol::External("dec".to_string()));
+                // The rest of the symbols are similar,
+                // so we can just check the first two entries for testing purposes.
+            }
 
-            // The rest of the symbols are similar,
-            // so we can just check the first two entries for testing purposes.
+            #[cfg(target_arch = "aarch64")]
+            {
+                assert_eq!(symbols.len(), 14);
+
+                assert_eq!(symbols[0], Symbol::Other);
+                assert_eq!(
+                    symbols[1], // .text
+                    Symbol::Defined {
+                        name: String::new(),
+                        section_index: 1,
+                        bind: SymbolBind::Local,
+                        symbol_type: SymbolType::Section,
+                        offset: 0,
+                    }
+                );
+
+                // There are other local and global symbols in aarch64,
+                // we only check the last symbol `y` for testing purposes.
+
+                assert_eq!(symbols[13], Symbol::External("y".to_string()));
+            }
         }
 
         // Read symbols of `override-weak.o`
@@ -748,30 +927,63 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
-            assert_eq!(symbols.len(), 3);
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_eq!(symbols.len(), 3);
 
-            assert_eq!(symbols[0], Symbol::Other);
+                assert_eq!(symbols[0], Symbol::Other);
+                assert_eq!(
+                    symbols[1],
+                    Symbol::Defined {
+                        name: "foo".to_string(),
+                        bind: SymbolBind::Weak,
+                        symbol_type: SymbolType::Notype,
+                        section_index: 1,
+                        offset: 0
+                    }
+                );
+                assert_eq!(
+                    symbols[2],
+                    Symbol::Defined {
+                        name: "bar".to_string(),
+                        bind: SymbolBind::Weak,
+                        symbol_type: SymbolType::Notype,
+                        section_index: 1,
+                        offset: 0x6
+                    }
+                );
+            }
 
-            assert_eq!(
-                symbols[1],
-                Symbol::Defined {
-                    name: "foo".to_string(),
-                    bind: SymbolBind::Weak,
-                    symbol_type: SymbolType::Notype,
-                    section_index: 1,
-                    offset: 0
-                }
-            );
-            assert_eq!(
-                symbols[2],
-                Symbol::Defined {
-                    name: "bar".to_string(),
-                    bind: SymbolBind::Weak,
-                    symbol_type: SymbolType::Notype,
-                    section_index: 1,
-                    offset: 0x6
-                }
-            );
+            #[cfg(target_arch = "aarch64")]
+            {
+                assert_eq!(symbols.len(), 7);
+
+                assert_eq!(symbols[0], Symbol::Other);
+                assert_eq!(
+                    symbols[1], // .text
+                    Symbol::Defined {
+                        name: String::new(),
+                        section_index: 1,
+                        bind: SymbolBind::Local,
+                        symbol_type: SymbolType::Section,
+                        offset: 0,
+                    }
+                );
+
+                // There are other local and global symbols in aarch64,
+                // we only check the last symbol `y` for testing purposes.
+
+                assert_eq!(
+                    symbols[6],
+                    Symbol::Defined {
+                        name: "bar".to_string(),
+                        bind: SymbolBind::Weak,
+                        symbol_type: SymbolType::Notype,
+                        section_index: 1,
+                        offset: 0x8
+                    }
+                );
+            }
         }
     }
 

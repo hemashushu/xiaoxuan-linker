@@ -695,7 +695,7 @@ fn get_first_not_null_section<'a>(
 mod tests {
 
     use std::{
-        fs, io,
+        fs,
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
         time::Duration,

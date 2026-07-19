@@ -1,12 +1,27 @@
 #!/usr/bin/env bash
 
-# initialize the build environment
-QEMU_USER=/usr/bin/qemu-aarch64
-GCC=/usr/bin/aarch64-linux-gnu-gcc
-
-SYSROOT="$($GCC -print-sysroot)"
-
 set -euo pipefail
+
+HOST_ARCH="$(uname -m)"
+
+RUN_MODE="native"
+RUNNER=""
+RUNNER_ARGS=()
+
+if [[ "$HOST_ARCH" != "aarch64" ]]; then
+    RUN_MODE="qemu"
+    RUNNER=${QEMU_USER:-/usr/bin/qemu-aarch64}
+
+    if [[ ! -x "$RUNNER" ]]; then
+        RUNNER=qemu-aarch64
+    fi
+
+    if [[ -x /usr/bin/aarch64-linux-gnu-gcc ]]; then
+        GCC=/usr/bin/aarch64-linux-gnu-gcc
+        SYSROOT="$($GCC -print-sysroot)"
+        RUNNER_ARGS=(-L "$SYSROOT")
+    fi
+fi
 
 fail_count=0
 
@@ -25,9 +40,15 @@ run_case() {
     stdout_file="$(mktemp)"
     stderr_file="$(mktemp)"
 
+    local actual_exit
     set +e
-    "$QEMU_USER" -L "$SYSROOT" "./$elf" >"$stdout_file" 2>"$stderr_file"
-    local actual_exit=$?
+    if [[ "$RUN_MODE" == "native" ]]; then
+        "./$elf" >"$stdout_file" 2>"$stderr_file"
+        actual_exit=$?
+    else
+        "$RUNNER" "${RUNNER_ARGS[@]}" "./$elf" >"$stdout_file" 2>"$stderr_file"
+        actual_exit=$?
+    fi
     set -e
 
     local actual_stdout

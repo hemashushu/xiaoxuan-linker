@@ -30,7 +30,7 @@ pub enum OSABI {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Machine {
     X86_64,    // EM_X86_64
-    Aarch64,   // EM_AARCH64
+    AArch64,   // EM_AARCH64
     RiscV,     // EM_RISCV
     LoongArch, // EM_LOONGARCH
     // S390,      // EM_S390
@@ -58,7 +58,7 @@ impl From<u16> for Machine {
     fn from(value: u16) -> Self {
         match value {
             elf::EM_X86_64 => Machine::X86_64,
-            elf::EM_AARCH64 => Machine::Aarch64,
+            elf::EM_AARCH64 => Machine::AArch64,
             elf::EM_RISCV => Machine::RiscV,
             elf::EM_LOONGARCH => Machine::LoongArch,
             other => Machine::Other(other),
