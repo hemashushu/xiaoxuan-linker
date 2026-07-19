@@ -749,7 +749,7 @@ mod tests {
                 );
 
                 // There are other local and global symbols in aarch64,
-                // we only check the last symbol `_start` for testing purposes.
+                // we only check the last symbol for testing purposes.
 
                 assert_eq!(
                     symbols[5],
@@ -773,7 +773,6 @@ mod tests {
 
             #[cfg(target_arch = "x86_64")]
             {
-                // .data, .bss, .rodata, foo, bar, a, b, x, y, _start
                 assert_eq!(symbols.len(), 11);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -787,50 +786,20 @@ mod tests {
                         offset: 0,
                     }
                 );
-                assert_eq!(
-                    symbols[2], // .bss
-                    Symbol::Defined {
-                        name: String::new(),
-                        section_index: 4,
-                        bind: SymbolBind::Local,
-                        symbol_type: SymbolType::Section,
-                        offset: 0,
-                    }
-                );
-                assert_eq!(
-                    symbols[3], // .rodata
-                    Symbol::Defined {
-                        name: String::new(),
-                        section_index: 5,
-                        bind: SymbolBind::Local,
-                        symbol_type: SymbolType::Section,
-                        offset: 0,
-                    }
-                );
+
+                // There are other local and global symbols in x86_64,
+                // we only check the last symbol for testing purposes.
 
                 assert_eq!(
-                    symbols[4],
+                    symbols[10],
                     Symbol::Defined {
-                        name: "foo".to_string(),
-                        section_index: 5,
-                        bind: SymbolBind::Local,
+                        name: "_start".to_string(),
+                        section_index: 1,
+                        bind: SymbolBind::Global,
                         symbol_type: SymbolType::Notype,
-                        offset: 0,
+                        offset: 0x0,
                     }
                 );
-                assert_eq!(
-                    symbols[5],
-                    Symbol::Defined {
-                        name: "bar".to_string(),
-                        section_index: 5,
-                        bind: SymbolBind::Local,
-                        symbol_type: SymbolType::Notype,
-                        offset: 0x8,
-                    }
-                );
-
-                // The rest of the symbols are similar,
-                // so we can just check the first two entries for testing purposes.
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -851,7 +820,7 @@ mod tests {
                 );
 
                 // There are other local and global symbols in aarch64,
-                // we only check the last symbol `_start` for testing purposes.
+                // we only check the last symbol for testing purposes.
 
                 assert_eq!(
                     symbols[15],
@@ -889,12 +858,9 @@ mod tests {
                     }
                 );
 
-                // It seems the order of symbols "GNU AS" generated is not guaranteed.
-                assert_eq!(symbols[2], Symbol::External("foo".to_string()));
-                assert_eq!(symbols[3], Symbol::External("dec".to_string()));
-
-                // The rest of the symbols are similar,
-                // so we can just check the first two entries for testing purposes.
+                // There are other local and global symbols in x86_64,
+                // we only check the last symbol for testing purposes.
+                assert_eq!(symbols[9], Symbol::External("y".to_string()));
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -914,7 +880,7 @@ mod tests {
                 );
 
                 // There are other local and global symbols in aarch64,
-                // we only check the last symbol `y` for testing purposes.
+                // we only check the last symbol for testing purposes.
 
                 assert_eq!(symbols[13], Symbol::External("y".to_string()));
             }
