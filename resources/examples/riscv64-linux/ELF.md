@@ -39,6 +39,23 @@ RISC-V64 syscalls use:
 
 1. Global Pointer Setup: Many examples initialize the global pointer (gp) with `la gp, __global_pointer$` to enable efficient access to small data sections.
 
+   Why this is required for freestanding entry points (`_start`):
+   - In normal hosted programs, C runtime startup code initializes `gp` before calling user code.
+   - In freestanding examples (`-nostdlib` with a custom `_start`), there is no runtime startup, so `_start` must initialize `gp` explicitly.
+   - RISC-V linker relaxation may rewrite some PC-relative global accesses into `gp`-relative forms for smaller/faster code.
+   - If `gp` is not initialized first, these rewritten accesses can point to invalid addresses and cause runtime faults (often SIGSEGV on store/load to `.data`/`.bss`).
+
+   Recommended pattern at the start of `_start`:
+
+   ```asm
+   .option push
+   .option norelax
+   la gp, __global_pointer$
+   .option pop
+   ```
+
+   The `.option norelax` guard prevents this setup sequence itself from being relaxed in an unexpected way.
+
 2. Position-Independent Code: While these examples are mostly statically linked, the code uses position-independent addressing patterns where applicable.
 
 3. Relocation: The examples demonstrate various relocation types that the linker must resolve:

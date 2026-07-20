@@ -18,6 +18,8 @@ long y;
 [[noreturn]]
 void _start(void)
 {
+    init_gp();
+
     a = foo - 1; // 11 - 1 = 10
     b = bar + 1; // 13 + 1 = 14
     x = a + b;   // 10 + 14 = 24

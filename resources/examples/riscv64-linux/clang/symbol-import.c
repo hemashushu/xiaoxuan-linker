@@ -15,6 +15,8 @@ extern long inc(long n);
 [[noreturn]]
 void _start(void)
 {
+    init_gp();
+
     a = dec(foo); // a = 11 - 1 = 10
     b = inc(bar); // b = 13 + 1 = 14
     x = a + b;    // x = 10 + 14 = 24

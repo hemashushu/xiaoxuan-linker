@@ -48,3 +48,15 @@ static inline long write(
         (long)buffer,
         size);
 }
+
+static inline void init_gp(void)
+{
+    __asm__ volatile(
+        ".option push\n\t"
+        ".option norelax\n\t"
+        "la gp, __global_pointer$\n\t"
+        ".option pop\n\t"
+        :
+        :
+        : "gp");
+}

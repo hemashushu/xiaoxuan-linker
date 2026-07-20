@@ -49,7 +49,7 @@ pushd clang
 # Compile C files to object files
 $GCC -std=c23 -c -O0 -o minimal.o minimal.c
 $GCC -std=c23 -c -O0 -o function.o function.c
-$GCC -std=c23 -c -O0 -g -Wall -o data.o data.c
+$GCC -std=c23 -c -O0 -o data.o data.c
 $GCC -std=c23 -c -O0 -o symbol-export.o symbol-export.c
 $GCC -std=c23 -c -O0 -o symbol-import.o symbol-import.c
 $GCC -std=c23 -c -O0 -o override-weak.o override-weak.c

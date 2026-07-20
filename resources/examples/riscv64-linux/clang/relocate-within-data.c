@@ -68,6 +68,8 @@ long *const pbar = &bar;
 [[noreturn]]
 void _start(void)
 {
+    init_gp();
+
     long i = *pfoo;   // i = 11
     long j = pdec(i); // j = 10
     foo = j;          // foo = 10
