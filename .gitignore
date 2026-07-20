@@ -15,15 +15,6 @@ output/
 *.a
 *.o
 *.obj
-*.core
 
 .idea/
 .vscode/
-
-!/resources/**/*.elf
-!/resources/**/*.so
-!/resources/**/*.so.1
-!/resources/**/*.so.1.0.0
-!/resources/**/*.a
-!/resources/**/*.o
-!/resources/**/*.obj

@@ -79,17 +79,26 @@ run_case() {
     rm -f "$stdout_file" "$stderr_file"
 }
 
-run_case "minimal.elf" 42 ""
-run_case "function.elf" 0 "Hello, world!"
-run_case "data.elf" 24 ""
-run_case "symbol.elf" 24 ""
-run_case "override.elf" 53 ""
-run_case "relocate-within-data.elf" 24 ""
+run_case "asm/minimal.elf" 42 ""
+run_case "asm/function.elf" 0 "Hello, world!"
+run_case "asm/data.elf" 24 ""
+run_case "asm/symbol.elf" 24 ""
+run_case "asm/override.elf" 53 ""
+run_case "asm/relocate-within-data.elf" 24 ""
 
-run_case "clang/pie.elf" 199 ""
+run_case "clang/minimal.elf" 42 ""
+run_case "clang/function.elf" 0 "Hello, world!"
+run_case "clang/data.elf" 24 ""
+run_case "clang/symbol.elf" 24 ""
+run_case "clang/override.elf" 53 ""
+run_case "clang/relocate-within-data.elf" 24 ""
+run_case "clang/relocate-within-data-no-pie.elf" 24 ""
+
+run_case "clang/relocate-within-tls.elf" 126 ""
+run_case "clang/relocate-within-tls-no-pie.elf" 126 ""
 run_case "clang/tls.elf" 66 ""
 run_case "clang/tls-gd.elf" 66 ""
-run_case "clang/relocate-within-data-tls.elf" 126 ""
+run_case "clang/share.elf" 199 ""
 
 if [[ $fail_count -ne 0 ]]; then
     echo ""
