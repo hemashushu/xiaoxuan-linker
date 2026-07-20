@@ -12,11 +12,15 @@
 // read tls_var_b and my_var, add them together, and return the result as the exit code.
 //
 // TLS model notes:
-//   local-exec  -- offset from thread pointer is a link-time constant (R_X86_64_TPOFF32).
+//   local-exec  -- offset from thread pointer is a link-time constant.
+//                 Typical RISC-V relocations: R_RISCV_TPREL_HI20 + R_RISCV_TPREL_ADD +
+//                 R_RISCV_TPREL_LO12_I / R_RISCV_TPREL_LO12_S.
 //                 Valid for executables (both non-PIE ET_EXEC and PIE ET_DYN). Simplest.
-//   initial-exec -- offset loaded from GOT at runtime (R_X86_64_GOTTPOFF).
+//   initial-exec -- offset loaded from GOT at runtime.
+//                 Typical RISC-V relocations: R_RISCV_TLS_GOT_HI20 + R_RISCV_PCREL_LO12_I.
 //                 Valid for executables and shared libs loaded at startup (not dlopen).
-//   global-dynamic -- calls __tls_get_addr() at runtime (R_X86_64_TLSGD).
+//   global-dynamic -- calls __tls_get_addr() at runtime.
+//                 Typical RISC-V relocations: R_RISCV_TLS_GD_HI20 and its associated pair.
 //                 Required only for dlopen'd shared libs. NOT needed for PIE executables.
 //
 //   PIC/PIE and local-exec are orthogonal: -fpie + -ftls-model=local-exec is valid.
@@ -25,13 +29,13 @@
 //
 // Build commands:
 //
-//   [1.1] Compile to relocatable object (with local-exec model, generates R_X86_64_TPOFF32):
+//   [1.1] Compile to relocatable object (with local-exec model, generates R_RISCV_TPREL_* relocations):
 //     gcc -c -ftls-model=local-exec -o tls.o tls.c
 //
 //   [1.2] Link to non-PIE executable (ET_EXEC):
 //     gcc -ftls-model=local-exec -o tls.elf tls.c
 //
-//   [2.1] Compile with global-dynamic (generates R_X86_64_TLSGD):
+//   [2.1] Compile with global-dynamic (generates R_RISCV_TLS_GD_* relocations):
 //     gcc -c -ftls-model=global-dynamic -o tls_gd.o tls.c
 //
 //   [2.2] Link to non-PIE executable (ET_EXEC):

@@ -349,7 +349,7 @@ fn parse_relocations(
         // Or using `relocation` trait methods:
         //
         // ```rust
-        // let symbol_index =relocation.r_sym(endian, elf.is_mips64el(endian));
+        // let symbol_index = relocation.r_sym(endian, elf.is_mips64el(endian));
         // let relocation_type = relocation.r_type(endian, elf.is_mips64el(endian));
         // ```
 

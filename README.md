@@ -4,7 +4,7 @@ _ANLD_ (XiaoXuan Linker) is a simple, efficient, and modular linker written in R
 
 ## Overview
 
-ANLD is built from the ground up with a focus on clarity and maintainability. It is written in Rust, which guarantees memory safety and portability across platforms. Unlike traditional linkers such as GNU `ld` or LLVM `lld`, ANLD is not a general-purpose replacement, it focuses exclusively on the essential features of a modern application linker, keeping the implementation lightweight and fast.
+ANLD is built from the ground up with a focus on clarity and maintainability. It is written in Rust, which guarantees memory safety and portability across platforms. Unlike traditional linkers such as GNU `ld` or LLVM `lld`, ANLD is not a general-purpose replacement; it focuses exclusively on the essential features of a modern application linker, keeping the implementation lightweight and fast.
 
 ## Features
 

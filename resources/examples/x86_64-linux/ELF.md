@@ -44,7 +44,7 @@
 
 <!-- /code_chunk_output -->
 
-## Calling convention
+## Calling Convention
 
 The x86_64 System V function calling convention:
 

@@ -3,33 +3,30 @@
 
 // ## share-import.c
 //
-// Demonstrates R_X86_64_PLT32 and R_X86_64_GOTPCREL relocations
+// Demonstrates R_RISCV_CALL_PLT and R_RISCV_GOT_HI20 relocations
 //
 // When compiled with -fpic, accesses to extern symbols generate:
 //
-//   R_X86_64_PLT32   (value 4):
-//     A 32-bit PC-relative relocation for a call to an external function.
+//   R_RISCV_CALL_PLT:
+//     A PC-relative relocation for a call to an external function.
 //     The linker resolves it to a PLT stub (for dynamic linking) or directly
 //     to the function's address (for static linking, no PLT needed).
-//     Formula: L + A - P  (L = PLT entry address, A = addend, P = relocation site)
 //
-//   R_X86_64_GOTPCREL (value 9):
-//     A 32-bit PC-relative relocation for a load of an external data symbol's
-//     address from the GOT. The linker fills the GOT slot with the symbol's
-//     final address; the code reads the pointer from the GOT at runtime.
-//     Formula: G + A - P  (G = GOT slot address, A = addend, P = relocation site)
+//   R_RISCV_GOT_HI20 + R_RISCV_PCREL_LO12_I:
+//     A two-instruction GOT access sequence for loading an external data symbol's
+//     address. The linker fills the GOT slot with the symbol's final address;
+//     the code reads the pointer from the GOT at runtime.
 //
-// NOTE: Modern GCC (>= 7) defaults to emitting R_X86_64_GOTPCRELX (value 41) or
-//       R_X86_64_REX_GOTPCRELX (value 42) -- optimized variants that allow the linker
-//       to rewrite the instruction sequence for better performance. To force the
-//       original R_X86_64_GOTPCREL, pass -Wa,-mrelax-relocations=no to GCC.
+// NOTE: RISC-V GCC/assembler may emit R_RISCV_RELAX alongside the main relocation
+//       entries. That is expected and tells the linker it may relax instruction
+//       sequences when safe.
 //
 // Build commands:
 //
-//   Compile to relocatable object (generates R_X86_64_PLT32 + R_X86_64_REX_GOTPCRELX):
+//   Compile to relocatable object (generates R_RISCV_CALL_PLT + R_RISCV_GOT_HI20):
 //     gcc -c -fpic -o share-import.o share-import.c
 //
-//   Compile to relocatable object (force classic R_X86_64_GOTPCREL instead):
+//   Compile to relocatable object (relaxation disabled for inspection):
 //     gcc -c -fpic -Wa,-mrelax-relocations=no -o share-import.o share-import.c
 //
 //   Link into a static executable (for static linker testing):
@@ -55,15 +52,15 @@
 //   Check the dynamic linking info of the executable:
 //     readelf -d share.elf
 
-extern int foo;            // accessed via GOT -> R_X86_64_GOTPCREL (or GOTPCRELX)
-extern int foo_plus(void); // called via PLT  -> R_X86_64_PLT32
+extern int foo;            // accessed via GOT -> R_RISCV_GOT_HI20 + R_RISCV_PCREL_LO12_I
+extern int foo_plus(void); // called via PLT  -> R_RISCV_CALL_PLT
 
 int main(void)
 {
-    // call through PLT: generates R_X86_64_PLT32 for foo_plus
+    // call through PLT: generates R_RISCV_CALL_PLT for foo_plus
     int a = foo_plus(); // 100
 
-    // load via GOT: generates R_X86_64_GOTPCREL (or REX_GOTPCRELX) for foo
+    // load via GOT: generates a GOT access sequence for foo
     int b = foo; // 99
 
     return a + b; // exit code 199

@@ -152,7 +152,7 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
     // |-------------------|--------------------------------|---------|-------|-----------|
     // | 00 phdr           | program headers                | PT_PHDR | R     | 0x8       |
     // | 01 metadata       | data before first code section | PT_LOAD | R     | 0x1000    |
-    // | 02 text           | .init`, .text, .finit          | PT_LOAD | R E   | 0x1000    |
+    // | 02 text           | .init, .text, .finit           | PT_LOAD | R E   | 0x1000    |
     // | 03 read-only data | .rodata                        | PT_LOAD | R     | 0x1000    |
     // | 04 writable data  | .tdata, .tbss, .data, .bss     | PT_LOAD | R W   | 0x1000    |
     // | 05 tls            | .tdata, .tbss                  | PT_TLS  | R     | 0x8       |
