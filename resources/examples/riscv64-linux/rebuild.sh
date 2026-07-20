@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
-
-# initialize the build environment
-AS=/usr/bin/riscv64-linux-gnu-as
-LD=/usr/bin/riscv64-linux-gnu-ld
-QEMU_USER=/usr/bin/qemu-riscv64
-GCC=/usr/bin/riscv64-linux-gnu-gcc
-
 set -euxo pipefail
+
+if [[ -x /usr/bin/riscv64-linux-gnu-as ]]; then
+    AS=${AS:-/usr/bin/riscv64-linux-gnu-as}
+else
+    AS=${AS:-as}
+fi
+
+if [[ -x /usr/bin/riscv64-linux-gnu-ld ]]; then
+    LD=${LD:-/usr/bin/riscv64-linux-gnu-ld}
+else
+    LD=${LD:-ld}
+fi
+
+if [[ -x /usr/bin/riscv64-linux-gnu-gcc ]]; then
+    GCC=${GCC:-/usr/bin/riscv64-linux-gnu-gcc}
+else
+    GCC=${GCC:-gcc}
+fi
 
 # Clean up old object files and executables
 rm ./*.o ./*.elf || true
@@ -30,14 +41,15 @@ $LD -o override.elf override-weak.o override-strong.o
 $LD -o relocate-within-data.elf relocate-within-data.o
 
 # Compile C files to object files
-$GCC -c -O0 -fno-pie -o relocate-within-data-tls.o relocate-within-data-tls.c
+$GCC -c -O0 -o relocate-within-data-tls.o relocate-within-data-tls.c
+$GCC -c -O0 -fno-pie -o relocate-within-data-tls-no-pie.o relocate-within-data-tls.c
 $GCC -c -O0 -ftls-model=local-exec -o tls.o tls.c
 $GCC -c -O0 -ftls-model=global-dynamic -o tls-gd.o tls.c
 $GCC -c -O0 -o pie-export.o pie-export.c
 $GCC -c -O0 -o pie-import.o pie-import.c
 
 # Link object files to executables
-$GCC -O0 -o relocate-within-data-tls.elf relocate-within-data-tls.c
-$GCC -O0 -ftls-model=local-exec -o tls.elf tls.c
-$GCC -O0 -ftls-model=global-dynamic -o tls-gd.elf tls.c
+$GCC -O0 -o relocate-within-data-tls.elf relocate-within-data-tls.o
+$GCC -O0 -ftls-model=local-exec -o tls.elf tls.o
+$GCC -O0 -ftls-model=global-dynamic -o tls-gd.elf tls-gd.o
 $GCC -O0 -o pie.elf pie-export.o pie-import.o

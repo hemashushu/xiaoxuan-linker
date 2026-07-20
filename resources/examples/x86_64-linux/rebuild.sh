@@ -2,21 +2,21 @@
 set -euxo pipefail
 
 if [[ -x /usr/bin/x86_64-linux-gnu-as ]]; then
-	AS=${AS:-/usr/bin/x86_64-linux-gnu-as}
+    AS=${AS:-/usr/bin/x86_64-linux-gnu-as}
 else
-	AS=${AS:-as}
+    AS=${AS:-as}
 fi
 
 if [[ -x /usr/bin/x86_64-linux-gnu-ld ]]; then
-	LD=${LD:-/usr/bin/x86_64-linux-gnu-ld}
+    LD=${LD:-/usr/bin/x86_64-linux-gnu-ld}
 else
-	LD=${LD:-ld}
+    LD=${LD:-ld}
 fi
 
 if [[ -x /usr/bin/x86_64-linux-gnu-gcc ]]; then
-	GCC=${GCC:-/usr/bin/x86_64-linux-gnu-gcc}
+    GCC=${GCC:-/usr/bin/x86_64-linux-gnu-gcc}
 else
-	GCC=${GCC:-gcc}
+    GCC=${GCC:-gcc}
 fi
 
 # Clean up old object files and executables
