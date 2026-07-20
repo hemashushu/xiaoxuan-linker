@@ -3,34 +3,30 @@
 
 // ## share-import.c
 //
-// Demonstrates R_X86_64_PLT32 and R_X86_64_GOTPCREL relocations
+// Demonstrates AArch64 PLT/GOT relocations for external symbols
 //
 // When compiled with -fpic, accesses to extern symbols generate:
 //
-//   R_X86_64_PLT32   (value 4):
-//     A 32-bit PC-relative relocation for a call to an external function.
+//   R_AARCH64_CALL26:
+//     A PC-relative branch relocation for a call to an external function.
 //     The linker resolves it to a PLT stub (for dynamic linking) or directly
 //     to the function's address (for static linking, no PLT needed).
-//     Formula: L + A - P  (L = PLT entry address, A = addend, P = relocation site)
 //
-//   R_X86_64_GOTPCREL (value 9):
-//     A 32-bit PC-relative relocation for a load of an external data symbol's
-//     address from the GOT. The linker fills the GOT slot with the symbol's
-//     final address; the code reads the pointer from the GOT at runtime.
-//     Formula: G + A - P  (G = GOT slot address, A = addend, P = relocation site)
+//   R_AARCH64_ADR_GOT_PAGE + R_AARCH64_LD64_GOT_LO12_NC:
+//     A two-instruction GOT access sequence for loading an external data symbol's
+//     address. The linker fills the GOT slot with the symbol's final address;
+//     the code reads that pointer from the GOT at runtime.
 //
-// NOTE: Modern GCC (>= 7) defaults to emitting R_X86_64_GOTPCRELX (value 41) or
-//       R_X86_64_REX_GOTPCRELX (value 42) -- optimized variants that allow the linker
-//       to rewrite the instruction sequence for better performance. To force the
-//       original R_X86_64_GOTPCREL, pass -Wa,-mrelax-relocations=no to GCC.
+// NOTE: On AArch64, the compiler typically emits ADRP/ADD or ADRP/LDR relocation
+//       pairs rather than x86-64 GOTPCRELX/REX_GOTPCRELX forms.
 //
 // Build commands:
 //
-//   Compile to relocatable object (generates R_X86_64_PLT32 + R_X86_64_REX_GOTPCRELX):
+//   Compile to relocatable object (generates AArch64 CALL26 and GOT relocation pairs):
 //     gcc -c -fpic -o share-import.o share-import.c
 //
-//   Compile to relocatable object (force classic R_X86_64_GOTPCREL instead):
-//     gcc -c -fpic -Wa,-mrelax-relocations=no -o share-import.o share-import.c
+//   Inspect relocations in the object file:
+//     readelf -r share-import.o
 //
 //   Link into a static executable (for static linker testing):
 //     gcc -static -o share.elf share-export.o share-import.o
@@ -55,16 +51,17 @@
 //   Check the dynamic linking info of the executable:
 //     readelf -d share.elf
 
-extern int foo;            // accessed via GOT -> R_X86_64_GOTPCREL (or GOTPCRELX)
-extern int foo_plus(void); // called via PLT  -> R_X86_64_PLT32
+extern int foo;            // accessed via GOT -> R_AARCH64_ADR_GOT_PAGE + R_AARCH64_LD64_GOT_LO12_NC
+extern int foo_plus(void); // called via PLT  -> R_AARCH64_CALL26
 
 int main(void)
 {
-    // call through PLT: generates R_X86_64_PLT32 for foo_plus
+    // call through PLT: generates R_AARCH64_CALL26 for foo_plus
     int a = foo_plus(); // 100
 
-    // load via GOT: generates R_X86_64_GOTPCREL (or REX_GOTPCRELX) for foo
+    // load via GOT: generates a GOT relocation pair for foo on AArch64
     int b = foo; // 99
+
 
     return a + b; // exit code 199
 }

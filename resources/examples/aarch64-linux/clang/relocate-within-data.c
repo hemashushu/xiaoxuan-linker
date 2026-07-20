@@ -3,7 +3,7 @@
 
 // ## relocate-within-data.c
 //
-// Demonstrates pointer-typed globals that produce R_X86_64_64 relocation
+// Demonstrates pointer-typed globals that produce R_AARCH64_ABS64 relocation
 // entries in three different sections of the relocatable object file:
 //
 // - .rela.rodata -- const pointer stored in .rodata

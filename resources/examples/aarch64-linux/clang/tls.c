@@ -12,11 +12,17 @@
 // read tls_var_b and my_var, add them together, and return the result as the exit code.
 //
 // TLS model notes:
-//   local-exec  -- offset from thread pointer is a link-time constant (R_X86_64_TPOFF32).
+//   local-exec  -- offset from thread pointer is resolved at link time.
+//                 Typical AArch64 relocations are
+//                 R_AARCH64_TLSLE_ADD_TPREL_HI12 + R_AARCH64_TLSLE_ADD_TPREL_LO12_NC.
 //                 Valid for executables (both non-PIE ET_EXEC and PIE ET_DYN). Simplest.
-//   initial-exec -- offset loaded from GOT at runtime (R_X86_64_GOTTPOFF).
+//   initial-exec -- offset loaded from GOT at runtime.
+//                 Typical AArch64 relocations are
+//                 R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21 + R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC.
 //                 Valid for executables and shared libs loaded at startup (not dlopen).
-//   global-dynamic -- calls __tls_get_addr() at runtime (R_X86_64_TLSGD).
+//   global-dynamic -- resolves TLS addresses via runtime helper sequence.
+//                 Typical AArch64 relocations are TLSDESC-family entries
+//                 (for example R_AARCH64_TLSDESC_*).
 //                 Required only for dlopen'd shared libs. NOT needed for PIE executables.
 //
 //   PIC/PIE and local-exec are orthogonal: -fpie + -ftls-model=local-exec is valid.
@@ -25,13 +31,13 @@
 //
 // Build commands:
 //
-//   [1.1] Compile to relocatable object (with local-exec model, generates R_X86_64_TPOFF32):
+//   [1.1] Compile to relocatable object (with local-exec model, generates AArch64 TLSLE relocations):
 //     gcc -c -ftls-model=local-exec -o tls.o tls.c
 //
 //   [1.2] Link to non-PIE executable (ET_EXEC):
 //     gcc -ftls-model=local-exec -o tls.elf tls.c
 //
-//   [2.1] Compile with global-dynamic (generates R_X86_64_TLSGD):
+//   [2.1] Compile with global-dynamic (generates TLSDESC-family relocations on AArch64):
 //     gcc -c -ftls-model=global-dynamic -o tls_gd.o tls.c
 //
 //   [2.2] Link to non-PIE executable (ET_EXEC):
