@@ -21,6 +21,7 @@ fi
 
 # Clean up old object files and executables
 rm ./*.o ./*.elf || true
+rm ./clang/*.o ./clang/*.elf || true
 
 # Compile assembly files to object files
 $AS -o minimal.o minimal.s
@@ -39,6 +40,8 @@ $LD -o data.elf data.o
 $LD -o symbol.elf symbol-export.o symbol-import.o
 $LD -o override.elf override-weak.o override-strong.o
 $LD -o relocate-within-data.elf relocate-within-data.o
+
+cd clang
 
 # Compile C files to object files
 $GCC -c -O0 -o relocate-within-data-tls.o relocate-within-data-tls.c

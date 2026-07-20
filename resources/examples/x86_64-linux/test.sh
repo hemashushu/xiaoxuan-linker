@@ -86,10 +86,10 @@ run_case "symbol.elf" 24 ""
 run_case "override.elf" 53 ""
 run_case "relocate-within-data.elf" 24 ""
 
-run_case "pie.elf" 199 ""
-run_case "tls.elf" 66 ""
-run_case "tls-gd.elf" 66 ""
-run_case "relocate-within-data-tls.elf" 126 ""
+run_case "clang/pie.elf" 199 ""
+run_case "clang/tls.elf" 66 ""
+run_case "clang/tls-gd.elf" 66 ""
+run_case "clang/relocate-within-data-tls.elf" 126 ""
 
 if [[ $fail_count -ne 0 ]]; then
     echo ""
