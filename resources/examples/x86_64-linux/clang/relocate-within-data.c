@@ -41,6 +41,8 @@
 //   - PIE generates a position-independent executable, which means the entire program
 //     can be loaded at any address in memory.
 
+#include "common.in"
+
 // .data
 long foo = 11;
 long bar = 13;
@@ -62,30 +64,6 @@ long (*pinc)(long) = inc;
 // .rodata
 long *const pfoo = &foo;
 long *const pbar = &bar;
-
-#define SYS_exit 60
-
-static inline long __syscall1(long nr, long arg1)
-{
-    long ret;
-    __asm__ volatile(
-        "syscall"
-        : "=a"(ret)
-        : "a"(nr),
-          "D"(arg1)
-        : "rcx", "r11", "memory");
-    return ret;
-}
-
-[[noreturn]]
-static inline void exit(int status)
-{
-    (void)__syscall1(SYS_exit, (long)status);
-
-    for (;;)
-    {
-    }
-}
 
 [[noreturn]]
 void _start(void)

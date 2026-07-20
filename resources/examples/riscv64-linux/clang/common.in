@@ -1,0 +1,50 @@
+// Architecture-specific common code for RISC-V 64 Linux.
+
+#define SYS_write 64
+#define SYS_exit 93
+
+#define __asm_syscall(...) \
+    __asm__ volatile(      \
+        "ecall\n\t"        \
+        : "=r"(a0)         \
+        : __VA_ARGS__      \
+        : "memory");       \
+    return a0;
+
+static inline long __syscall1(long n, long a)
+{
+    register long a7 __asm__("a7") = n;
+    register long a0 __asm__("a0") = a;
+    __asm_syscall("r"(a7), "0"(a0))
+}
+
+static inline long __syscall3(long n, long a, long b, long c)
+{
+    register long a7 __asm__("a7") = n;
+    register long a0 __asm__("a0") = a;
+    register long a1 __asm__("a1") = b;
+    register long a2 __asm__("a2") = c;
+    __asm_syscall("r"(a7), "0"(a0), "r"(a1), "r"(a2))
+}
+
+[[noreturn]]
+static inline void exit(int status)
+{
+    (void)__syscall1(SYS_exit, (long)status);
+
+    for (;;)
+    {
+    }
+}
+
+static inline long write(
+    int fd,
+    const void *buffer,
+    long size)
+{
+    return __syscall3(
+        SYS_write,
+        (long)fd,
+        (long)buffer,
+        size);
+}

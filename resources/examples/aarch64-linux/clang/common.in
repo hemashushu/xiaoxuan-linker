@@ -1,0 +1,50 @@
+// Architecture-specific common code for AArch64 Linux.
+
+#define SYS_write 64
+#define SYS_exit 93
+
+#define __asm_syscall(...) \
+    __asm__ volatile(      \
+        "svc 0"            \
+        : "=r"(x0)         \
+        : __VA_ARGS__      \
+        : "memory", "cc"); \
+    return x0;
+
+static inline long __syscall1(long nr, long arg1)
+{
+    register long x8 __asm__("x8") = nr;
+    register long x0 __asm__("x0") = arg1;
+    __asm_syscall("r"(x8), "0"(x0));
+}
+
+static inline long __syscall3(long nr, long arg1, long arg2, long arg3)
+{
+    register long x8 __asm__("x8") = nr;
+    register long x0 __asm__("x0") = arg1;
+    register long x1 __asm__("x1") = arg2;
+    register long x2 __asm__("x2") = arg3;
+    __asm_syscall("r"(x8), "0"(x0), "r"(x1), "r"(x2));
+}
+
+[[noreturn]]
+static inline void exit(int status)
+{
+    (void)__syscall1(SYS_exit, (long)status);
+
+    for (;;)
+    {
+    }
+}
+
+static inline long write(
+    int fd,
+    const void *buffer,
+    long size)
+{
+    return __syscall3(
+        SYS_write,
+        (long)fd,
+        (long)buffer,
+        size);
+}

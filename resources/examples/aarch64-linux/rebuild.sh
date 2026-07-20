@@ -26,14 +26,14 @@ rm ./clang/*.o ./clang/*.so ./clang/*.elf || true
 pushd asm
 
 # Compile assembly files to object files
-$AS --64 -o minimal.o minimal.s
-$AS --64 -o function.o function.s
-$AS --64 -o data.o data.s
-$AS --64 -o symbol-export.o symbol-export.s
-$AS --64 -o symbol-import.o symbol-import.s
-$AS --64 -o override-weak.o override-weak.s
-$AS --64 -o override-strong.o override-strong.s
-$AS --64 -o relocate-within-data.o relocate-within-data.s
+$AS -o minimal.o minimal.s
+$AS -o function.o function.s
+$AS -o data.o data.s
+$AS -o symbol-export.o symbol-export.s
+$AS -o symbol-import.o symbol-import.s
+$AS -o override-weak.o override-weak.s
+$AS -o override-strong.o override-strong.s
+$AS -o relocate-within-data.o relocate-within-data.s
 
 # Link object files to executables
 $LD -o minimal.elf minimal.o
