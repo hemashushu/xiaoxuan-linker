@@ -326,10 +326,31 @@ pub fn read_relocatable<'a>(binary: &'a [u8]) -> Result<RelocatableModule<'a>, L
 mod tests {
     use crate::elf::relocatable::read_relocatable;
 
+    #[cfg(target_arch = "x86_64")]
+    fn get_arch_dir_name() -> &'static str {
+        "x86_64-linux"
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn get_arch_dir_name() -> &'static str {
+        "aarch64-linux"
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn get_arch_dir_name() -> &'static str {
+        "riscv64-linux"
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    fn get_arch_dir_name() -> &'static str {
+        "loongarch64-linux"
+    }
+
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
-            .join("resources/examples/x86_64-linux")
+            .join("resources/examples")
+            .join(get_arch_dir_name())
             .join(file_name);
 
         std::fs::read(file_path).unwrap()
@@ -338,56 +359,56 @@ mod tests {
     #[test]
     fn test_read_minimal() {
         let binary = get_example_file_binary("minimal.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_function() {
         let binary = get_example_file_binary("function.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_data() {
         let binary = get_example_file_binary("data.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_symbol_export() {
         let binary = get_example_file_binary("symbol-export.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_symbol_import() {
         let binary = get_example_file_binary("symbol-import.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_override_weak() {
         let binary = get_example_file_binary("override-weak.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_override_strong() {
         let binary = get_example_file_binary("override-strong.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_relocate_within_data() {
         let binary = get_example_file_binary("relocate-within-data.o");
-        let module = read_relocatable(&binary).unwrap();
-        println!("{:#?}", module);
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
     }
 }

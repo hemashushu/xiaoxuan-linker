@@ -384,6 +384,13 @@ fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, Lin
         object::elf::R_X86_64_32 => Ok(RelocationType::R_X86_64_32),
         object::elf::R_X86_64_TPOFF32 => Ok(RelocationType::R_X86_64_TPOFF32),
         object::elf::R_X86_64_PLT32 => Ok(RelocationType::R_X86_64_PLT32),
+        object::elf::R_AARCH64_ADR_PREL_PG_HI21 => Ok(RelocationType::R_AARCH64_ADR_PREL_PG_HI21),
+        object::elf::R_AARCH64_LDST64_ABS_LO12_NC => {
+            Ok(RelocationType::R_AARCH64_LDST64_ABS_LO12_NC)
+        }
+        object::elf::R_AARCH64_ADD_ABS_LO12_NC => Ok(RelocationType::R_AARCH64_ADD_ABS_LO12_NC),
+        object::elf::R_AARCH64_CALL26 => Ok(RelocationType::R_AARCH64_CALL26),
+        object::elf::R_AARCH64_ABS64 => Ok(RelocationType::R_AARCH64_ABS64),
         _ => Err(LinkerError::new(&format!(
             "Unsupported relocation type: {relocation_type_raw}"
         ))),
@@ -470,6 +477,11 @@ mod tests {
     #[cfg(target_arch = "riscv64")]
     fn get_arch_dir_name() -> &'static str {
         "riscv64-linux"
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    fn get_arch_dir_name() -> &'static str {
+        "loongarch64-linux"
     }
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
@@ -593,8 +605,7 @@ mod tests {
                 );
 
                 // Fields such as `size`, `binary`, `align`, and `offset` are not guaranteed
-                // to be the same across different versions of the assembler and platforms,
-                // so check these fields manually.
+                // to be the same across different versions of the assembler and platforms.
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -667,10 +678,6 @@ mod tests {
                         SectionType::Strtab,   // .shstrtab
                     ]
                 );
-
-                // Fields such as `size`, `binary`, `align`, and `offset` are not guaranteed
-                // to be the same across different versions of the assembler and platforms,
-                // so check these fields manually.
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -736,7 +743,12 @@ mod tests {
             #[cfg(target_arch = "aarch64")]
             {
                 assert_eq!(symbols.len(), 6);
+
+                // There are several symbols,
+                // check certain symbols for testing purposes only.
+
                 assert_eq!(symbols[0], Symbol::Other);
+
                 assert_eq!(
                     symbols[1], // .text
                     Symbol::Defined {
@@ -747,9 +759,6 @@ mod tests {
                         offset: 0,
                     }
                 );
-
-                // There are other local and global symbols in aarch64,
-                // we only check the last symbol for testing purposes.
 
                 assert_eq!(
                     symbols[5],
@@ -787,9 +796,6 @@ mod tests {
                     }
                 );
 
-                // There are other local and global symbols in x86_64,
-                // we only check the last symbol for testing purposes.
-
                 assert_eq!(
                     symbols[10],
                     Symbol::Defined {
@@ -818,9 +824,6 @@ mod tests {
                         offset: 0,
                     }
                 );
-
-                // There are other local and global symbols in aarch64,
-                // we only check the last symbol for testing purposes.
 
                 assert_eq!(
                     symbols[15],
@@ -858,8 +861,6 @@ mod tests {
                     }
                 );
 
-                // There are other local and global symbols in x86_64,
-                // we only check the last symbol for testing purposes.
                 assert_eq!(symbols[9], Symbol::External("y".to_string()));
             }
 
@@ -878,9 +879,6 @@ mod tests {
                         offset: 0,
                     }
                 );
-
-                // There are other local and global symbols in aarch64,
-                // we only check the last symbol for testing purposes.
 
                 assert_eq!(symbols[13], Symbol::External("y".to_string()));
             }
@@ -936,9 +934,6 @@ mod tests {
                     }
                 );
 
-                // There are other local and global symbols in aarch64,
-                // we only check the last symbol `y` for testing purposes.
-
                 assert_eq!(
                     symbols[6],
                     Symbol::Defined {
@@ -972,36 +967,70 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            assert_eq!(relocation_sections.len(), 1); // .rela.text
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_eq!(relocation_sections.len(), 1); // .rela.text
 
-            let relocation_section = &relocation_sections[0];
-            assert_eq!(relocation_section.name, ".rela.text");
-            assert_eq!(relocation_section.target_section_index, 1); // index of `.text` section
+                let relocation_section = &relocation_sections[0];
+                assert_eq!(relocation_section.name, ".rela.text");
+                assert_eq!(relocation_section.target_section_index, 1); // index of `.text` section
 
-            let relocations = &relocation_section.relocations;
-            assert_eq!(relocations.len(), 10);
+                let relocations = &relocation_section.relocations;
+                assert_eq!(relocations.len(), 10);
 
-            assert_eq!(
-                relocations[0],
-                Relocation {
-                    relocation_type: RelocationType::R_X86_64_PC32,
-                    placeholder_offset: 0x3,
-                    symbol_index: 3, // section symbol of `.rodata` section
-                    addend: -4
-                }
-            );
-            assert_eq!(
-                relocations[1],
-                Relocation {
-                    relocation_type: RelocationType::R_X86_64_PC32,
-                    placeholder_offset: 0xe,
-                    symbol_index: 1, // section symbol of `.data` section
-                    addend: -4
-                }
-            );
+                // There are several relocation entries,
+                // check certain entries for testing purposes only.
 
-            // The rest of the relocation entries are similar,
-            // so we can just check the first two entries for testing purposes.
+                assert_eq!(
+                    relocations[0],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_PC32,
+                        placeholder_offset: 0x3,
+                        symbol_index: 3, // section symbol of `.rodata` section
+                        addend: -4
+                    }
+                );
+                assert_eq!(
+                    relocations[1],
+                    Relocation {
+                        relocation_type: RelocationType::R_X86_64_PC32,
+                        placeholder_offset: 0xe,
+                        symbol_index: 1, // section symbol of `.data` section
+                        addend: -4
+                    }
+                );
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                assert_eq!(relocation_sections.len(), 1); // .rela.text
+
+                let relocation_section = &relocation_sections[0];
+                assert_eq!(relocation_section.name, ".rela.text");
+                assert_eq!(relocation_section.target_section_index, 1); // index of `.text` section
+
+                let relocations = &relocation_section.relocations;
+                assert_eq!(relocations.len(), 20);
+
+                assert_eq!(
+                    relocations[0],
+                    Relocation {
+                        relocation_type: RelocationType::R_AARCH64_ADR_PREL_PG_HI21,
+                        placeholder_offset: 0x0,
+                        symbol_index: 4, // section symbol of `.rodata` section
+                        addend: 0
+                    }
+                );
+                assert_eq!(
+                    relocations[1],
+                    Relocation {
+                        relocation_type: RelocationType::R_AARCH64_LDST64_ABS_LO12_NC,
+                        placeholder_offset: 0x4,
+                        symbol_index: 4, // section symbol of `.rodata` section
+                        addend: 0
+                    }
+                );
+            }
         }
 
         // Read relocation sections of `relocate-within-data.o`
@@ -1011,96 +1040,188 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            assert_eq!(relocation_sections.len(), 3);
-
-            // `.rela.text`
+            #[cfg(target_arch = "x86_64")]
             {
-                let relocation_section = &relocation_sections[0];
-                assert_eq!(relocation_section.name, ".rela.text");
-                assert_eq!(relocation_section.target_section_index, 1); // `.text` section index
+                assert_eq!(relocation_sections.len(), 3);
 
-                let relocations = &relocation_section.relocations;
-                assert_eq!(relocations.len(), 6);
+                // `.rela.text`
+                {
+                    let relocation_section = &relocation_sections[0];
+                    assert_eq!(relocation_section.name, ".rela.text");
+                    assert_eq!(relocation_section.target_section_index, 1); // `.text` section index
 
-                assert_eq!(
-                    relocations[0],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_PC32,
-                        placeholder_offset: 0x13,
-                        symbol_index: 4, // section symbol of `.rodata` section
-                        addend: -4
-                    }
-                );
-                assert_eq!(
-                    relocations[1],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_PC32,
-                        placeholder_offset: 0x1d,
-                        symbol_index: 1, // section symbol of `.data` section
-                        addend: 0xc
-                    }
-                );
+                    let relocations = &relocation_section.relocations;
+                    assert_eq!(relocations.len(), 6);
 
-                // The rest of the relocation entries are similar,
-                // so we can just check the first two entries for testing purposes.
+                    assert_eq!(
+                        relocations[0],
+                        Relocation {
+                            relocation_type: RelocationType::R_X86_64_PC32,
+                            placeholder_offset: 0x13,
+                            symbol_index: 4, // section symbol of `.rodata` section
+                            addend: -4
+                        }
+                    );
+                    assert_eq!(
+                        relocations[1],
+                        Relocation {
+                            relocation_type: RelocationType::R_X86_64_PC32,
+                            placeholder_offset: 0x1d,
+                            symbol_index: 1, // section symbol of `.data` section
+                            addend: 0xc
+                        }
+                    );
+                }
+
+                // `.rela.data`
+                {
+                    let relocation_section = &relocation_sections[1];
+                    assert_eq!(relocation_section.name, ".rela.data");
+                    assert_eq!(relocation_section.target_section_index, 3); // `.data` section index
+
+                    let relocations = &relocation_section.relocations;
+                    assert_eq!(relocations.len(), 2);
+
+                    assert_eq!(
+                        relocations[0],
+                        Relocation {
+                            relocation_type: RelocationType::R_X86_64_64,
+                            placeholder_offset: 0x10,
+                            symbol_index: 0x9, // symbol `dec`
+                            addend: 0
+                        }
+                    );
+                    assert_eq!(
+                        relocations[1],
+                        Relocation {
+                            relocation_type: RelocationType::R_X86_64_64,
+                            placeholder_offset: 0x18,
+                            symbol_index: 0xa, // symbol `inc`
+                            addend: 0
+                        }
+                    );
+                }
+
+                // `.rela.rodata`
+                {
+                    let relocation_section = &relocation_sections[2];
+                    assert_eq!(relocation_section.name, ".rela.rodata");
+                    assert_eq!(relocation_section.target_section_index, 6); // `.rodata` section index
+
+                    let relocations = &relocation_section.relocations;
+                    assert_eq!(relocations.len(), 2);
+
+                    assert_eq!(
+                        relocations[0],
+                        Relocation {
+                            relocation_type: RelocationType::R_X86_64_64,
+                            placeholder_offset: 0,
+                            symbol_index: 7, // symbol `foo`
+                            addend: 0
+                        }
+                    );
+                    assert_eq!(
+                        relocations[1],
+                        Relocation {
+                            relocation_type: RelocationType::R_X86_64_64,
+                            placeholder_offset: 0x8,
+                            symbol_index: 8, // symbol `bar`
+                            addend: 0
+                        }
+                    );
+                }
             }
 
-            // `.rela.data`
+            #[cfg(target_arch = "aarch64")]
             {
-                let relocation_section = &relocation_sections[1];
-                assert_eq!(relocation_section.name, ".rela.data");
-                assert_eq!(relocation_section.target_section_index, 3); // `.data` section index
+                assert_eq!(relocation_sections.len(), 3);
 
-                let relocations = &relocation_section.relocations;
-                assert_eq!(relocations.len(), 2);
+                // `.rela.text`
+                {
+                    let relocation_section = &relocation_sections[0];
+                    assert_eq!(relocation_section.name, ".rela.text");
+                    assert_eq!(relocation_section.target_section_index, 1); // `.text` section index
 
-                assert_eq!(
-                    relocations[0],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_64,
-                        placeholder_offset: 0x10,
-                        symbol_index: 0x9, // symbol `dec`
-                        addend: 0
-                    }
-                );
-                assert_eq!(
-                    relocations[1],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_64,
-                        placeholder_offset: 0x18,
-                        symbol_index: 0xa, // symbol `inc`
-                        addend: 0
-                    }
-                );
-            }
+                    let relocations = &relocation_section.relocations;
+                    assert_eq!(relocations.len(), 12);
 
-            // `.rela.rodata`
-            {
-                let relocation_section = &relocation_sections[2];
-                assert_eq!(relocation_section.name, ".rela.rodata");
-                assert_eq!(relocation_section.target_section_index, 6); // `.rodata` section index
+                    assert_eq!(
+                        relocations[0],
+                        Relocation {
+                            relocation_type: RelocationType::R_AARCH64_ADR_PREL_PG_HI21,
+                            placeholder_offset: 0x10,
+                            symbol_index: 0xb, // section symbol of `.rodata` section
+                            addend: 0
+                        }
+                    );
+                    assert_eq!(
+                        relocations[1],
+                        Relocation {
+                            relocation_type: RelocationType::R_AARCH64_LDST64_ABS_LO12_NC,
+                            placeholder_offset: 0x14,
+                            symbol_index: 0xb, // section symbol of `.rodata` section
+                            addend: 0
+                        }
+                    );
+                }
 
-                let relocations = &relocation_section.relocations;
-                assert_eq!(relocations.len(), 2);
+                // `.rela.data`
+                {
+                    let relocation_section = &relocation_sections[1];
+                    assert_eq!(relocation_section.name, ".rela.data");
+                    assert_eq!(relocation_section.target_section_index, 3); // `.data` section index
 
-                assert_eq!(
-                    relocations[0],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_64,
-                        placeholder_offset: 0,
-                        symbol_index: 7, // symbol `foo`
-                        addend: 0
-                    }
-                );
-                assert_eq!(
-                    relocations[1],
-                    Relocation {
-                        relocation_type: RelocationType::R_X86_64_64,
-                        placeholder_offset: 0x8,
-                        symbol_index: 8, // symbol `bar`
-                        addend: 0
-                    }
-                );
+                    let relocations = &relocation_section.relocations;
+                    assert_eq!(relocations.len(), 2);
+
+                    assert_eq!(
+                        relocations[0],
+                        Relocation {
+                            relocation_type: RelocationType::R_AARCH64_ABS64,
+                            placeholder_offset: 0x20,
+                            symbol_index: 0x13, // symbol `dec`
+                            addend: 0
+                        }
+                    );
+                    assert_eq!(
+                        relocations[1],
+                        Relocation {
+                            relocation_type: RelocationType::R_AARCH64_ABS64,
+                            placeholder_offset: 0x28,
+                            symbol_index: 0x14, // symbol `inc`
+                            addend: 0
+                        }
+                    );
+                }
+
+                // `.rela.rodata`
+                {
+                    let relocation_section = &relocation_sections[2];
+                    assert_eq!(relocation_section.name, ".rela.rodata");
+                    assert_eq!(relocation_section.target_section_index, 6); // `.rodata` section index
+
+                    let relocations = &relocation_section.relocations;
+                    assert_eq!(relocations.len(), 2);
+
+                    assert_eq!(
+                        relocations[0],
+                        Relocation {
+                            relocation_type: RelocationType::R_AARCH64_ABS64,
+                            placeholder_offset: 0,
+                            symbol_index: 2, // symbol `.data`
+                            addend: 0
+                        }
+                    );
+                    assert_eq!(
+                        relocations[1],
+                        Relocation {
+                            relocation_type: RelocationType::R_AARCH64_ABS64,
+                            placeholder_offset: 0x8,
+                            symbol_index: 2, // symbol `.data`
+                            addend: 8
+                        }
+                    );
+                }
             }
         }
     }
@@ -1124,36 +1245,57 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            assert_eq!(program_headers.len(), 5);
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_eq!(program_headers.len(), 5);
 
-            assert_eq!(
-                program_headers[0],
-                ProgramHeader {
-                    segment_type: SegmentType::Load,
-                    segment_flags: vec![SegmentFlag::Read,],
-                    offset: 0,
-                    virtual_address: 0x400000,
-                    file_size: 0x158,
-                    memory_size: 0x158,
-                    align: 0x1000
-                }
-            );
+                // There are several program headers,
+                // check certain entries for testing purposes only.
 
-            assert_eq!(
-                program_headers[1],
-                ProgramHeader {
-                    segment_type: SegmentType::Load,
-                    segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-                    offset: 0x1000,
-                    virtual_address: 0x401000,
-                    file_size: 0x10,
-                    memory_size: 0x10,
-                    align: 0x1000
-                }
-            );
+                assert_eq!(
+                    program_headers[0],
+                    ProgramHeader {
+                        segment_type: SegmentType::Load,
+                        segment_flags: vec![SegmentFlag::Read,],
+                        offset: 0,
+                        virtual_address: 0x400000,
+                        file_size: 0x158,
+                        memory_size: 0x158,
+                        align: 0x1000
+                    }
+                );
 
-            // The rest of the program headers are similar,
-            // so we can just check the first two entries for testing purposes.
+                assert_eq!(
+                    program_headers[1],
+                    ProgramHeader {
+                        segment_type: SegmentType::Load,
+                        segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
+                        offset: 0x1000,
+                        virtual_address: 0x401000,
+                        file_size: 0x10,
+                        memory_size: 0x10,
+                        align: 0x1000
+                    }
+                );
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                assert_eq!(program_headers.len(), 1);
+
+                assert_eq!(
+                    program_headers[0],
+                    ProgramHeader {
+                        segment_type: SegmentType::Load,
+                        segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
+                        offset: 0,
+                        virtual_address: 0x400000,
+                        file_size: 0x84,
+                        memory_size: 0x84,
+                        align: 0x10000
+                    }
+                );
+            }
         }
 
         // Read program headers of `data.elf`
@@ -1163,36 +1305,67 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            assert_eq!(program_headers.len(), 6);
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_eq!(program_headers.len(), 6);
 
-            assert_eq!(
-                program_headers[0],
-                ProgramHeader {
-                    segment_type: SegmentType::Load,
-                    segment_flags: vec![SegmentFlag::Read,],
-                    offset: 0,
-                    virtual_address: 0x400000,
-                    file_size: 0x190,
-                    memory_size: 0x190,
-                    align: 0x1000
-                }
-            );
+                assert_eq!(
+                    program_headers[0],
+                    ProgramHeader {
+                        segment_type: SegmentType::Load,
+                        segment_flags: vec![SegmentFlag::Read,],
+                        offset: 0,
+                        virtual_address: 0x400000,
+                        file_size: 0x190,
+                        memory_size: 0x190,
+                        align: 0x1000
+                    }
+                );
 
-            assert_eq!(
-                program_headers[1],
-                ProgramHeader {
-                    segment_type: SegmentType::Load,
-                    segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-                    offset: 0x1000,
-                    virtual_address: 0x401000,
-                    file_size: 0x5a,
-                    memory_size: 0x5a,
-                    align: 0x1000
-                }
-            );
+                assert_eq!(
+                    program_headers[1],
+                    ProgramHeader {
+                        segment_type: SegmentType::Load,
+                        segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
+                        offset: 0x1000,
+                        virtual_address: 0x401000,
+                        file_size: 0x5a,
+                        memory_size: 0x5a,
+                        align: 0x1000
+                    }
+                );
+            }
 
-            // The rest of the program headers are similar,
-            // so we can just check the first two entries for testing purposes.
+            #[cfg(target_arch = "aarch64")]
+            {
+                assert_eq!(program_headers.len(), 2);
+
+                assert_eq!(
+                    program_headers[0],
+                    ProgramHeader {
+                        segment_type: SegmentType::Load,
+                        segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
+                        offset: 0,
+                        virtual_address: 0x400000,
+                        file_size: 0x128,
+                        memory_size: 0x128,
+                        align: 0x10000
+                    }
+                );
+
+                assert_eq!(
+                    program_headers[1],
+                    ProgramHeader {
+                        segment_type: SegmentType::Load,
+                        segment_flags: vec![SegmentFlag::Write, SegmentFlag::Read,],
+                        offset: 0x128,
+                        virtual_address: 0x410128,
+                        file_size: 0x10,
+                        memory_size: 0x20,
+                        align: 0x10000
+                    }
+                );
+            }
         }
     }
 }

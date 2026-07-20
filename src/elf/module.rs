@@ -251,8 +251,11 @@ pub enum RelocationType {
     /// - `P` is the address of the relocation site (the `placeholder_offset` field in the `Relocation` struct).
     R_X86_64_PC32,
 
+    /// The `R_X86_64_PLT32` relocation type represents a 32-bit PC-relative relocation to a PLT entry.
+    /// It is used for function calls to external symbols in PIC code.
+    ///
+    /// Because this linker does not support dynamic linking, we can treat `R_X86_64_PLT32` the same as `R_X86_64_PC32` for static linking purposes.
     R_X86_64_PLT32,
-    // R_X86_64_GOT32,
 
     /// The `R_X86_64_64` relocation type represents a 64-bit absolute relocation.
     /// It is produced by the assembler/compiler whenever a full 64-bit address is stored
@@ -319,6 +322,26 @@ pub enum RelocationType {
     /// +---------------------------+
     /// Lower addresses
     R_X86_64_TPOFF32,
+
+    /// `R_AARCH64_ADR_PREL_PG_HI21` and `R_AARCH64_LDST64_ABS_LO12_NC` are used for PC-relative addressing.
+    ///
+    /// - Name 'R_AARCH64_ADR_PREL_PG_HI21' = 'ADRP instruction' + 'PC relative' + 'Page' + 'High 21 bits immediate'
+    /// - Name 'R_AARCH64_LDST64_ABS_LO12_NC' = 'Load/Store instruction' + '64-bit' + 'Absolute' + 'Low 12 bits immediate' + 'Non-Checked'
+    ///
+    /// There are 2 steps to load/store a 64-bit address in AArch64 architecture:
+    /// 1. Use `ADRP` instruction to calculate the page address (high 21 bits) of the target symbol and PC.
+    /// 2. Load/store the value with 12 bits offset within the page of the target symbol.
+    ///
+    R_AARCH64_ADR_PREL_PG_HI21,
+    R_AARCH64_LDST64_ABS_LO12_NC,
+    R_AARCH64_ADD_ABS_LO12_NC,
+    R_AARCH64_CALL26,
+
+    /// `R_AARCH64_ABS64` is used for absolute addressing of 64-bit data in AArch64 architecture.
+    ///
+    /// It is similar to `R_X86_64_64` in x86_64 architecture, and is used when
+    /// a full 64-bit address is stored in a data section.
+    R_AARCH64_ABS64,
 }
 
 #[derive(Debug, PartialEq)]

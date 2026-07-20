@@ -467,6 +467,9 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
                             patch_value: PatchValue::Value32(relocated_value as u32),
                         }
                     }
+                    _=> {
+                        unimplemented!()
+                    }
                 };
 
                 patch_items.push(patch_item);
