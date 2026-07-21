@@ -44,7 +44,7 @@ $LD -o override.elf override-weak.o override-strong.o
 $LD -o relocate-within-data.elf relocate-within-data.o
 
 popd
-pushd clang
+pushd gcc
 
 # Compile C files to object files
 $GCC -std=c23 -c -O0 -o minimal.o minimal.c

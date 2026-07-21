@@ -9,15 +9,15 @@
 //! It assumes that an object file contains only:
 //!
 //! - At most one code section `.text`
-//! - At most one read-only data section `.rodata`
+//! - At most one read-only data section `.rodata` (and `.data.rel.ro.local` for PIE)
 //! - At most one thread local data section `.tdata`
 //! - At most one thread local uninitialized section `.tbss`
-//! - At most one data section `.data`
+//! - At most one data section `.data` (and `.data.rel.local` for PIE)
 //! - At most one uninitialized data section `.bss`
 //! - At most one symbol table `.symtab`
 //! - At most one relocation table `.rela.text`
-//! - At most one relocation table `.rela.rodata`
-//! - At most one relocation table `.rela.data`
+//! - At most one relocation table `.rela.rodata` (and `.rela.data.rel.ro.local` for PIE)
+//! - At most one relocation table `.rela.data` (and `.rela.data.rel.local` for PIE)
 //! - At most one relocation table `.rela.tdata`
 //! - At most one string table `.strtab` (for symbol names)
 //! - One section header string table `.shstrtab` (for section names)
@@ -40,15 +40,19 @@ use crate::{
 // The names of the sections that are relevant for merging.
 const SECTION_NAME_TEXT: &str = ".text";
 const SECTION_NAME_RODATA: &str = ".rodata";
+// const SECTION_NAME_RODATA_REL: &str = ".data.rel.ro.local";
 const SECTION_NAME_TDATA: &str = ".tdata";
 const SECTION_NAME_TBSS: &str = ".tbss";
 const SECTION_NAME_DATA: &str = ".data";
+// const SECTION_NAME_DATA_REL: &str = ".data.rel.local";
 const SECTION_NAME_BSS: &str = ".bss";
 
 // The names of the relocation sections that are relevant for relocation.
 const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
 const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
+// const SECTION_NAME_RELA_RODATA_REL: &str = ".rela.data.rel.ro.local";
 const SECTION_NAME_RELA_DATA: &str = ".rela.data";
+// const SECTION_NAME_RELA_DATA_REL: &str = ".rela.data.rel.local";
 const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
 
 /// A module represents essential elements of an object file,

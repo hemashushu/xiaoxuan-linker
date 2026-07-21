@@ -245,6 +245,14 @@ pub fn write_executable(
     writer.write_align_program_headers();
 
     // Write PHDR segment header
+    //
+    // Some compilers (e.g. GCC) generate the first section called `.note.gnu.build-id`
+    // before the `.text` section, and this section is included in the PHDR segment.
+    // But our linker does not generate the `.note.gnu.build-id` section,
+    // so the PHDR segment only includes the ELF header and program headers.
+    //
+    // P.S.: using the command `readelf -n FILE` to show the notes.
+
     let segment_phdr_offset = ELF_HEADER_SIZE;
     let segment_phdr_size = PROGRAM_HEADER_ENTRY_SIZE * link_result.program_header_count;
     let segment_phdr_virtual_address = LOAD_ADDR_BASE + ELF_HEADER_SIZE;
