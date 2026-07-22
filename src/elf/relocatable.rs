@@ -309,10 +309,8 @@ pub fn read_relocatable<'a>(binary: &'a [u8]) -> Result<RelocatableModule<'a>, L
             SECTION_NAME_RELA_DATA => RelocationEntrySectionType::Data,
             SECTION_NAME_RELA_TDATA => RelocationEntrySectionType::TData,
             _ => {
-                return Err(LinkerError::new(&format!(
-                    "Unsupported relocation section '{}'",
-                    relocation_section.name
-                )));
+                // Ignore other relocation sections
+                continue;
             }
         };
         relocatable_relocations.insert(section_type, relocation_section.relocations);
@@ -361,57 +359,119 @@ mod tests {
     }
 
     #[test]
-    fn test_read_minimal() {
-        let binary = get_example_file_binary("minimal.o");
+    fn test_read_minimal_asm() {
+        let binary = get_example_file_binary("asm/minimal.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_function() {
-        let binary = get_example_file_binary("function.o");
+    fn test_read_function_asm() {
+        let binary = get_example_file_binary("asm/function.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_data() {
-        let binary = get_example_file_binary("data.o");
+    fn test_read_data_asm() {
+        let binary = get_example_file_binary("asm/data.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_symbol_export() {
-        let binary = get_example_file_binary("symbol-export.o");
+    fn test_read_symbol_export_asm() {
+        let binary = get_example_file_binary("asm/symbol-export.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_symbol_import() {
-        let binary = get_example_file_binary("symbol-import.o");
+    fn test_read_symbol_import_asm() {
+        let binary = get_example_file_binary("asm/symbol-import.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_override_weak() {
-        let binary = get_example_file_binary("override-weak.o");
+    fn test_read_override_weak_asm() {
+        let binary = get_example_file_binary("asm/override-weak.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_override_strong() {
-        let binary = get_example_file_binary("override-strong.o");
+    fn test_read_override_strong_asm() {
+        let binary = get_example_file_binary("asm/override-strong.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_relocate_within_data() {
-        let binary = get_example_file_binary("relocate-within-data.o");
+    fn test_read_relocate_within_data_asm() {
+        let binary = get_example_file_binary("asm/relocate-within-data.o");
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
+    }
+
+    #[test]
+    fn test_read_minimal_gcc() {
+        let binary = get_example_file_binary("gcc/minimal.o");
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
+    }
+
+    #[test]
+    fn test_read_function_gcc() {
+        let binary = get_example_file_binary("gcc/function.o");
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
+    }
+
+    #[test]
+    fn test_read_data_gcc() {
+        let binary = get_example_file_binary("gcc/data.o");
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
+    }
+
+    #[test]
+    fn test_read_symbol_export_gcc() {
+        let binary = get_example_file_binary("gcc/symbol-export.o");
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
+    }
+
+    #[test]
+    fn test_read_symbol_import_gcc() {
+        let binary = get_example_file_binary("gcc/symbol-import.o");
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
+    }
+
+    #[test]
+    fn test_read_override_weak_gcc() {
+        let binary = get_example_file_binary("gcc/override-weak.o");
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
+    }
+
+    #[test]
+    fn test_read_override_strong_gcc() {
+        let binary = get_example_file_binary("gcc/override-strong.o");
+        let module = read_relocatable(&binary);
+        assert!(module.is_ok());
+    }
+
+    #[test]
+    fn test_read_relocate_within_data_gcc_no_pie() {
+        // NOTE:
+        // GCC in modern Linux distributions (e.g., Ubuntu 22.04) generates PIE (Position Independent Executable) by default,
+        // which means that the `.data.rel.ro.local` section is generated instead of the `.data` section,
+        // and the `.rela.data.rel.ro.local` section is generated instead of the `.rela.data` section.
+        // However, the current implementation of the linker does not support PIE, so we need to use a non-PIE object file for testing.
+
+        let binary = get_example_file_binary("gcc/relocate-within-data-no-pie.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }

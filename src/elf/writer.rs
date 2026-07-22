@@ -717,13 +717,34 @@ mod tests {
         writer::write_executable,
     };
 
+    #[cfg(target_arch = "x86_64")]
+    fn get_arch_dir_name() -> &'static str {
+        "x86_64-linux"
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn get_arch_dir_name() -> &'static str {
+        "aarch64-linux"
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn get_arch_dir_name() -> &'static str {
+        "riscv64-linux"
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    fn get_arch_dir_name() -> &'static str {
+        "loongarch64-linux"
+    }
+
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
-            .join("resources/examples/x86_64-linux")
+            .join("resources/examples")
+            .join(get_arch_dir_name())
             .join(file_name);
 
-        fs::read(file_path).unwrap()
+        std::fs::read(file_path).unwrap()
     }
 
     fn get_example_file_binaries(file_names: &[&str]) -> Vec<Vec<u8>> {
@@ -796,51 +817,102 @@ mod tests {
     }
 
     #[test]
-    fn test_write_minimal() {
-        let file = link_example_file_to_executable(&["minimal.o"], "test-minimal.elf");
+    fn test_write_minimal_asm() {
+        let file = link_example_file_to_executable(&["asm/minimal.o"], "test-asm-minimal.elf");
         execute_and_assert(&file, 42, "");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_function() {
-        let file = link_example_file_to_executable(&["function.o"], "test-function.elf");
+    fn test_write_function_asm() {
+        let file = link_example_file_to_executable(&["asm/function.o"], "test-asm-function.elf");
         execute_and_assert(&file, 0, "Hello, world!\n");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_data() {
-        let file = link_example_file_to_executable(&["data.o"], "test-data.elf");
+    fn test_write_data_asm() {
+        let file = link_example_file_to_executable(&["asm/data.o"], "test-asm-data.elf");
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_symbol() {
+    fn test_write_symbol_asm() {
         let file = link_example_file_to_executable(
-            &["symbol-export.o", "symbol-import.o"],
-            "test-symbol.elf",
+            &["asm/symbol-export.o", "asm/symbol-import.o"],
+            "test-asm-symbol.elf",
         );
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_override() {
+    fn test_write_override_asm() {
         let file = link_example_file_to_executable(
-            &["override-weak.o", "override-strong.o"],
-            "test-override.elf",
+            &["asm/override-weak.o", "asm/override-strong.o"],
+            "test-asm-override.elf",
         );
         execute_and_assert(&file, 53, "");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_relocate_within_data() {
+    fn test_write_relocate_within_data_asm() {
         let file = link_example_file_to_executable(
-            &["relocate-within-data.o"],
-            "test-relocate-within-data.elf",
+            &["asm/relocate-within-data.o"],
+            "test-asm-relocate-within-data.elf",
+        );
+        execute_and_assert(&file, 24, "");
+        delete_temporary_file(&file);
+    }
+
+    #[test]
+    fn test_write_minimal_gcc() {
+        let file = link_example_file_to_executable(&["gcc/minimal.o"], "test-gcc-minimal.elf");
+        execute_and_assert(&file, 42, "");
+        delete_temporary_file(&file);
+    }
+
+    #[test]
+    fn test_write_function_gcc() {
+        let file = link_example_file_to_executable(&["gcc/function.o"], "test-gcc-function.elf");
+        execute_and_assert(&file, 0, "Hello, world!\n");
+        delete_temporary_file(&file);
+    }
+
+    #[test]
+    fn test_write_data_gcc() {
+        let file = link_example_file_to_executable(&["gcc/data.o"], "test-gcc-data.elf");
+        execute_and_assert(&file, 24, "");
+        delete_temporary_file(&file);
+    }
+
+    #[test]
+    fn test_write_symbol_gcc() {
+        let file = link_example_file_to_executable(
+            &["gcc/symbol-export.o", "gcc/symbol-import.o"],
+            "test-gcc-symbol.elf",
+        );
+        execute_and_assert(&file, 24, "");
+        delete_temporary_file(&file);
+    }
+
+    #[test]
+    fn test_write_override_gcc() {
+        let file = link_example_file_to_executable(
+            &["gcc/override-weak.o", "gcc/override-strong.o"],
+            "test-gcc-override.elf",
+        );
+        execute_and_assert(&file, 53, "");
+        delete_temporary_file(&file);
+    }
+
+    #[test]
+    fn test_write_relocate_within_data_gcc_no_pie() {
+        let file = link_example_file_to_executable(
+            &["gcc/relocate-within-data-no-pie.o"],
+            "test-gcc-relocate-within-data-no-pie.elf",
         );
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);

@@ -467,7 +467,7 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
                             patch_value: PatchValue::Value32(relocated_value as u32),
                         }
                     }
-                    _=> {
+                    _ => {
                         unimplemented!()
                     }
                 };
@@ -720,20 +720,39 @@ fn find_global_symbol(
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use crate::elf::{
         linker::link,
         relocatable::{RelocatableModule, read_relocatable},
     };
 
+    #[cfg(target_arch = "x86_64")]
+    fn get_arch_dir_name() -> &'static str {
+        "x86_64-linux"
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn get_arch_dir_name() -> &'static str {
+        "aarch64-linux"
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn get_arch_dir_name() -> &'static str {
+        "riscv64-linux"
+    }
+
+    #[cfg(target_arch = "loongarch64")]
+    fn get_arch_dir_name() -> &'static str {
+        "loongarch64-linux"
+    }
+
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
-            .join("resources/examples/x86_64-linux")
+            .join("resources/examples")
+            .join(get_arch_dir_name())
             .join(file_name);
 
-        fs::read(file_path).unwrap()
+        std::fs::read(file_path).unwrap()
     }
 
     fn get_example_file_binaries(file_names: &[&str]) -> Vec<Vec<u8>> {
@@ -755,67 +774,126 @@ mod tests {
     }
 
     #[test]
-    fn test_link_minimal() {
-        let file_binaries = get_example_file_binaries(&["minimal.o"]);
+    fn test_link_minimal_asm() {
+        let file_binaries = get_example_file_binaries(&["asm/minimal.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
-        let result = link(&mut modules).unwrap();
-        println!("Module after linking: {:#?}", modules);
-        println!("Link result: {:#?}", result);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
     }
 
     #[test]
-    fn test_link_function() {
-        let file_binaries = get_example_file_binaries(&["function.o"]);
+    fn test_link_function_asm() {
+        let file_binaries = get_example_file_binaries(&["asm/function.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
-        let result = link(&mut modules).unwrap();
-
-        println!("Module after linking: {:#?}", modules);
-        println!("Link result: {:#?}", result);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
     }
 
     #[test]
-    fn test_link_data() {
-        let file_binaries = get_example_file_binaries(&["data.o"]);
+    fn test_link_data_asm() {
+        let file_binaries = get_example_file_binaries(&["asm/data.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
-        let result = link(&mut modules).unwrap();
-
-        println!("Module after linking: {:#?}", modules);
-        println!("Link result: {:#?}", result);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
     }
 
     #[test]
-    fn test_link_symbol() {
-        let file_binaries = get_example_file_binaries(&["symbol-export.o", "symbol-import.o"]);
+    fn test_link_symbol_asm() {
+        let file_binaries =
+            get_example_file_binaries(&["asm/symbol-export.o", "asm/symbol-import.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
-        let result = link(&mut modules).unwrap();
-
-        println!("Module after linking: {:#?}", modules);
-        println!("Link result: {:#?}", result);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
     }
 
     #[test]
-    fn test_link_override() {
-        let file_binaries = get_example_file_binaries(&["override-weak.o", "override-strong.o"]);
+    fn test_link_override_asm() {
+        let file_binaries =
+            get_example_file_binaries(&["asm/override-weak.o", "asm/override-strong.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
-        let result = link(&mut modules).unwrap();
-
-        println!("Module after linking: {:#?}", modules);
-        println!("Link result: {:#?}", result);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
     }
 
     #[test]
-    fn test_link_relocate_within_data() {
-        let file_binaries = get_example_file_binaries(&["relocate-within-data.o"]);
+    fn test_link_relocate_within_data_asm() {
+        let file_binaries = get_example_file_binaries(&["asm/relocate-within-data.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
-        let result = link(&mut modules).unwrap();
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
+    }
 
-        println!("Module after linking: {:#?}", modules);
-        println!("Link result: {:#?}", result);
+    #[test]
+    fn test_link_minimal_gcc() {
+        let file_binaries = get_example_file_binaries(&["gcc/minimal.o"]);
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let mut modules = get_example_file_modules(&file_binaries_ref);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
+    }
+
+    #[test]
+    fn test_link_function_gcc() {
+        let file_binaries = get_example_file_binaries(&["gcc/function.o"]);
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let mut modules = get_example_file_modules(&file_binaries_ref);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
+    }
+
+    #[test]
+    fn test_link_data_gcc() {
+        let file_binaries = get_example_file_binaries(&["gcc/data.o"]);
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let mut modules = get_example_file_modules(&file_binaries_ref);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
+    }
+
+    #[test]
+    fn test_link_symbol_gcc() {
+        let file_binaries =
+            get_example_file_binaries(&["gcc/symbol-export.o", "gcc/symbol-import.o"]);
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let mut modules = get_example_file_modules(&file_binaries_ref);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
+    }
+
+    #[test]
+    fn test_link_override_gcc() {
+        let file_binaries =
+            get_example_file_binaries(&["gcc/override-weak.o", "gcc/override-strong.o"]);
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let mut modules = get_example_file_modules(&file_binaries_ref);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
+    }
+
+    #[test]
+    fn test_link_relocate_within_data_gcc_no_pie() {
+        let file_binaries = get_example_file_binaries(&["gcc/relocate-within-data-no-pie.o"]);
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let mut modules = get_example_file_modules(&file_binaries_ref);
+        let result = link(&mut modules);
+        assert!(result.is_ok());
+        // Check the modified modules and the link result manually.
     }
 }
