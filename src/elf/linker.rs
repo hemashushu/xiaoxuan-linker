@@ -725,24 +725,38 @@ mod tests {
         relocatable::{RelocatableModule, read_relocatable},
     };
 
-    #[cfg(target_arch = "x86_64")]
-    fn get_arch_dir_name() -> &'static str {
-        "x86_64-linux"
+    enum ARCH {
+        X86_64,
+        AARCH64,
+        RISCV64,
+        LOONGARCH64,
+        POWERSPC64LE,
+        S390X,
+        UNSUPPORTED,
     }
 
-    #[cfg(target_arch = "aarch64")]
-    fn get_arch_dir_name() -> &'static str {
-        "aarch64-linux"
+    fn get_arch() -> ARCH {
+        match std::env::consts::ARCH {
+            "x86_64" => ARCH::X86_64,
+            "aarch64" => ARCH::AARCH64,
+            "riscv64" => ARCH::RISCV64,
+            "loongarch64" => ARCH::LOONGARCH64,
+            "powerpc64" => ARCH::POWERSPC64LE,
+            "s390x" => ARCH::S390X,
+            _ => ARCH::UNSUPPORTED,
+        }
     }
 
-    #[cfg(target_arch = "riscv64")]
     fn get_arch_dir_name() -> &'static str {
-        "riscv64-linux"
-    }
-
-    #[cfg(target_arch = "loongarch64")]
-    fn get_arch_dir_name() -> &'static str {
-        "loongarch64-linux"
+        match get_arch() {
+            ARCH::X86_64 => "x86_64-linux",
+            ARCH::AARCH64 => "aarch64-linux",
+            ARCH::RISCV64 => "riscv64-linux",
+            ARCH::LOONGARCH64 => "loongarch64-linux",
+            ARCH::POWERSPC64LE => "powerpc64le-linux",
+            ARCH::S390X => "s390x-linux",
+            ARCH::UNSUPPORTED => panic!("Unsupported architecture"),
+        }
     }
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
@@ -889,6 +903,12 @@ mod tests {
 
     #[test]
     fn test_link_relocate_within_data_gcc_no_pie() {
+        // Note:
+        // GCC in modern Linux distributions (e.g., Ubuntu 22.04) generates PIE (Position Independent Executable) by default,
+        // which means that the `.data.rel.ro.local` section is generated instead of the `.data` section,
+        // and the `.rela.data.rel.ro.local` section is generated instead of the `.rela.data` section.
+        // However, the current implementation of the linker does not support PIE, so we need to use a non-PIE object file for testing.
+
         let file_binaries = get_example_file_binaries(&["gcc/relocate-within-data-no-pie.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);

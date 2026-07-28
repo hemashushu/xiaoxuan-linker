@@ -25,7 +25,7 @@
 //                 (for example R_AARCH64_TLSDESC_*).
 //                 Required only for dlopen'd shared libs. NOT needed for PIE executables.
 //
-//   PIC/PIE and local-exec are orthogonal: -fpie + -ftls-model=local-exec is valid.
+//   PIE and local-exec are orthogonal: -fpie + -ftls-model=local-exec is valid.
 //   GCC automatically uses local-exec for PIE executables when the variable is in the
 //   same module, so the TLS relocations are identical with or without -fpie.
 //

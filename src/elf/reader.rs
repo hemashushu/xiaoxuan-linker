@@ -451,7 +451,7 @@ pub fn read_program_headers(
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use std::{fs, vec};
+    use std::vec;
 
     use crate::elf::{
         module::{
@@ -464,24 +464,38 @@ mod tests {
         },
     };
 
-    #[cfg(target_arch = "x86_64")]
-    fn get_arch_dir_name() -> &'static str {
-        "x86_64-linux"
+    enum ARCH {
+        X86_64,
+        AARCH64,
+        RISCV64,
+        LOONGARCH64,
+        POWERSPC64LE,
+        S390X,
+        UNSUPPORTED,
     }
 
-    #[cfg(target_arch = "aarch64")]
-    fn get_arch_dir_name() -> &'static str {
-        "aarch64-linux"
+    fn get_arch() -> ARCH {
+        match std::env::consts::ARCH {
+            "x86_64" => ARCH::X86_64,
+            "aarch64" => ARCH::AARCH64,
+            "riscv64" => ARCH::RISCV64,
+            "loongarch64" => ARCH::LOONGARCH64,
+            "powerpc64" => ARCH::POWERSPC64LE,
+            "s390x" => ARCH::S390X,
+            _ => ARCH::UNSUPPORTED,
+        }
     }
 
-    #[cfg(target_arch = "riscv64")]
     fn get_arch_dir_name() -> &'static str {
-        "riscv64-linux"
-    }
-
-    #[cfg(target_arch = "loongarch64")]
-    fn get_arch_dir_name() -> &'static str {
-        "loongarch64-linux"
+        match get_arch() {
+            ARCH::X86_64 => "x86_64-linux",
+            ARCH::AARCH64 => "aarch64-linux",
+            ARCH::RISCV64 => "riscv64-linux",
+            ARCH::LOONGARCH64 => "loongarch64-linux",
+            ARCH::POWERSPC64LE => "powerpc64le-linux",
+            ARCH::S390X => "s390x-linux",
+            ARCH::UNSUPPORTED => panic!("Unsupported architecture"),
+        }
     }
 
     fn get_example_file_binary(file_name: &str) -> Vec<u8> {
@@ -491,80 +505,87 @@ mod tests {
             .join(get_arch_dir_name())
             .join(file_name);
 
-        fs::read(file_path).unwrap()
+        std::fs::read(file_path).unwrap()
     }
 
     #[test]
-    fn test_read_file_header_asm() {
+    fn test_read_file_header_asm_minimal_o() {
         // Manually check with command `readelf -h asm/minimal.o`
-        {
-            let binary = get_example_file_binary("asm/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let file_header = read_file_header(elf).unwrap();
+        let binary = get_example_file_binary("asm/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let file_header = read_file_header(elf).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            assert_eq!(
-                file_header,
-                FileHeader {
-                    os_abi: OSABI::SystemV,
-                    machine: Machine::X86_64,
-                    file_type: FileType::Relocatable,
-                    entry_point: 0,
-                    program_header_count: 0,
-                    section_header_count: 8,
-                }
-            );
-
-            #[cfg(target_arch = "aarch64")]
-            assert_eq!(
-                file_header,
-                FileHeader {
-                    os_abi: OSABI::SystemV,
-                    machine: Machine::AArch64,
-                    file_type: FileType::Relocatable,
-                    entry_point: 0,
-                    program_header_count: 0,
-                    section_header_count: 7,
-                }
-            );
-        }
-
-        // Manually check with command `readelf -h asm/minimal.elf`
-        {
-            let binary = get_example_file_binary("asm/minimal.elf");
-            let elf = read_file(&binary).unwrap();
-            let file_header = read_file_header(elf).unwrap();
-
-            #[cfg(target_arch = "x86_64")]
-            assert_eq!(
-                file_header,
-                FileHeader {
-                    os_abi: OSABI::SystemV,
-                    machine: Machine::X86_64,
-                    file_type: FileType::Executable,
-                    entry_point: 0x401000,
-                    program_header_count: 5,
-                    section_header_count: 6,
-                }
-            );
-
-            #[cfg(target_arch = "aarch64")]
-            assert_eq!(
-                file_header,
-                FileHeader {
-                    os_abi: OSABI::SystemV,
-                    machine: Machine::AArch64,
-                    file_type: FileType::Executable,
-                    entry_point: 0x400078,
-                    program_header_count: 1,
-                    section_header_count: 5,
-                }
-            );
+        match get_arch() {
+            ARCH::X86_64 => {
+                assert_eq!(
+                    file_header,
+                    FileHeader {
+                        os_abi: OSABI::SystemV,
+                        machine: Machine::X86_64,
+                        file_type: FileType::Relocatable,
+                        entry_point: 0,
+                        program_header_count: 0,
+                        section_header_count: 8,
+                    }
+                );
+            }
+            ARCH::AARCH64 => {
+                assert_eq!(
+                    file_header,
+                    FileHeader {
+                        os_abi: OSABI::SystemV,
+                        machine: Machine::AArch64,
+                        file_type: FileType::Relocatable,
+                        entry_point: 0,
+                        program_header_count: 0,
+                        section_header_count: 7,
+                    }
+                );
+            }
+            _ => unimplemented!(),
         }
     }
 
     #[test]
-    fn test_read_section_header_asm() {
+    fn test_read_file_header_asm_minimal_elf() {
+        // Manually check with command `readelf -h asm/minimal.elf`
+        let binary = get_example_file_binary("asm/minimal.elf");
+        let elf = read_file(&binary).unwrap();
+        let file_header = read_file_header(elf).unwrap();
+
+        match get_arch() {
+            ARCH::X86_64 => {
+                assert_eq!(
+                    file_header,
+                    FileHeader {
+                        os_abi: OSABI::SystemV,
+                        machine: Machine::X86_64,
+                        file_type: FileType::Executable,
+                        entry_point: 0x401000,
+                        program_header_count: 5,
+                        section_header_count: 6,
+                    }
+                );
+            }
+            ARCH::AARCH64 => {
+                assert_eq!(
+                    file_header,
+                    FileHeader {
+                        os_abi: OSABI::SystemV,
+                        machine: Machine::AArch64,
+                        file_type: FileType::Executable,
+                        entry_point: 0x400078,
+                        program_header_count: 1,
+                        section_header_count: 5,
+                    }
+                );
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    #[test]
+    fn test_read_section_header_asm_minimal_o() {
         // Fields such as `size`, `binary`, `align`, and `offset` are not
         // intended to be tested here because they are not guaranteed
         // to be the same across different versions of the assembler and platforms.
@@ -572,13 +593,12 @@ mod tests {
         // Note: check certain entries only for testing purposes.
 
         // Manually check with command `readelf -S asm/minimal.o`
-        {
-            let binary = get_example_file_binary("asm/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let sections = read_section_headers(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let sections = read_section_headers(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(sections.len(), 8);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
@@ -599,8 +619,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(sections.len(), 7);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
@@ -620,16 +639,19 @@ mod tests {
                     ]
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_section_header_asm_data_o() {
         // Manually check with command `readelf -S asm/data.o`
-        {
-            let binary = get_example_file_binary("asm/data.o");
-            let elf = read_file(&binary).unwrap();
-            let sections = read_section_headers(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/data.o");
+        let elf = read_file(&binary).unwrap();
+        let sections = read_section_headers(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(sections.len(), 10);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
@@ -650,8 +672,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(sections.len(), 9);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
@@ -671,21 +692,21 @@ mod tests {
                     ]
                 );
             }
+            _ => unimplemented!(),
         }
     }
 
     #[test]
-    fn test_read_symbols_asm() {
+    fn test_read_symbols_asm_minimal_o() {
         // Note: check certain entries only for testing purposes.
 
         // Manually check with command `readelf -s asm/minimal.o`
-        {
-            let binary = get_example_file_binary("asm/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let symbols = read_symbols(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(symbols.len(), 2);
                 assert_eq!(symbols[0], Symbol::Other);
                 assert_eq!(
@@ -700,8 +721,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(symbols.len(), 6);
                 assert_eq!(symbols[0], Symbol::Other);
 
@@ -727,16 +747,19 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_symbols_asm_data_o() {
         // Manually check with command `readelf -s asm/data.o`
-        {
-            let binary = get_example_file_binary("asm/data.o");
-            let elf = read_file(&binary).unwrap();
-            let symbols = read_symbols(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/data.o");
+        let elf = read_file(&binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(symbols.len(), 11);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -763,8 +786,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(symbols.len(), 16);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -790,16 +812,19 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_symbols_asm_symbol_import_o() {
         // Manually check with command `readelf -s asm/symbol-import.o`
-        {
-            let binary = get_example_file_binary("asm/symbol-import.o");
-            let elf = read_file(&binary).unwrap();
-            let symbols = read_symbols(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/symbol-import.o");
+        let elf = read_file(&binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(symbols.len(), 10);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -817,8 +842,7 @@ mod tests {
                 assert_eq!(symbols[9], Symbol::External("y".to_string()));
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(symbols.len(), 14);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -835,16 +859,19 @@ mod tests {
 
                 assert_eq!(symbols[13], Symbol::External("y".to_string()));
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_symbols_asm_override_weak_o() {
         // Manually check with command `readelf -s asm/override-weak.o`
-        {
-            let binary = get_example_file_binary("asm/override-weak.o");
-            let elf = read_file(&binary).unwrap();
-            let symbols = read_symbols(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/override-weak.o");
+        let elf = read_file(&binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(symbols.len(), 3);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -870,8 +897,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(symbols.len(), 7);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -897,30 +923,31 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
     }
 
     #[test]
-    fn test_read_relocation_sections_asm() {
+    fn test_read_relocations_asm_minimal_o() {
         // Note: check certain entries only for testing purposes.
 
         // Manually check with command `readelf -r asm/minimal.o`
-        {
-            let binary = get_example_file_binary("asm/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            assert_eq!(relocation_sections.len(), 0);
-        }
+        assert_eq!(relocation_sections.len(), 0);
+    }
 
+    #[test]
+    fn test_read_relocations_asm_data_o() {
         // Manually check with command `readelf -r asm/data.o`
-        {
-            let binary = get_example_file_binary("asm/data.o");
-            let elf = read_file(&binary).unwrap();
-            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/data.o");
+        let elf = read_file(&binary).unwrap();
+        let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(relocation_sections.len(), 1);
 
                 let relocation_section = &relocation_sections[0];
@@ -950,8 +977,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(relocation_sections.len(), 1);
 
                 let relocation_section = &relocation_sections[0];
@@ -980,16 +1006,19 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_relocations_asm_relocate_within_data_o() {
         // Manually check with command `readelf -r asm/relocate-within-data.o`
-        {
-            let binary = get_example_file_binary("asm/relocate-within-data.o");
-            let elf = read_file(&binary).unwrap();
-            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/relocate-within-data.o");
+        let elf = read_file(&binary).unwrap();
+        let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(relocation_sections.len(), 3);
 
                 // `.rela.text`
@@ -1080,8 +1109,7 @@ mod tests {
                 }
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(relocation_sections.len(), 3);
 
                 // `.rela.text`
@@ -1171,30 +1199,31 @@ mod tests {
                     );
                 }
             }
+            _ => unimplemented!(),
         }
     }
 
     #[test]
-    fn test_read_program_headers_asm() {
+    fn test_read_program_headers_asm_minimal_o() {
         // Note: check certain entries only for testing purposes.
 
         // Manually check with command `readelf -l asm/minimal.o`
-        {
-            let binary = get_example_file_binary("asm/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let program_headers = read_program_headers(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            assert_eq!(program_headers.len(), 0);
-        }
+        assert_eq!(program_headers.len(), 0);
+    }
 
+    #[test]
+    fn test_read_program_headers_asm_minimal_elf() {
         // Manually check with command `readelf -l asm/minimal.elf`
-        {
-            let binary = get_example_file_binary("asm/minimal.elf");
-            let elf = read_file(&binary).unwrap();
-            let program_headers = read_program_headers(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/minimal.elf");
+        let elf = read_file(&binary).unwrap();
+        let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(program_headers.len(), 5);
 
                 assert_eq!(
@@ -1224,8 +1253,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(program_headers.len(), 1);
 
                 assert_eq!(
@@ -1241,16 +1269,19 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_program_headers_asm_data_elf() {
         // Manually check with command `readelf -l asm/data.elf`
-        {
-            let binary = get_example_file_binary("asm/data.elf");
-            let elf = read_file(&binary).unwrap();
-            let program_headers = read_program_headers(elf, &binary).unwrap();
+        let binary = get_example_file_binary("asm/data.elf");
+        let elf = read_file(&binary).unwrap();
+        let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(program_headers.len(), 6);
 
                 assert_eq!(
@@ -1280,8 +1311,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(program_headers.len(), 2);
 
                 assert_eq!(
@@ -1310,82 +1340,90 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
     }
 
     #[test]
-    fn test_read_file_header_gcc() {
+    fn test_read_file_header_gcc_minimal_o() {
         // Note: check certain entries only for testing purposes.
 
         // Manually check with command `readelf -h gcc/minimal.o`
-        {
-            let binary = get_example_file_binary("gcc/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let file_header = read_file_header(elf).unwrap();
+        let binary = get_example_file_binary("gcc/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let file_header = read_file_header(elf).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            assert_eq!(
-                file_header,
-                FileHeader {
-                    os_abi: OSABI::SystemV,
-                    machine: Machine::X86_64,
-                    file_type: FileType::Relocatable,
-                    entry_point: 0,
-                    program_header_count: 0,
-                    section_header_count: 12,
-                }
-            );
-
-            #[cfg(target_arch = "aarch64")]
-            assert_eq!(
-                file_header,
-                FileHeader {
-                    os_abi: OSABI::SystemV,
-                    machine: Machine::AArch64,
-                    file_type: FileType::Relocatable,
-                    entry_point: 0,
-                    program_header_count: 0,
-                    section_header_count: 7,
-                }
-            );
-        }
-
-        // Manually check with command `readelf -h gcc/minimal.elf`
-        {
-            let binary = get_example_file_binary("gcc/minimal.elf");
-            let elf = read_file(&binary).unwrap();
-            let file_header = read_file_header(elf).unwrap();
-
-            #[cfg(target_arch = "x86_64")]
-            assert_eq!(
-                file_header,
-                FileHeader {
-                    os_abi: OSABI::SystemV,
-                    machine: Machine::X86_64,
-                    file_type: FileType::Executable,
-                    entry_point: 0x401042,
-                    program_header_count: 7,
-                    section_header_count: 9,
-                }
-            );
-
-            #[cfg(target_arch = "aarch64")]
-            assert_eq!(
-                file_header,
-                FileHeader {
-                    os_abi: OSABI::SystemV,
-                    machine: Machine::AArch64,
-                    file_type: FileType::Executable,
-                    entry_point: 0x400078,
-                    program_header_count: 1,
-                    section_header_count: 5,
-                }
-            );
+        match get_arch() {
+            ARCH::X86_64 => {
+                assert_eq!(
+                    file_header,
+                    FileHeader {
+                        os_abi: OSABI::SystemV,
+                        machine: Machine::X86_64,
+                        file_type: FileType::Relocatable,
+                        entry_point: 0,
+                        program_header_count: 0,
+                        section_header_count: 12,
+                    }
+                );
+            }
+            ARCH::AARCH64 => {
+                assert_eq!(
+                    file_header,
+                    FileHeader {
+                        os_abi: OSABI::SystemV,
+                        machine: Machine::AArch64,
+                        file_type: FileType::Relocatable,
+                        entry_point: 0,
+                        program_header_count: 0,
+                        section_header_count: 12,
+                    }
+                );
+            }
+            _ => unimplemented!(),
         }
     }
 
     #[test]
-    fn test_read_section_header_gcc() {
+    fn test_read_file_header_gcc_minimal_elf() {
+        // Manually check with command `readelf -h gcc/minimal.elf`
+        let binary = get_example_file_binary("gcc/minimal.elf");
+        let elf = read_file(&binary).unwrap();
+        let file_header = read_file_header(elf).unwrap();
+
+        match get_arch() {
+            ARCH::X86_64 => {
+                assert_eq!(
+                    file_header,
+                    FileHeader {
+                        os_abi: OSABI::SystemV,
+                        machine: Machine::X86_64,
+                        file_type: FileType::Executable,
+                        entry_point: 0x401042,
+                        program_header_count: 7,
+                        section_header_count: 9,
+                    }
+                );
+            }
+            ARCH::AARCH64 => {
+                assert_eq!(
+                    file_header,
+                    FileHeader {
+                        os_abi: OSABI::SystemV,
+                        machine: Machine::AArch64,
+                        file_type: FileType::Executable,
+                        entry_point: 0x40014c,
+                        program_header_count: 3,
+                        section_header_count: 9,
+                    }
+                );
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    #[test]
+    fn test_read_section_header_gcc_minimal_o() {
         // Fields such as `size`, `binary`, `align`, and `offset` are not
         // intended to be tested here because they are not guaranteed
         // to be the same across different versions of the compiler and platforms.
@@ -1393,13 +1431,12 @@ mod tests {
         // Note: check certain entries only for testing purposes.
 
         // Manually check with command `readelf -S gcc/minimal.o`
-        {
-            let binary = get_example_file_binary("gcc/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let sections = read_section_headers(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let sections = read_section_headers(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(sections.len(), 12);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
@@ -1420,9 +1457,8 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
-                assert_eq!(sections.len(), 7);
+            ARCH::AARCH64 => {
+                assert_eq!(sections.len(), 12);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
                     vec!["", ".text", ".data", ".bss",]
@@ -1441,16 +1477,19 @@ mod tests {
                     ]
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_section_header_gcc_data_o() {
         // Manually check with command `readelf -S gcc/data.o`
-        {
-            let binary = get_example_file_binary("gcc/data.o");
-            let elf = read_file(&binary).unwrap();
-            let sections = read_section_headers(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/data.o");
+        let elf = read_file(&binary).unwrap();
+        let sections = read_section_headers(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(sections.len(), 14);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
@@ -1471,9 +1510,8 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
-                assert_eq!(sections.len(), 9);
+            ARCH::AARCH64 => {
+                assert_eq!(sections.len(), 14);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
                     vec!["", ".text", ".rela.text", ".data",]
@@ -1492,21 +1530,21 @@ mod tests {
                     ]
                 );
             }
+            _ => unimplemented!(),
         }
     }
 
     #[test]
-    fn test_read_symbols_gcc() {
+    fn test_read_symbols_gcc_minimal_o() {
         // Note: check certain entries only for testing purposes.
 
         // Manually check with command `readelf -s gcc/minimal.o`
-        {
-            let binary = get_example_file_binary("gcc/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let symbols = read_symbols(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(symbols.len(), 6);
                 assert_eq!(symbols[0], Symbol::Other);
                 assert_eq!(
@@ -1521,9 +1559,8 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
-                assert_eq!(symbols.len(), 6);
+            ARCH::AARCH64 => {
+                assert_eq!(symbols.len(), 14);
 
                 assert_eq!(symbols[0], Symbol::Other);
 
@@ -1549,16 +1586,19 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_symbols_gcc_data_o() {
         // Manually check with command `readelf -s gcc/data.o`
-        {
-            let binary = get_example_file_binary("gcc/data.o");
-            let elf = read_file(&binary).unwrap();
-            let symbols = read_symbols(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/data.o");
+        let elf = read_file(&binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(symbols.len(), 12);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -1585,8 +1625,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(symbols.len(), 16);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -1612,16 +1651,19 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_symbols_gcc_symbol_import_o() {
         // Manually check with command `readelf -s gcc/symbol-import.o`
-        {
-            let binary = get_example_file_binary("gcc/symbol-import.o");
-            let elf = read_file(&binary).unwrap();
-            let symbols = read_symbols(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/symbol-import.o");
+        let elf = read_file(&binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(symbols.len(), 14);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -1639,8 +1681,7 @@ mod tests {
                 assert_eq!(symbols[6], Symbol::External("foo".to_string()));
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(symbols.len(), 14);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -1657,16 +1698,19 @@ mod tests {
 
                 assert_eq!(symbols[13], Symbol::External("y".to_string()));
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_symbols_gcc_override_weak_o() {
         // Manually check with command `readelf -s gcc/override-weak.o`
-        {
-            let binary = get_example_file_binary("gcc/override-weak.o");
-            let elf = read_file(&binary).unwrap();
-            let symbols = read_symbols(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/override-weak.o");
+        let elf = read_file(&binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(symbols.len(), 5);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -1692,8 +1736,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(symbols.len(), 7);
 
                 assert_eq!(symbols[0], Symbol::Other);
@@ -1719,42 +1762,43 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
     }
 
     #[test]
-    fn test_read_relocation_sections_gcc() {
+    fn test_read_relocations_gcc_minimal_o() {
         // Note: check certain entries only for testing purposes.
 
         // Manually check with command `readelf -r gcc/minimal.o`
-        {
-            let binary = get_example_file_binary("gcc/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(relocation_sections.len(), 1);
 
                 let relocation_section = &relocation_sections[0];
                 assert_eq!(relocation_section.name, ".rela.eh_frame");
                 assert_eq!(relocation_section.target_section_index, 7); // index of `.eh_frame` section
             }
-
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 unimplemented!()
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_relocations_gcc_data_o() {
         // Manually check with command `readelf -r gcc/data.o`
-        {
-            let binary = get_example_file_binary("gcc/data.o");
-            let elf = read_file(&binary).unwrap();
-            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/data.o");
+        let elf = read_file(&binary).unwrap();
+        let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(relocation_sections.len(), 2);
 
                 let relocation_section = &relocation_sections[0];
@@ -1784,8 +1828,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(relocation_sections.len(), 1);
 
                 let relocation_section = &relocation_sections[0];
@@ -1814,16 +1857,24 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
-        // Manually check with command `readelf -r gcc/relocate-within-data.o`
-        {
-            let binary = get_example_file_binary("gcc/relocate-within-data.o");
-            let elf = read_file(&binary).unwrap();
-            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+    #[test]
+    fn test_read_relocations_gcc_relocate_within_data_no_pie_o() {
+        // Note:
+        // Don't test relocation sections with `relocate-within-data.o` because
+        // the GCC compiler generates ".rela.data.rel.local" and ".rela.data.rel.ro.local"
+        // because it uses the `-fPIE` flag by default, which is not supported by this crate.
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        // Manually check with command `readelf -r gcc/relocate-within-data-no-pie.o`
+        let binary = get_example_file_binary("gcc/relocate-within-data-no-pie.o");
+        let elf = read_file(&binary).unwrap();
+        let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(relocation_sections.len(), 4);
 
                 // `.rela.text`
@@ -1838,28 +1889,28 @@ mod tests {
                     assert_eq!(
                         relocations[0],
                         Relocation {
-                            relocation_type: RelocationType::R_X86_64_PC32,
-                            placeholder_offset: 0x71,
+                            relocation_type: RelocationType::R_X86_64_32,
+                            placeholder_offset: 0x6f,
                             symbol_index: 5,
-                            addend: -4
+                            addend: 0
                         }
                     );
                     assert_eq!(
                         relocations[1],
                         Relocation {
                             relocation_type: RelocationType::R_X86_64_PC32,
-                            placeholder_offset: 0x7f,
+                            placeholder_offset: 0x7d,
                             symbol_index: 9,
                             addend: -4
                         }
                     );
                 }
 
-                // `.rela.data.rel.local`
+                // `.rela.data`
                 {
                     let relocation_section = &relocation_sections[1];
-                    assert_eq!(relocation_section.name, ".rela.data.rel.local");
-                    assert_eq!(relocation_section.target_section_index, 5);
+                    assert_eq!(relocation_section.name, ".rela.data");
+                    assert_eq!(relocation_section.target_section_index, 3);
 
                     let relocations = &relocation_section.relocations;
                     assert_eq!(relocations.len(), 2);
@@ -1868,7 +1919,7 @@ mod tests {
                         relocations[0],
                         Relocation {
                             relocation_type: RelocationType::R_X86_64_64,
-                            placeholder_offset: 0x0,
+                            placeholder_offset: 0x10,
                             symbol_index: 0x7,
                             addend: 0
                         }
@@ -1877,18 +1928,18 @@ mod tests {
                         relocations[1],
                         Relocation {
                             relocation_type: RelocationType::R_X86_64_64,
-                            placeholder_offset: 0x8,
+                            placeholder_offset: 0x18,
                             symbol_index: 0x8,
                             addend: 0
                         }
                     );
                 }
 
-                // `.rela.data.rel.ro.local`
+                // `.rela.rodata`
                 {
                     let relocation_section = &relocation_sections[2];
-                    assert_eq!(relocation_section.name, ".rela.data.rel.ro.local");
-                    assert_eq!(relocation_section.target_section_index, 7);
+                    assert_eq!(relocation_section.name, ".rela.rodata");
+                    assert_eq!(relocation_section.target_section_index, 6);
 
                     let relocations = &relocation_section.relocations;
                     assert_eq!(relocations.len(), 2);
@@ -1914,8 +1965,7 @@ mod tests {
                 }
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(relocation_sections.len(), 3);
 
                 // `.rela.text`
@@ -2004,30 +2054,31 @@ mod tests {
                     );
                 }
             }
+            _ => unimplemented!(),
         }
     }
 
     #[test]
-    fn test_read_program_headers_gcc() {
+    fn test_read_program_headers_gcc_minimal_o() {
         // Note: check certain entries only for testing purposes.
 
         // Manually check with command `readelf -l gcc/minimal.o`
-        {
-            let binary = get_example_file_binary("gcc/minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let program_headers = read_program_headers(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/minimal.o");
+        let elf = read_file(&binary).unwrap();
+        let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            assert_eq!(program_headers.len(), 0);
-        }
+        assert_eq!(program_headers.len(), 0);
+    }
 
+    #[test]
+    fn test_read_program_headers_gcc_minimal_elf() {
         // Manually check with command `readelf -l gcc/minimal.elf`
-        {
-            let binary = get_example_file_binary("gcc/minimal.elf");
-            let elf = read_file(&binary).unwrap();
-            let program_headers = read_program_headers(elf, &binary).unwrap();
+        let binary = get_example_file_binary("gcc/minimal.elf");
+        let elf = read_file(&binary).unwrap();
+        let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(program_headers.len(), 7);
 
                 assert_eq!(
@@ -2057,8 +2108,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(program_headers.len(), 1);
 
                 assert_eq!(
@@ -2074,16 +2124,20 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
+    }
 
+    #[test]
+    fn test_read_program_headers_gcc_data_elf() {
         // Manually check with command `readelf -l gcc/data.elf`
-        {
-            let binary = get_example_file_binary("gcc/data.elf");
-            let elf = read_file(&binary).unwrap();
-            let program_headers = read_program_headers(elf, &binary).unwrap();
 
-            #[cfg(target_arch = "x86_64")]
-            {
+        let binary = get_example_file_binary("gcc/data.elf");
+        let elf = read_file(&binary).unwrap();
+        let program_headers = read_program_headers(elf, &binary).unwrap();
+
+        match get_arch() {
+            ARCH::X86_64 => {
                 assert_eq!(program_headers.len(), 8);
 
                 assert_eq!(
@@ -2113,8 +2167,7 @@ mod tests {
                 );
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
+            ARCH::AARCH64 => {
                 assert_eq!(program_headers.len(), 2);
 
                 assert_eq!(
@@ -2143,6 +2196,7 @@ mod tests {
                     }
                 );
             }
+            _ => unimplemented!(),
         }
     }
 }
