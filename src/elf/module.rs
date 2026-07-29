@@ -158,7 +158,7 @@ pub enum SymbolType {
     Object,  // Data object, e.g. global variable
     Func,    // Function
     Section, // Section
-    File,    // File
+    // File,    // File
     TLS,     // Thread-local storage
     Other(u8),
 }
@@ -181,7 +181,7 @@ impl From<u8> for SymbolType {
             elf::STT_OBJECT => SymbolType::Object,
             elf::STT_FUNC => SymbolType::Func,
             elf::STT_SECTION => SymbolType::Section,
-            elf::STT_FILE => SymbolType::File,
+            // elf::STT_FILE => SymbolType::File,
             elf::STT_TLS => SymbolType::TLS,
             other => SymbolType::Other(other),
         }
@@ -259,7 +259,7 @@ pub enum RelocationType {
     ///
     /// Because this linker does not support dynamic linking, we can treat `R_X86_64_PLT32` the
     /// same as `R_X86_64_PC32` for static linking purposes.
-    R_X86_64_PLT32,
+    // R_X86_64_PLT32,
 
     /// The `R_X86_64_64` relocation type represents a 64-bit absolute relocation.
     /// It is produced by the assembler/compiler whenever a full 64-bit address is stored
@@ -346,6 +346,8 @@ pub enum RelocationType {
     /// It is similar to `R_X86_64_64` in x86_64 architecture, and is used when
     /// a full 64-bit address is stored in a data section.
     R_AARCH64_ABS64,
+
+    R_AARCH64_PREL32,
 }
 
 #[derive(Debug, PartialEq)]

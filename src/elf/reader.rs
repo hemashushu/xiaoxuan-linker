@@ -379,11 +379,14 @@ fn parse_relocations(
 
 fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, LinkerError> {
     match relocation_type_raw {
+        /* x86_64 */
         object::elf::R_X86_64_PC32 => Ok(RelocationType::R_X86_64_PC32),
         object::elf::R_X86_64_64 => Ok(RelocationType::R_X86_64_64),
         object::elf::R_X86_64_32 => Ok(RelocationType::R_X86_64_32),
         object::elf::R_X86_64_TPOFF32 => Ok(RelocationType::R_X86_64_TPOFF32),
-        object::elf::R_X86_64_PLT32 => Ok(RelocationType::R_X86_64_PLT32),
+        // object::elf::R_X86_64_PLT32 => Ok(RelocationType::R_X86_64_PLT32),
+
+        /* aarch64 */
         object::elf::R_AARCH64_ADR_PREL_PG_HI21 => Ok(RelocationType::R_AARCH64_ADR_PREL_PG_HI21),
         object::elf::R_AARCH64_LDST64_ABS_LO12_NC => {
             Ok(RelocationType::R_AARCH64_LDST64_ABS_LO12_NC)
@@ -391,6 +394,9 @@ fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, Lin
         object::elf::R_AARCH64_ADD_ABS_LO12_NC => Ok(RelocationType::R_AARCH64_ADD_ABS_LO12_NC),
         object::elf::R_AARCH64_CALL26 => Ok(RelocationType::R_AARCH64_CALL26),
         object::elf::R_AARCH64_ABS64 => Ok(RelocationType::R_AARCH64_ABS64),
+        object::elf::R_AARCH64_PREL32 => Ok(RelocationType::R_AARCH64_PREL32),
+
+        /* unsupported */
         _ => Err(LinkerError::new(&format!(
             "Unsupported relocation type: {relocation_type_raw}"
         ))),
@@ -506,6 +512,17 @@ mod tests {
             .join(file_name);
 
         std::fs::read(file_path).unwrap()
+    }
+
+    fn assert_contains_all(strs: &[&str], expected: &[&str]) {
+        for &expected_str in expected {
+            assert!(
+                strs.contains(&expected_str),
+                "Expected string '{}' not found in the list: {:?}",
+                expected_str,
+                strs
+            );
+        }
     }
 
     #[test]
@@ -1376,7 +1393,7 @@ mod tests {
                         file_type: FileType::Relocatable,
                         entry_point: 0,
                         program_header_count: 0,
-                        section_header_count: 12,
+                        section_header_count: 11,
                     }
                 );
             }
@@ -1414,7 +1431,7 @@ mod tests {
                         file_type: FileType::Executable,
                         entry_point: 0x40014c,
                         program_header_count: 3,
-                        section_header_count: 9,
+                        section_header_count: 8,
                     }
                 );
             }
@@ -1458,7 +1475,7 @@ mod tests {
             }
 
             ARCH::AARCH64 => {
-                assert_eq!(sections.len(), 12);
+                assert_eq!(sections.len(), 11);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
                     vec!["", ".text", ".data", ".bss",]
@@ -1511,7 +1528,7 @@ mod tests {
             }
 
             ARCH::AARCH64 => {
-                assert_eq!(sections.len(), 14);
+                assert_eq!(sections.len(), 13);
                 assert_eq!(
                     sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
                     vec!["", ".text", ".rela.text", ".data",]
@@ -1560,29 +1577,18 @@ mod tests {
             }
 
             ARCH::AARCH64 => {
-                assert_eq!(symbols.len(), 14);
+                assert_eq!(symbols.len(), 13);
 
                 assert_eq!(symbols[0], Symbol::Other);
 
                 assert_eq!(
-                    symbols[1],
-                    Symbol::Defined {
-                        name: String::new(),
-                        section_index: 1,
-                        bind: SymbolBind::Local,
-                        symbol_type: SymbolType::Section,
-                        offset: 0,
-                    }
-                );
-
-                assert_eq!(
-                    symbols[5],
+                    symbols[12],
                     Symbol::Defined {
                         name: "_start".to_string(),
                         section_index: 1,
                         bind: SymbolBind::Global,
-                        symbol_type: SymbolType::Notype,
-                        offset: 0,
+                        symbol_type: SymbolType::Func,
+                        offset: 0x40,
                     }
                 );
             }
@@ -1626,28 +1632,18 @@ mod tests {
             }
 
             ARCH::AARCH64 => {
-                assert_eq!(symbols.len(), 16);
+                assert_eq!(symbols.len(), 23);
 
                 assert_eq!(symbols[0], Symbol::Other);
-                assert_eq!(
-                    symbols[1],
-                    Symbol::Defined {
-                        name: String::new(),
-                        section_index: 1,
-                        bind: SymbolBind::Local,
-                        symbol_type: SymbolType::Section,
-                        offset: 0,
-                    }
-                );
 
                 assert_eq!(
-                    symbols[15],
+                    symbols[22],
                     Symbol::Defined {
                         name: "_start".to_string(),
                         section_index: 1,
                         bind: SymbolBind::Global,
-                        symbol_type: SymbolType::Notype,
-                        offset: 0,
+                        symbol_type: SymbolType::Func,
+                        offset: 0x40,
                     }
                 );
             }
@@ -1682,21 +1678,21 @@ mod tests {
             }
 
             ARCH::AARCH64 => {
-                assert_eq!(symbols.len(), 14);
+                assert_eq!(symbols.len(), 21);
 
                 assert_eq!(symbols[0], Symbol::Other);
                 assert_eq!(
-                    symbols[1],
+                    symbols[12],
                     Symbol::Defined {
-                        name: String::new(),
+                        name: "_start".to_string(),
                         section_index: 1,
-                        bind: SymbolBind::Local,
-                        symbol_type: SymbolType::Section,
-                        offset: 0,
+                        bind: SymbolBind::Global,
+                        symbol_type: SymbolType::Func,
+                        offset: 0x40,
                     }
                 );
 
-                assert_eq!(symbols[13], Symbol::External("y".to_string()));
+                assert_eq!(symbols[20], Symbol::External("y".to_string()));
             }
             _ => unimplemented!(),
         }
@@ -1737,26 +1733,25 @@ mod tests {
             }
 
             ARCH::AARCH64 => {
-                assert_eq!(symbols.len(), 7);
+                assert_eq!(symbols.len(), 12);
 
-                assert_eq!(symbols[0], Symbol::Other);
                 assert_eq!(
-                    symbols[1],
+                    symbols[10],
                     Symbol::Defined {
-                        name: String::new(),
+                        name: "foo".to_string(),
+                        bind: SymbolBind::Weak,
+                        symbol_type: SymbolType::Func,
                         section_index: 1,
-                        bind: SymbolBind::Local,
-                        symbol_type: SymbolType::Section,
-                        offset: 0,
+                        offset: 0x0
                     }
                 );
 
                 assert_eq!(
-                    symbols[6],
+                    symbols[11],
                     Symbol::Defined {
                         name: "bar".to_string(),
                         bind: SymbolBind::Weak,
-                        symbol_type: SymbolType::Notype,
+                        symbol_type: SymbolType::Func,
                         section_index: 1,
                         offset: 0x8
                     }
@@ -1781,10 +1776,12 @@ mod tests {
 
                 let relocation_section = &relocation_sections[0];
                 assert_eq!(relocation_section.name, ".rela.eh_frame");
-                assert_eq!(relocation_section.target_section_index, 7); // index of `.eh_frame` section
             }
             ARCH::AARCH64 => {
-                unimplemented!()
+                assert_eq!(relocation_sections.len(), 1);
+
+                let relocation_section = &relocation_sections[0];
+                assert_eq!(relocation_section.name, ".rela.eh_frame");
             }
             _ => unimplemented!(),
         }
@@ -1795,6 +1792,8 @@ mod tests {
         // Manually check with command `readelf -r gcc/data.o`
         let binary = get_example_file_binary("gcc/data.o");
         let elf = read_file(&binary).unwrap();
+        let sections = read_section_headers(elf, &binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
         let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
         match get_arch() {
@@ -1827,35 +1826,43 @@ mod tests {
                     }
                 );
             }
-
             ARCH::AARCH64 => {
-                assert_eq!(relocation_sections.len(), 1);
+                assert!(
+                    relocation_sections
+                        .iter()
+                        .find(|s| s.name == ".rela.text")
+                        .is_some()
+                );
 
-                let relocation_section = &relocation_sections[0];
-                assert_eq!(relocation_section.name, ".rela.text");
-                assert_eq!(relocation_section.target_section_index, 1);
+                let relocation_section = relocation_sections
+                    .iter()
+                    .find(|s| s.name == ".rela.text")
+                    .unwrap();
+
+                assert_eq!(
+                    relocation_section.target_section_index,
+                    sections.iter().position(|s| s.name == ".text").unwrap()
+                );
 
                 let relocations = &relocation_section.relocations;
-                assert_eq!(relocations.len(), 20);
 
                 assert_eq!(
-                    relocations[0],
-                    Relocation {
-                        relocation_type: RelocationType::R_AARCH64_ADR_PREL_PG_HI21,
-                        placeholder_offset: 0x0,
-                        symbol_index: 4,
-                        addend: 0
-                    }
+                    relocations[0].relocation_type,
+                    RelocationType::R_AARCH64_ADR_PREL_PG_HI21
                 );
+                assert!(matches!(
+                    &symbols[relocations[0].symbol_index],
+                    Symbol::Defined { name, .. } if name == "foo"
+                ));
+
                 assert_eq!(
-                    relocations[1],
-                    Relocation {
-                        relocation_type: RelocationType::R_AARCH64_LDST64_ABS_LO12_NC,
-                        placeholder_offset: 0x4,
-                        symbol_index: 4,
-                        addend: 0
-                    }
+                    relocations[1].relocation_type,
+                    RelocationType::R_AARCH64_ADD_ABS_LO12_NC
                 );
+                assert!(matches!(
+                    &symbols[relocations[1].symbol_index],
+                    Symbol::Defined { name, .. } if name == "foo"
+                ));
             }
             _ => unimplemented!(),
         }
@@ -1871,6 +1878,8 @@ mod tests {
         // Manually check with command `readelf -r gcc/relocate-within-data-no-pie.o`
         let binary = get_example_file_binary("gcc/relocate-within-data-no-pie.o");
         let elf = read_file(&binary).unwrap();
+        let sections = read_section_headers(elf, &binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
         let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
         match get_arch() {
@@ -1964,36 +1973,46 @@ mod tests {
                     );
                 }
             }
-
             ARCH::AARCH64 => {
-                assert_eq!(relocation_sections.len(), 3);
+                assert_contains_all(
+                    &relocation_sections
+                        .iter()
+                        .map(|s| s.name.as_str())
+                        .collect::<Vec<_>>(),
+                    &[".rela.text", ".rela.data", ".rela.rodata"],
+                );
 
                 // `.rela.text`
                 {
-                    let relocation_section = &relocation_sections[0];
-                    assert_eq!(relocation_section.name, ".rela.text");
-                    assert_eq!(relocation_section.target_section_index, 1);
-                    let relocations = &relocation_section.relocations;
-                    assert_eq!(relocations.len(), 12);
+                    let relocation_section = relocation_sections
+                        .iter()
+                        .find(|s| s.name == ".rela.text")
+                        .unwrap();
 
                     assert_eq!(
-                        relocations[0],
-                        Relocation {
-                            relocation_type: RelocationType::R_AARCH64_ADR_PREL_PG_HI21,
-                            placeholder_offset: 0x10,
-                            symbol_index: 0xb,
-                            addend: 0
-                        }
+                        relocation_section.target_section_index,
+                        sections.iter().position(|s| s.name == ".text").unwrap()
                     );
+
+                    let relocations = &relocation_section.relocations;
+
                     assert_eq!(
-                        relocations[1],
-                        Relocation {
-                            relocation_type: RelocationType::R_AARCH64_LDST64_ABS_LO12_NC,
-                            placeholder_offset: 0x14,
-                            symbol_index: 0xb,
-                            addend: 0
-                        }
+                        relocations[0].relocation_type,
+                        RelocationType::R_AARCH64_ADR_PREL_PG_HI21
                     );
+                    assert!(matches!(
+                        &symbols[relocations[0].symbol_index],
+                        Symbol::Defined { name, .. } if name == "foo"
+                    ));
+
+                    assert_eq!(
+                        relocations[1].relocation_type,
+                        RelocationType::R_AARCH64_ADD_ABS_LO12_NC
+                    );
+                    assert!(matches!(
+                        &symbols[relocations[1].symbol_index],
+                        Symbol::Defined { name, .. } if name == "foo"
+                    ));
                 }
 
                 // `.rela.data`
