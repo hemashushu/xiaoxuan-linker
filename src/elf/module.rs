@@ -9,12 +9,28 @@ use object::elf;
 // https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
 #[derive(Debug, PartialEq)]
 pub struct FileHeader {
+    pub data_encoding: DataEncoding,
+    pub file_class: FileClass,
     pub os_abi: OSABI,
     pub machine: Machine,
     pub file_type: FileType,
     pub entry_point: usize,
     pub program_header_count: usize,
     pub section_header_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataEncoding {
+    LittleEndian, // ELFDATA2LSB
+    BigEndian,    // ELFDATA2MSB
+    Other(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileClass {
+    Elf32, // ELFCLASS32
+    Elf64, // ELFCLASS64
+    Other(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +49,8 @@ pub enum Machine {
     AArch64,   // EM_AARCH64
     RiscV,     // EM_RISCV
     LoongArch, // EM_LOONGARCH
-    // S390,      // EM_S390
+    PowerPC64, // EM_PPC64
+    S390,      // EM_S390
     Other(u16),
 }
 
@@ -43,6 +60,26 @@ pub enum FileType {
     Executable,   // ET_EXEC
     SharedObject, // ET_DYN
     Other(u16),
+}
+
+impl From<u8> for DataEncoding {
+    fn from(value: u8) -> Self {
+        match value {
+            elf::ELFDATA2LSB => DataEncoding::LittleEndian,
+            elf::ELFDATA2MSB => DataEncoding::BigEndian,
+            other => DataEncoding::Other(other),
+        }
+    }
+}
+
+impl From<u8> for FileClass {
+    fn from(value: u8) -> Self {
+        match value {
+            elf::ELFCLASS32 => FileClass::Elf32,
+            elf::ELFCLASS64 => FileClass::Elf64,
+            other => FileClass::Other(other),
+        }
+    }
 }
 
 impl From<u8> for OSABI {
@@ -61,6 +98,8 @@ impl From<u16> for Machine {
             elf::EM_AARCH64 => Machine::AArch64,
             elf::EM_RISCV => Machine::RiscV,
             elf::EM_LOONGARCH => Machine::LoongArch,
+            elf::EM_PPC64 => Machine::PowerPC64,
+            elf::EM_S390 => Machine::S390,
             other => Machine::Other(other),
         }
     }
@@ -159,7 +198,7 @@ pub enum SymbolType {
     Func,    // Function
     Section, // Section
     // File,    // File
-    TLS,     // Thread-local storage
+    TLS, // Thread-local storage
     Other(u8),
 }
 
@@ -338,6 +377,8 @@ pub enum RelocationType {
     ///
     R_AARCH64_ADR_PREL_PG_HI21,
     R_AARCH64_LDST64_ABS_LO12_NC,
+
+    // TODO
     R_AARCH64_ADD_ABS_LO12_NC,
     R_AARCH64_CALL26,
 
@@ -347,7 +388,13 @@ pub enum RelocationType {
     /// a full 64-bit address is stored in a data section.
     R_AARCH64_ABS64,
 
+    // TODO
     R_AARCH64_PREL32,
+
+    // TODO
+    R_RISCV_PCREL_HI20,
+    R_RISCV_PCREL_LO12_I,
+    R_RISCV_RELAX,
 }
 
 #[derive(Debug, PartialEq)]

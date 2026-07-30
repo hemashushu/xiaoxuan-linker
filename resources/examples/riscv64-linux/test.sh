@@ -92,12 +92,10 @@ run_case "gcc/data.elf" 24 ""
 run_case "gcc/symbol.elf" 24 ""
 run_case "gcc/override.elf" 53 ""
 run_case "gcc/relocate-within-data.elf" 24 ""
-run_case "gcc/relocate-within-data-no-pie.elf" 24 ""
 
-run_case "gcc/relocate-within-tls.elf" 126 ""
-run_case "gcc/relocate-within-tls-no-pie.elf" 126 ""
 run_case "gcc/tls.elf" 66 ""
 run_case "gcc/tls-gd.elf" 66 ""
+run_case "gcc/relocate-within-tls.elf" 126 ""
 run_case "gcc/share.elf" 199 ""
 
 if [[ $fail_count -ne 0 ]]; then

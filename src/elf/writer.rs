@@ -803,6 +803,14 @@ mod tests {
         const RETRY_INTERVAL: Duration = Duration::from_millis(5);
         std::thread::sleep(RETRY_INTERVAL);
 
+        // TODO::
+        // Use QEMU to run the executable on non-native architectures
+        // (e.g., aarch64, riscv64, loongarch64, powerpc64le, s390x)
+        //
+        // For example, to run the aarch64 executable on x86_64, you can use:
+        //
+        // qemu-aarch64 -L $(aarch64-linux-gnu-gcc -print-sysroot) ./executable_file
+
         let output = std::process::Command::new(file_path)
             .output()
             .expect("failed to execute process");
