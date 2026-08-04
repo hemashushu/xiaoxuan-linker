@@ -42,10 +42,12 @@ _start:
     // read `foo` and subtract 1, then store the result in `a`.
     // (`a` should be 10 after this)
     adrp x0, foo
-    ldr x0, [x0, :lo12:foo]
+    add x0, x0, :lo12:foo
+    ldr x0, [x0]
     sub x0, x0, #1
     adrp x1, a
-    str x0, [x1, :lo12:a]
+    add x1, x1, :lo12:a
+    str x0, [x1]
 
     // read `bar` and add 1, then store the result in `b`.
     // (`b` should be 14 after this)
@@ -58,25 +60,31 @@ _start:
     // read `a` and `b`, add them together, and store the result in `x`.
     // (`x` should be 24 after this)
     adrp x0, a
-    ldr x0, [x0, :lo12:a]
+    add x0, x0, :lo12:a
+    ldr x0, [x0]
     adrp x1, b
-    ldr x1, [x1, :lo12:b]
+    add x1, x1, :lo12:b
+    ldr x1, [x1]
     add x0, x0, x1
     adrp x2, x
-    str x0, [x2, :lo12:x]
+    add x2, x2, :lo12:x
+    str x0, [x2]
 
     // copy `x` to `y`.
     // (`y` should be 24 after this)
     adrp x0, x
-    ldr x0, [x0, :lo12:x]
+    add x0, x0, :lo12:x
+    ldr x0, [x0]
     adrp x1, y
-    str x0, [x1, :lo12:y]
+    add x1, x1, :lo12:y
+    str x0, [x1]
 
     // read `y` and exit with the value of `y` as the status code.
     //
     // exit program using syscall `exit(status)`
     // syscall number: 93
     adrp x0, y
-    ldr x0, [x0, :lo12:y]
+    add x0, x0, :lo12:y
+    ldr x0, [x0]
     mov x8, #93
     svc #0

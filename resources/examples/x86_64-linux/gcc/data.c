@@ -4,16 +4,16 @@
 #include "common.in"
 
 // .rodata
-const long foo = 11;
-const long bar = 13;
+const static long foo = 11;
+const static long bar = 13;
 
 // .data
-long a = 17;
-long b = 19;
+static long a = 17;
+static long b = 19;
 
 // .bss
-long x;
-long y;
+static long x;
+static long y;
 
 [[noreturn]]
 void _start(void)

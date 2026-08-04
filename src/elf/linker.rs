@@ -425,7 +425,7 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
                             patch_value: PatchValue::Value32(relocated_value as u32),
                         }
                     }
-                    RelocationType::R_X86_64_PC32 => {
+                    RelocationType::R_X86_64_PC32 /* | RelocationType::R_X86_64_PLT32 */ => {
                         // R_X86_64_PC32: S + A - P
                         let section_text =
                             module.sections.get(&RelocatableSectionType::Text).unwrap();
@@ -442,31 +442,32 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
                             patch_value: PatchValue::Value32(relocated_value as u32),
                         }
                     }
-                    RelocationType::R_X86_64_TPOFF32 => {
-                        // R_X86_64_TPOFF32: S + A - TP
-                        // The formula for calculating the value to be written at the relocation site is:
-                        // TPOFF(sym) = symbol_offset_in_tls_block − tls_block_size
-                        let section_tdata =
-                            module.sections.get(&RelocatableSectionType::TData).unwrap();
-                        let section_tbss =
-                            module.sections.get(&RelocatableSectionType::TBss).unwrap();
-
-                        let tls_block_size = section_tbss.resolved_virtual_address
-                            - section_tdata.resolved_virtual_address
-                            + section_tbss.size;
-                        let symbol_offset_in_tls_block = target_symbol.resolved_offset;
-
-                        let relocated_value = symbol_offset_in_tls_block
-                            .wrapping_add(addend as usize)
-                            .wrapping_sub(tls_block_size);
-
-                        PatchItem {
-                            module_index,
-                            patch_section_type: *patch_section_type,
-                            patch_offset: placeholder_offset,
-                            patch_value: PatchValue::Value32(relocated_value as u32),
-                        }
-                    }
+                    // todo:: not implemented yet
+                    // RelocationType::R_X86_64_TPOFF32 => {
+                    //     // R_X86_64_TPOFF32: S + A - TP
+                    //     // The formula for calculating the value to be written at the relocation site is:
+                    //     // TPOFF(sym) = symbol_offset_in_tls_block − tls_block_size
+                    //     let section_tdata =
+                    //         module.sections.get(&RelocatableSectionType::TData).unwrap();
+                    //     let section_tbss =
+                    //         module.sections.get(&RelocatableSectionType::TBss).unwrap();
+                    //
+                    //     let tls_block_size = section_tbss.resolved_virtual_address
+                    //         - section_tdata.resolved_virtual_address
+                    //         + section_tbss.size;
+                    //     let symbol_offset_in_tls_block = target_symbol.resolved_offset;
+                    //
+                    //     let relocated_value = symbol_offset_in_tls_block
+                    //         .wrapping_add(addend as usize)
+                    //         .wrapping_sub(tls_block_size);
+                    //
+                    //     PatchItem {
+                    //         module_index,
+                    //         patch_section_type: *patch_section_type,
+                    //         patch_offset: placeholder_offset,
+                    //         patch_value: PatchValue::Value32(relocated_value as u32),
+                    //     }
+                    // }
                     _ => {
                         unimplemented!()
                     }

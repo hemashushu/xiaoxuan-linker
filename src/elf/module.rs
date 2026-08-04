@@ -298,6 +298,7 @@ pub enum RelocationType {
     ///
     /// Because this linker does not support dynamic linking, we can treat `R_X86_64_PLT32` the
     /// same as `R_X86_64_PC32` for static linking purposes.
+    // TODO: Not implemented yet
     // R_X86_64_PLT32,
 
     /// The `R_X86_64_64` relocation type represents a 64-bit absolute relocation.
@@ -364,22 +365,41 @@ pub enum RelocationType {
     /// | var1 (offset 0)           | [fs:-8] = FS.base - 8 (tpoff = -8)
     /// +---------------------------+
     /// Lower addresses
-    R_X86_64_TPOFF32,
+    // TODO: Not implemented yet
+    // R_X86_64_TPOFF32,
 
-    /// `R_AARCH64_ADR_PREL_PG_HI21` and `R_AARCH64_LDST64_ABS_LO12_NC` are used for PC-relative addressing.
+    /// `R_AARCH64_ADR_PREL_PG_HI21` and `R_AARCH64_ADD_ABS_LO12_NC/R_AARCH64_LDST64_ABS_LO12_NC` are used for PC-relative addressing.
     ///
     /// - Name 'R_AARCH64_ADR_PREL_PG_HI21' = 'ADRP instruction' + 'PC relative' + 'Page' + 'High 21 bits immediate'
+    /// - Name 'R_AARCH64_ADD_ABS_LO12_NC' = 'Add instruction' + 'Absolute' + 'Low 12 bits immediate' + 'Non-Checked'
     /// - Name 'R_AARCH64_LDST64_ABS_LO12_NC' = 'Load/Store instruction' + '64-bit' + 'Absolute' + 'Low 12 bits immediate' + 'Non-Checked'
     ///
     /// There are 2 steps to load/store a 64-bit address in AArch64 architecture:
+    ///
+    /// ```asm
+    /// adrp x0, foo
+    /// ldr x0, [x0, :lo12:foo]
+    /// ```
+    ///
     /// 1. Use `ADRP` instruction to calculate the page address (high 21 bits) of the target symbol and PC.
     /// 2. Load/store the value with 12 bits offset within the page of the target symbol.
     ///
+    /// The relocation entries for this sequence are `R_AARCH64_ADR_PREL_PG_HI21` + `R_AARCH64_LDST64_ABS_LO12_NC`.
+    ///
+    /// These 2 steps can also be written as `ADRP` + `ADD` + `LDR/STR`:
+    ///
+    /// ```asm
+    /// adrp x0, foo
+    /// add x0, x0, :lo12:foo
+    /// ldr x0, [x0]
+    /// ```
+    ///
+    /// The relocation entries for this sequence are `R_AARCH64_ADR_PREL_PG_HI21` + `R_AARCH64_ADD_ABS_LO12_NC`.
     R_AARCH64_ADR_PREL_PG_HI21,
+    R_AARCH64_ADD_ABS_LO12_NC,
     R_AARCH64_LDST64_ABS_LO12_NC,
 
-    // TODO
-    R_AARCH64_ADD_ABS_LO12_NC,
+    /// `R_AARCH64_CALL26` is used for PC-relative function calls in AArch64 architecture.
     R_AARCH64_CALL26,
 
     /// `R_AARCH64_ABS64` is used for absolute addressing of 64-bit data in AArch64 architecture.
@@ -388,13 +408,19 @@ pub enum RelocationType {
     /// a full 64-bit address is stored in a data section.
     R_AARCH64_ABS64,
 
-    // TODO
+    /// Appears in the `.rela.eh_frame` section.
+    /// This type is necessary for handling GCC generated object files.
     R_AARCH64_PREL32,
 
     // TODO
-    R_RISCV_PCREL_HI20,
-    R_RISCV_PCREL_LO12_I,
-    R_RISCV_RELAX,
+    // R_RISCV_PCREL_HI20,
+    // R_RISCV_PCREL_LO12_I,
+    // R_RISCV_PCREL_LO12_S,
+    // R_RISCV_32,
+    // R_RISCV_64,
+    // R_RISCV_BRANCH,
+    // R_RISCV_JAL,
+    // R_RISCV_CALL,
 }
 
 #[derive(Debug, PartialEq)]

@@ -4,22 +4,20 @@
 #include "common.in"
 
 // .rodata
-const long foo = 11;
-const long bar = 13;
+const static long foo = 11;
+const static long bar = 13;
 
 // .data
-long a = 17;
-long b = 19;
+static long a = 17;
+static long b = 19;
 
 // .bss
-long x;
-long y;
+static long x;
+static long y;
 
 [[noreturn]]
 void _start(void)
 {
-    init_gp();
-
     a = foo - 1; // 11 - 1 = 10
     b = bar + 1; // 13 + 1 = 14
     x = a + b;   // 10 + 14 = 24

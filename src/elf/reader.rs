@@ -387,23 +387,21 @@ fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, Lin
         object::elf::R_X86_64_PC32 => Ok(RelocationType::R_X86_64_PC32),
         object::elf::R_X86_64_64 => Ok(RelocationType::R_X86_64_64),
         object::elf::R_X86_64_32 => Ok(RelocationType::R_X86_64_32),
-        object::elf::R_X86_64_TPOFF32 => Ok(RelocationType::R_X86_64_TPOFF32),
-        // object::elf::R_X86_64_PLT32 => Ok(RelocationType::R_X86_64_PLT32),
+        // object::elf::R_X86_64_TPOFF32 => Ok(RelocationType::R_X86_64_TPOFF32),
 
         /* aarch64 */
         object::elf::R_AARCH64_ADR_PREL_PG_HI21 => Ok(RelocationType::R_AARCH64_ADR_PREL_PG_HI21),
+        object::elf::R_AARCH64_ADD_ABS_LO12_NC => Ok(RelocationType::R_AARCH64_ADD_ABS_LO12_NC),
         object::elf::R_AARCH64_LDST64_ABS_LO12_NC => {
             Ok(RelocationType::R_AARCH64_LDST64_ABS_LO12_NC)
         }
-        object::elf::R_AARCH64_ADD_ABS_LO12_NC => Ok(RelocationType::R_AARCH64_ADD_ABS_LO12_NC),
         object::elf::R_AARCH64_CALL26 => Ok(RelocationType::R_AARCH64_CALL26),
         object::elf::R_AARCH64_ABS64 => Ok(RelocationType::R_AARCH64_ABS64),
         object::elf::R_AARCH64_PREL32 => Ok(RelocationType::R_AARCH64_PREL32),
 
         /* riscv */
-        object::elf::R_RISCV_PCREL_HI20 => Ok(RelocationType::R_RISCV_PCREL_HI20),
-        object::elf::R_RISCV_PCREL_LO12_I => Ok(RelocationType::R_RISCV_PCREL_LO12_I),
-        object::elf::R_RISCV_RELAX => Ok(RelocationType::R_RISCV_RELAX),
+        // object::elf::R_RISCV_PCREL_HI20 => Ok(RelocationType::R_RISCV_PCREL_HI20),
+        // object::elf::R_RISCV_PCREL_LO12_I => Ok(RelocationType::R_RISCV_PCREL_LO12_I),
 
         /* unsupported */
         _ => Err(LinkerError::new(&format!(
@@ -466,7 +464,7 @@ pub fn read_program_headers(
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use std::vec;
+    use std::{str::Matches, vec};
 
     use crate::elf::{
         module::{
@@ -483,7 +481,7 @@ mod tests {
     const IMPLEMENTED_ARCHS: &[Machine] = &[
         Machine::X86_64,
         Machine::AArch64,
-        Machine::RiscV,
+        // Machine::RiscV,
         // Machine::LoongArch,
         // Machine::PowerPC64,
         // Machine::S390,
@@ -521,6 +519,10 @@ mod tests {
             );
         }
     }
+
+    // ===============================================
+    // Assembly programs compiled with `as` for testing purposes
+    // ===============================================
 
     #[test]
     fn test_read_file_header_asm_minimal_o() {
@@ -598,64 +600,52 @@ mod tests {
                 &[".text", ".data", ".bss", ".symtab", ".strtab", ".shstrtab"],
             );
 
-            // check section types
+            // Check section types
 
             // The first section header is always a NULL section header, which is reserved and has no name.
-            assert_eq!(sections.first().unwrap().section_type, SectionType::Null);
+            assert!(matches!(sections.first(), Some(s) if s.section_type == SectionType::Null));
 
-            assert_eq!(
+            assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".text")
-                    .unwrap()
-                    .section_type,
-                SectionType::Progbits
-            );
+                    .find(|s| s.name == ".text"),
+                Some(s) if s.section_type == SectionType::Progbits
+            ));
 
-            assert_eq!(
+            assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".data")
-                    .unwrap()
-                    .section_type,
-                SectionType::Progbits
-            );
+                    .find(|s| s.name == ".data"),
+                Some(s) if s.section_type == SectionType::Progbits
+            ));
 
-            assert_eq!(
+            assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".bss")
-                    .unwrap()
-                    .section_type,
-                SectionType::Nobits
-            );
+                    .find(|s| s.name == ".bss"),
+                Some(s) if s.section_type == SectionType::Nobits
+            ));
 
-            assert_eq!(
+            assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".symtab")
-                    .unwrap()
-                    .section_type,
-                SectionType::Symtab
-            );
+                    .find(|s| s.name == ".symtab"),
+                Some(s) if s.section_type == SectionType::Symtab
+            ));
 
-            assert_eq!(
+            assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".strtab")
-                    .unwrap()
-                    .section_type,
-                SectionType::Strtab
-            );
+                    .find(|s| s.name == ".strtab"),
+                Some(s) if s.section_type == SectionType::Strtab
+            ));
 
-            assert_eq!(
+            assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".shstrtab")
-                    .unwrap()
-                    .section_type,
-                SectionType::Strtab
-            );
+                    .find(|s| s.name == ".shstrtab"),
+                Some(s) if s.section_type == SectionType::Strtab
+            ));
         }
     }
 
@@ -670,27 +660,32 @@ mod tests {
             // Check section names
             assert_contains_all(
                 &sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
-                &[".text", ".rela.text", ".data", ".bss", ".rodata"],
+                &[
+                    ".text",
+                    ".rela.text",
+                    ".data",
+                    ".bss",
+                    ".rodata",
+                    ".symtab",
+                    ".strtab",
+                    ".shstrtab",
+                ],
             );
 
             // Check section types
-            assert_eq!(
+            assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".rela.text")
-                    .unwrap()
-                    .section_type,
-                SectionType::Rela
-            );
+                    .find(|s| s.name == ".rela.text"),
+                Some(s) if s.section_type == SectionType::Rela
+            ));
 
-            assert_eq!(
+            assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".rodata")
-                    .unwrap()
-                    .section_type,
-                SectionType::Progbits
-            );
+                    .find(|s| s.name == ".rodata"),
+                Some(s) if s.section_type == SectionType::Progbits
+            ));
         }
     }
 
@@ -705,16 +700,16 @@ mod tests {
             // The first symbol table entry (index 0) is reserved and must be undefined.
             assert_eq!(symbols[0], Symbol::Other);
 
-            assert!(
+            assert!(matches!(
                 symbols
                     .iter()
-                    .find(|s| matches!(s, Symbol::Defined {
-                            name,
-                            bind,
-                            ..
-                        } if name == "_start" && *bind == SymbolBind::Global))
-                    .is_some()
-            );
+                    .find(|s| matches!(s, Symbol::Defined {name,..} if name == "_start")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Notype,
+                    ..
+                })
+            ));
         }
     }
 
@@ -726,9 +721,7 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
-            // check symbols names, types and binds, but not check the section index and offset,
-            // because they may vary across different platforms and versions of the assembler.
-
+            // Check symbol names
             assert_contains_all(
                 &symbols
                     .iter()
@@ -744,41 +737,41 @@ mod tests {
                 &["foo", "bar", "a", "b", "x", "y", "_start"],
             );
 
+            // Check symbols names, types and binds, but not check the section index and offset,
+            // because they may vary across different platforms and versions of the assembler.
+
             // Only check a few entries for testing purposes.
             assert!(matches!(
                 symbols
                     .iter()
-                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "foo"))
-                    .unwrap(),
-                Symbol::Defined {
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "foo")),
+                Some(Symbol::Defined {
                     bind: SymbolBind::Local,
                     symbol_type: SymbolType::Notype,
                     ..
-                }
+                })
             ));
 
             assert!(matches!(
                 symbols
                     .iter()
-                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar"))
-                    .unwrap(),
-                Symbol::Defined {
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
+                Some(Symbol::Defined {
                     bind: SymbolBind::Local,
                     symbol_type: SymbolType::Notype,
                     ..
-                }
+                })
             ));
 
             assert!(matches!(
                 symbols
                     .iter()
-                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "_start"))
-                    .unwrap(),
-                Symbol::Defined {
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "_start")),
+                Some(Symbol::Defined {
                     bind: SymbolBind::Global,
                     symbol_type: SymbolType::Notype,
                     ..
-                }
+                })
             ));
 
             match arch {
@@ -793,14 +786,86 @@ mod tests {
                     assert!(
                         symbols
                             .iter()
-                            .find(|s| matches!(
-                                s,
-                                Symbol::External(name) if name == "__global_pointer$"))
+                            .find(|s| matches!(s, Symbol::External(name) if name == "__global_pointer$"))
                             .is_some()
                     );
                 }
                 _ => unimplemented!(),
             }
+        }
+    }
+
+    #[test]
+    fn test_read_symbols_asm_symbol_export_o() {
+        for arch in IMPLEMENTED_ARCHS {
+            // Manually check with command `readelf -s asm/symbol-export.o`
+            let binary = get_example_file_binary(arch, "asm/symbol-export.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // Check symbol names
+            assert_contains_all(
+                &symbols
+                    .iter()
+                    .filter(|s| matches!(s, Symbol::Defined { .. }))
+                    .map(|s| {
+                        if let Symbol::Defined { name, .. } = s {
+                            name.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                &["foo", "bar", "a", "b", "x", "y", "dec", "inc"],
+            );
+
+            // Check symbols names, types and binds, but not check the section index and offset,
+            // because they may vary across different platforms and versions of the assembler.
+
+            // Only check a few entries for testing purposes.
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "foo")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Notype,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Notype,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "dec")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Notype,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "inc")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Notype,
+                    ..
+                })
+            ));
         }
     }
 
@@ -813,6 +878,7 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
+            // Check imported symbol names
             assert_contains_all(
                 &symbols
                     .iter()
@@ -839,6 +905,7 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
+            // Check weak symbol names
             assert_contains_all(
                 &symbols
                     .iter()
@@ -859,6 +926,54 @@ mod tests {
     }
 
     #[test]
+    fn test_read_symbols_asm_override_strong_o() {
+        // Manually check with command `readelf -s asm/override-strong.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "asm/override-strong.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // Check import symbol
+            assert!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::External(name) if name == "foo"))
+                    .is_some()
+            );
+
+            // Check strong symbol
+            match arch {
+                Machine::X86_64 => {
+                    assert!(matches!(
+                        symbols
+                            .iter()
+                            .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
+                        Some(Symbol::Defined {
+                            bind: SymbolBind::Local,
+                            symbol_type: SymbolType::Notype,
+                            ..
+                        })
+                    ));
+                }
+                Machine::AArch64 => {
+                    assert!(matches!(
+                        symbols
+                            .iter()
+                            .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
+                        Some(Symbol::Defined {
+                            bind: SymbolBind::Global, // AArch64 assembler generates a global symbol for `bar` in this case.
+                            symbol_type: SymbolType::Notype,
+                            ..
+                        })
+                    ));
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    #[test]
     fn test_read_relocations_asm_minimal_o() {
         // Manually check with command `readelf -r asm/minimal.o`
         for arch in IMPLEMENTED_ARCHS {
@@ -866,7 +981,7 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            assert_eq!(relocation_sections.len(), 0);
+            assert!(relocation_sections.is_empty());
         }
     }
 
@@ -879,10 +994,12 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
-            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+            let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            let relocation_section_opt =
-                relocation_sections.iter().find(|s| s.name == ".rela.text");
+            // Check relocation section `.rela.text`
+            let relocation_section_opt = relocation_sections
+                .iter_mut()
+                .find(|s| s.name == ".rela.text");
 
             assert!(relocation_section_opt.is_some());
 
@@ -892,7 +1009,874 @@ mod tests {
                 ".text"
             );
 
-            let relocations = &relocation_section.relocations;
+            // Check relocation entries in `.rela.text` section
+            let relocations = &mut relocation_section.relocations;
+
+            // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+            relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+
+            // Only check a few entries for testing purposes.
+            match arch {
+                Machine::X86_64 => {
+                    // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+                    let relocation0 = &relocations[0];
+                    let symbol0 = &symbols[relocation0.symbol_index];
+                    assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
+                    assert!(
+                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                    );
+
+                    let relocation1 = &relocations[1];
+                    let symbol1 = &symbols[relocation1.symbol_index];
+                    assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
+                    assert!(
+                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
+                    );
+                }
+
+                Machine::AArch64 => {
+                    // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+
+                    // R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
+
+                    let relocation0 = &relocations[0];
+                    let symbol0 = &symbols[relocation0.symbol_index];
+                    assert_eq!(
+                        relocation0.relocation_type,
+                        RelocationType::R_AARCH64_ADR_PREL_PG_HI21
+                    );
+                    assert!(
+                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                    );
+
+                    let relocation1 = &relocations[1];
+                    let symbol1 = &symbols[relocation1.symbol_index];
+                    assert_eq!(
+                        relocation1.relocation_type,
+                        RelocationType::R_AARCH64_ADD_ABS_LO12_NC
+                    );
+                    assert!(
+                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                    );
+
+                    // R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_LDST64_ABS_LO12_NC
+
+                    let relocation4 = &relocations[4];
+                    let symbol4 = &symbols[relocation4.symbol_index];
+                    assert_eq!(
+                        relocation4.relocation_type,
+                        RelocationType::R_AARCH64_ADR_PREL_PG_HI21
+                    );
+                    assert!(
+                        matches!(symbol4, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                    );
+
+                    let relocation5 = &relocations[5];
+                    let symbol5 = &symbols[relocation5.symbol_index];
+                    assert_eq!(
+                        relocation5.relocation_type,
+                        RelocationType::R_AARCH64_LDST64_ABS_LO12_NC
+                    );
+                    assert!(
+                        matches!(symbol5, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                    );
+                }
+                Machine::RiscV => {
+                    // todo
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_relocations_asm_relocate_within_data_o() {
+        // Manually check with command `readelf -r asm/relocate-within-data.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "asm/relocate-within-data.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+            let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+            // Check relocation section `.rela.text`
+            {
+                let relocation_section_opt = relocation_sections
+                    .iter_mut()
+                    .find(|s| s.name == ".rela.text");
+
+                assert!(relocation_section_opt.is_some());
+
+                let relocation_section = relocation_section_opt.unwrap();
+                assert_eq!(
+                    sections[relocation_section.target_section_index].name,
+                    ".text"
+                );
+
+                // Check relocation entries in `.rela.text` section
+                let relocations = &mut relocation_section.relocations;
+
+                // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+
+                // Only check a few entries for testing purposes.
+                match arch {
+                    Machine::X86_64 => {
+                        // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
+                        assert!(
+                            matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                        );
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
+                        assert!(
+                            matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
+                        );
+                    }
+
+                    Machine::AArch64 => {
+                        // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(
+                            relocation0.relocation_type,
+                            RelocationType::R_AARCH64_ADR_PREL_PG_HI21
+                        );
+                        assert!(
+                            matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                        );
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(
+                            relocation1.relocation_type,
+                            RelocationType::R_AARCH64_LDST64_ABS_LO12_NC
+                        );
+                        assert!(
+                            matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                        );
+                    }
+                    Machine::RiscV => {
+                        // todo
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+
+            // Check relocation section `.rela.data`
+            {
+                let relocation_section_opt = relocation_sections
+                    .iter_mut()
+                    .find(|s| s.name == ".rela.data");
+
+                assert!(relocation_section_opt.is_some());
+
+                let relocation_section = relocation_section_opt.unwrap();
+                assert_eq!(
+                    sections[relocation_section.target_section_index].name,
+                    ".data"
+                );
+
+                // Check relocation entries in `.rela.data` section
+                let relocations = &mut relocation_section.relocations;
+
+                // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+
+                // Only check a few entries for testing purposes.
+                match arch {
+                    Machine::X86_64 => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_64);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_64);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
+                    }
+                    Machine::AArch64 => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_AARCH64_ABS64);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_AARCH64_ABS64);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
+                    }
+                    Machine::RiscV => {
+                        // todo
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+
+            // Check relocation section `.rela.rodata`
+            {
+                let relocation_section_opt = relocation_sections
+                    .iter_mut()
+                    .find(|s| s.name == ".rela.rodata");
+
+                assert!(relocation_section_opt.is_some());
+
+                let relocation_section = relocation_section_opt.unwrap();
+                assert_eq!(
+                    sections[relocation_section.target_section_index].name,
+                    ".rodata"
+                );
+
+                // Check relocation entries in `.rela.rodata` section
+                let relocations = &mut relocation_section.relocations;
+
+                // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+
+                // Only check a few entries for testing purposes.
+                match arch {
+                    Machine::X86_64 => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_64);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_64);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "bar"));
+                    }
+
+                    Machine::AArch64 => {
+                        // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_AARCH64_ABS64);
+                        assert!(
+                            matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
+                        );
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_AARCH64_ABS64);
+                        assert!(
+                            matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
+                        );
+                    }
+                    Machine::RiscV => {
+                        // todo
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_program_headers_asm_minimal_o() {
+        // Manually check with command `readelf -l asm/minimal.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "asm/minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            assert!(program_headers.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_read_program_headers_asm_minimal_elf() {
+        // Manually check with command `readelf -l asm/minimal.elf`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "asm/minimal.elf");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            match arch {
+                Machine::X86_64 => {
+                    // Segment offset, virtual address, file size, memory size and alignment
+                    // may vary across different versions of the assembler and platforms.
+                    // Check segment types and flags, but not check the other fields.
+
+                    // segment that covers file header and program headers
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+
+                    // segment that covers .text
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::AArch64 => {
+                    // segment that covers .text
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_program_headers_asm_data_elf() {
+        // Manually check with command `readelf -l asm/data.elf`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "asm/data.elf");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            match arch {
+                Machine::X86_64 => {
+                    // Segment offset, virtual address, file size, memory size and alignment
+                    // may vary across different versions of the assembler and platforms.
+                    // Check segment types and flags, but not check the other fields.
+
+                    // segment that covers file header and program headers
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+
+                    // segment that covers .text
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment that covers .rodata
+                    assert_eq!(program_headers[2].segment_type, SegmentType::Load);
+                    assert_eq!(program_headers[2].segment_flags, vec![SegmentFlag::Read]);
+
+                    // segment that covers .data and .bss
+                    assert_eq!(program_headers[3].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[3].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
+                }
+                Machine::AArch64 => {
+                    // segment that covers .text and .rodata
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment that covers .data and .bss
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    // ===============================================
+    // C programs compiled with `gcc` for testing purposes
+    // ===============================================
+
+    #[test]
+    fn test_read_file_header_gcc_minimal_o() {
+        // Manually check with command `readelf -h gcc/minimal.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let file_header = read_file_header(elf).unwrap();
+
+            assert_eq!(file_header.os_abi, OSABI::SystemV);
+            assert_eq!(file_header.file_type, FileType::Relocatable);
+            assert_eq!(file_header.data_encoding, DataEncoding::LittleEndian);
+            assert_eq!(file_header.file_class, FileClass::Elf64);
+
+            match arch {
+                Machine::X86_64 => {
+                    assert_eq!(file_header.machine, Machine::X86_64);
+                }
+                Machine::AArch64 => {
+                    assert_eq!(file_header.machine, Machine::AArch64);
+                }
+                Machine::RiscV => {
+                    assert_eq!(file_header.machine, Machine::RiscV);
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_file_header_gcc_minimal_elf() {
+        // Manually check with command `readelf -h gcc/minimal.elf`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/minimal.elf");
+            let elf = read_file(&binary).unwrap();
+            let file_header = read_file_header(elf).unwrap();
+
+            assert_eq!(file_header.os_abi, OSABI::SystemV);
+            assert_eq!(file_header.file_type, FileType::Executable);
+            assert_eq!(file_header.data_encoding, DataEncoding::LittleEndian);
+            assert_eq!(file_header.file_class, FileClass::Elf64);
+
+            match arch {
+                Machine::X86_64 => {
+                    assert_eq!(file_header.machine, Machine::X86_64);
+                }
+                Machine::AArch64 => {
+                    assert_eq!(file_header.machine, Machine::AArch64);
+                }
+                Machine::RiscV => {
+                    assert_eq!(file_header.machine, Machine::RiscV);
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_section_header_gcc_minimal_o() {
+        // Fields such as `size`, `binary`, `align`, and `offset` are not
+        // intended to be tested here because they are not guaranteed
+        // to be the same across different versions of the assembler and platforms.
+
+        for arch in IMPLEMENTED_ARCHS {
+            // Manually check with command `readelf -S gcc/minimal.o`
+            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+
+            // Check section names
+            assert_contains_all(
+                &sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+                &[".text", ".data", ".bss", ".symtab", ".strtab", ".shstrtab"],
+            );
+
+            // Check section types
+
+            // The first section header is always a NULL section header, which is reserved and has no name.
+            assert!(matches!(sections.first(), Some(s) if s.section_type == SectionType::Null));
+
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".text"),
+                Some(s) if s.section_type == SectionType::Progbits
+            ));
+
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".data"),
+                Some(s) if s.section_type == SectionType::Progbits
+            ));
+
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".bss"),
+                Some(s) if s.section_type == SectionType::Nobits
+            ));
+
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".symtab"),
+                Some(s) if s.section_type == SectionType::Symtab
+            ));
+
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".strtab"),
+                Some(s) if s.section_type == SectionType::Strtab
+            ));
+
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".shstrtab"),
+                Some(s) if s.section_type == SectionType::Strtab
+            ));
+        }
+    }
+
+    #[test]
+    fn test_read_section_header_gcc_data_o() {
+        // Manually check with command `readelf -S gcc/data.o`
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/data.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+
+            // Check section names
+            assert_contains_all(
+                &sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+                &[
+                    ".text",
+                    ".rela.text",
+                    ".data",
+                    ".bss",
+                    ".rodata",
+                    ".symtab",
+                    ".strtab",
+                    ".shstrtab",
+                ],
+            );
+
+            // Check section types
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".rela.text"),
+                Some(s) if s.section_type == SectionType::Rela
+            ));
+
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".rodata"),
+                Some(s) if s.section_type == SectionType::Progbits
+            ));
+        }
+    }
+
+    #[test]
+    fn test_read_symbols_gcc_minimal_o() {
+        // Manually check with command `readelf -s gcc/minimal.o`
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // The first symbol table entry (index 0) is reserved and must be undefined.
+            assert_eq!(symbols[0], Symbol::Other);
+
+            // GCC generates correct symbol type for function symbols,
+            // while the assembler generates `Notype` for function symbols.
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined {name,..} if name == "_start")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Func,
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn test_read_symbols_gcc_data_o() {
+        for arch in IMPLEMENTED_ARCHS {
+            // Manually check with command `readelf -s gcc/data.o`
+            let binary = get_example_file_binary(arch, "gcc/data.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // Check symbol names
+            assert_contains_all(
+                &symbols
+                    .iter()
+                    .filter(|s| matches!(s, Symbol::Defined { .. }))
+                    .map(|s| {
+                        if let Symbol::Defined { name, .. } = s {
+                            name.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                &["foo", "bar", "a", "b", "x", "y", "_start"],
+            );
+
+            // Check symbols names, types and binds, but not check the section index and offset,
+            // because they may vary across different platforms and versions of the assembler.
+
+            // Only check a few entries for testing purposes.
+
+            // GCC generates correct symbol type for data and function symbols,
+            // while the assembler generates `Notype` for data and function symbols.
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "foo")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Object,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Object,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "_start")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Func,
+                    ..
+                })
+            ));
+
+            match arch {
+                Machine::X86_64 => {
+                    // ok
+                }
+                Machine::AArch64 => {
+                    // ok
+                }
+                Machine::RiscV => {
+                    // The assembler generates a special symbol `__global_pointer$` for the global pointer register (gp).
+                    assert!(
+                        symbols
+                            .iter()
+                            .find(|s| matches!(s, Symbol::External(name) if name == "__global_pointer$"))
+                            .is_some()
+                    );
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_symbols_gcc_symbol_export_o() {
+        for arch in IMPLEMENTED_ARCHS {
+            // Manually check with command `readelf -s gcc/symbol-export.o`
+            let binary = get_example_file_binary(arch, "gcc/symbol-export.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // Check symbol names
+            assert_contains_all(
+                &symbols
+                    .iter()
+                    .filter(|s| matches!(s, Symbol::Defined { .. }))
+                    .map(|s| {
+                        if let Symbol::Defined { name, .. } = s {
+                            name.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                &["foo", "bar", "a", "b", "x", "y", "dec", "inc"],
+            );
+
+            // Check symbols names, types and binds, but not check the section index and offset,
+            // because they may vary across different platforms and versions of the assembler.
+
+            // Only check a few entries for testing purposes.
+
+            // GCC generates correct symbol type for data and function symbols,
+            // while the assembler generates `Notype` for data and function symbols.
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "foo")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Object,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Object,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "dec")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Func,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "inc")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Func,
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn test_read_symbols_gcc_symbol_import_o() {
+        // Manually check with command `readelf -s gcc/symbol-import.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/symbol-import.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // Check imported symbol names
+            assert_contains_all(
+                &symbols
+                    .iter()
+                    .filter(|s| matches!(s, Symbol::External(_)))
+                    .map(|s| {
+                        if let Symbol::External(name) = s {
+                            name.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                &["foo", "bar", "a", "b", "x", "y", "inc", "dec"],
+            );
+        }
+    }
+
+    #[test]
+    fn test_read_symbols_gcc_override_weak_o() {
+        // Manually check with command `readelf -s gcc/override-weak.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/override-weak.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // Check weak symbol names
+            assert_contains_all(
+                &symbols
+                    .iter()
+                    .filter(
+                        |s| matches!(s, Symbol::Defined { bind, .. } if *bind == SymbolBind::Weak),
+                    )
+                    .map(|s| {
+                        if let Symbol::Defined { name, .. } = s {
+                            name.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                &["foo", "bar"],
+            );
+        }
+    }
+
+    #[test]
+    fn test_read_symbols_gcc_override_strong_o() {
+        // Manually check with command `readelf -s gcc/override-strong.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/override-strong.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // Check import symbol
+            assert!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::External(name) if name == "foo"))
+                    .is_some()
+            );
+
+            // Check strong symbol
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Func,
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn test_read_relocations_gcc_minimal_o() {
+        // Manually check with command`
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+            // GCC generates relocation section `.rela.eh_frame` for exception handling,
+            // while assembler does not generate this section.
+            assert!(matches!(
+                relocation_sections.first(),
+                Some(section) if section.name == ".rela.eh_frame"
+            ));
+        }
+    }
+
+    #[test]
+    fn test_read_relocations_gcc_data_o() {
+        // Manually check with command `readelf -r gcc/data.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/data.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+            let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+            // Check relocation section `.rela.text`
+            let relocation_section_opt = relocation_sections
+                .iter_mut()
+                .find(|s| s.name == ".rela.text");
+
+            assert!(relocation_section_opt.is_some());
+
+            let relocation_section = relocation_section_opt.unwrap();
+            assert_eq!(
+                sections[relocation_section.target_section_index].name,
+                ".text"
+            );
+
+            // Check relocation entries in `.rela.text` section
+            let relocations = &mut relocation_section.relocations;
+
+            // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+            relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
 
             // Only check a few entries for testing purposes.
             match arch {
@@ -902,7 +1886,7 @@ mod tests {
                     let symbol0 = &symbols[relocation0.symbol_index];
                     assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
                     assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
                     );
 
                     let relocation1 = &relocations[1];
@@ -922,17 +1906,17 @@ mod tests {
                         RelocationType::R_AARCH64_ADR_PREL_PG_HI21
                     );
                     assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
                     );
 
                     let relocation1 = &relocations[1];
                     let symbol1 = &symbols[relocation1.symbol_index];
                     assert_eq!(
                         relocation1.relocation_type,
-                        RelocationType::R_AARCH64_LDST64_ABS_LO12_NC
+                        RelocationType::R_AARCH64_ADD_ABS_LO12_NC
                     );
                     assert!(
-                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
                     );
                 }
                 Machine::RiscV => {
@@ -943,1195 +1927,284 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_read_relocations_asm_relocate_within_data_o() {
-    //     // Manually check with command `readelf -r asm/relocate-within-data.o`
-    //     let binary = get_example_file_binary("asm/relocate-within-data.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(relocation_sections.len(), 3);
-
-    //             // `.rela.text`
-    //             {
-    //                 let relocation_section = &relocation_sections[0];
-    //                 assert_eq!(relocation_section.name, ".rela.text");
-    //                 assert_eq!(relocation_section.target_section_index, 1);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 6);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_PC32,
-    //                         placeholder_offset: 0x13,
-    //                         symbol_index: 4,
-    //                         addend: -4
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_PC32,
-    //                         placeholder_offset: 0x1d,
-    //                         symbol_index: 1,
-    //                         addend: 0xc
-    //                     }
-    //                 );
-    //             }
-
-    //             // `.rela.data`
-    //             {
-    //                 let relocation_section = &relocation_sections[1];
-    //                 assert_eq!(relocation_section.name, ".rela.data");
-    //                 assert_eq!(relocation_section.target_section_index, 3);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 2);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_64,
-    //                         placeholder_offset: 0x10,
-    //                         symbol_index: 0x9,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_64,
-    //                         placeholder_offset: 0x18,
-    //                         symbol_index: 0xa,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //             }
-
-    //             // `.rela.rodata`
-    //             {
-    //                 let relocation_section = &relocation_sections[2];
-    //                 assert_eq!(relocation_section.name, ".rela.rodata");
-    //                 assert_eq!(relocation_section.target_section_index, 6);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 2);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_64,
-    //                         placeholder_offset: 0,
-    //                         symbol_index: 7,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_64,
-    //                         placeholder_offset: 0x8,
-    //                         symbol_index: 8,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //             }
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(relocation_sections.len(), 3);
-
-    //             // `.rela.text`
-    //             {
-    //                 let relocation_section = &relocation_sections[0];
-    //                 assert_eq!(relocation_section.name, ".rela.text");
-    //                 assert_eq!(relocation_section.target_section_index, 1);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 12);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_ADR_PREL_PG_HI21,
-    //                         placeholder_offset: 0x10,
-    //                         symbol_index: 0xb,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_LDST64_ABS_LO12_NC,
-    //                         placeholder_offset: 0x14,
-    //                         symbol_index: 0xb,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //             }
-
-    //             // `.rela.data`
-    //             {
-    //                 let relocation_section = &relocation_sections[1];
-    //                 assert_eq!(relocation_section.name, ".rela.data");
-    //                 assert_eq!(relocation_section.target_section_index, 3);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 2);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_ABS64,
-    //                         placeholder_offset: 0x20,
-    //                         symbol_index: 0x13,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_ABS64,
-    //                         placeholder_offset: 0x28,
-    //                         symbol_index: 0x14,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //             }
-
-    //             // `.rela.rodata`
-    //             {
-    //                 let relocation_section = &relocation_sections[2];
-    //                 assert_eq!(relocation_section.name, ".rela.rodata");
-    //                 assert_eq!(relocation_section.target_section_index, 6);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 2);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_ABS64,
-    //                         placeholder_offset: 0,
-    //                         symbol_index: 2,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_ABS64,
-    //                         placeholder_offset: 0x8,
-    //                         symbol_index: 2,
-    //                         addend: 8
-    //                     }
-    //                 );
-    //             }
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_program_headers_asm_minimal_o() {
-    //     // Only check a few entries for testing purposes.
-
-    //     // Manually check with command `readelf -l asm/minimal.o`
-    //     let binary = get_example_file_binary("asm/minimal.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let program_headers = read_program_headers(elf, &binary).unwrap();
-
-    //     assert_eq!(program_headers.len(), 0);
-    // }
-
-    // #[test]
-    // fn test_read_program_headers_asm_minimal_elf() {
-    //     // Manually check with command `readelf -l asm/minimal.elf`
-    //     let binary = get_example_file_binary("asm/minimal.elf");
-    //     let elf = read_file(&binary).unwrap();
-    //     let program_headers = read_program_headers(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(program_headers.len(), 5);
-
-    //             assert_eq!(
-    //                 program_headers[0],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Read,],
-    //                     offset: 0,
-    //                     virtual_address: 0x400000,
-    //                     file_size: 0x158,
-    //                     memory_size: 0x158,
-    //                     align: 0x1000
-    //                 }
-    //             );
-
-    //             assert_eq!(
-    //                 program_headers[1],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-    //                     offset: 0x1000,
-    //                     virtual_address: 0x401000,
-    //                     file_size: 0x10,
-    //                     memory_size: 0x10,
-    //                     align: 0x1000
-    //                 }
-    //             );
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(program_headers.len(), 1);
-
-    //             assert_eq!(
-    //                 program_headers[0],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-    //                     offset: 0,
-    //                     virtual_address: 0x400000,
-    //                     file_size: 0x84,
-    //                     memory_size: 0x84,
-    //                     align: 0x10000
-    //                 }
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_program_headers_asm_data_elf() {
-    //     // Manually check with command `readelf -l asm/data.elf`
-    //     let binary = get_example_file_binary("asm/data.elf");
-    //     let elf = read_file(&binary).unwrap();
-    //     let program_headers = read_program_headers(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(program_headers.len(), 6);
-
-    //             assert_eq!(
-    //                 program_headers[0],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Read,],
-    //                     offset: 0,
-    //                     virtual_address: 0x400000,
-    //                     file_size: 0x190,
-    //                     memory_size: 0x190,
-    //                     align: 0x1000
-    //                 }
-    //             );
-
-    //             assert_eq!(
-    //                 program_headers[1],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-    //                     offset: 0x1000,
-    //                     virtual_address: 0x401000,
-    //                     file_size: 0x5a,
-    //                     memory_size: 0x5a,
-    //                     align: 0x1000
-    //                 }
-    //             );
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(program_headers.len(), 2);
-
-    //             assert_eq!(
-    //                 program_headers[0],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-    //                     offset: 0,
-    //                     virtual_address: 0x400000,
-    //                     file_size: 0x128,
-    //                     memory_size: 0x128,
-    //                     align: 0x10000
-    //                 }
-    //             );
-
-    //             assert_eq!(
-    //                 program_headers[1],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Write, SegmentFlag::Read,],
-    //                     offset: 0x128,
-    //                     virtual_address: 0x410128,
-    //                     file_size: 0x10,
-    //                     memory_size: 0x20,
-    //                     align: 0x10000
-    //                 }
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_file_header_gcc_minimal_o() {
-    //     // Only check a few entries for testing purposes.
-
-    //     // Manually check with command `readelf -h gcc/minimal.o`
-    //     let binary = get_example_file_binary("gcc/minimal.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let file_header = read_file_header(elf).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(
-    //                 file_header,
-    //                 FileHeader {
-    //                     os_abi: OSABI::SystemV,
-    //                     machine: Machine::X86_64,
-    //                     file_type: FileType::Relocatable,
-    //                     entry_point: 0,
-    //                     program_header_count: 0,
-    //                     section_header_count: 12,
-    //                 }
-    //             );
-    //         }
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(
-    //                 file_header,
-    //                 FileHeader {
-    //                     os_abi: OSABI::SystemV,
-    //                     machine: Machine::AArch64,
-    //                     file_type: FileType::Relocatable,
-    //                     entry_point: 0,
-    //                     program_header_count: 0,
-    //                     section_header_count: 11,
-    //                 }
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_file_header_gcc_minimal_elf() {
-    //     // Manually check with command `readelf -h gcc/minimal.elf`
-    //     let binary = get_example_file_binary("gcc/minimal.elf");
-    //     let elf = read_file(&binary).unwrap();
-    //     let file_header = read_file_header(elf).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(
-    //                 file_header,
-    //                 FileHeader {
-    //                     os_abi: OSABI::SystemV,
-    //                     machine: Machine::X86_64,
-    //                     file_type: FileType::Executable,
-    //                     entry_point: 0x401042,
-    //                     program_header_count: 7,
-    //                     section_header_count: 9,
-    //                 }
-    //             );
-    //         }
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(
-    //                 file_header,
-    //                 FileHeader {
-    //                     os_abi: OSABI::SystemV,
-    //                     machine: Machine::AArch64,
-    //                     file_type: FileType::Executable,
-    //                     entry_point: 0x40014c,
-    //                     program_header_count: 3,
-    //                     section_header_count: 8,
-    //                 }
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_section_header_gcc_minimal_o() {
-    //     // Fields such as `size`, `binary`, `align`, and `offset` are not
-    //     // intended to be tested here because they are not guaranteed
-    //     // to be the same across different versions of the compiler and platforms.
-
-    //     // Only check a few entries for testing purposes.
-
-    //     // Manually check with command `readelf -S gcc/minimal.o`
-    //     let binary = get_example_file_binary("gcc/minimal.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let sections = read_section_headers(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(sections.len(), 12);
-    //             assert_eq!(
-    //                 sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
-    //                 vec!["", ".text", ".data", ".bss",]
-    //             );
-    //             assert_eq!(
-    //                 sections
-    //                     .iter()
-    //                     .take(4)
-    //                     .map(|s| s.section_type)
-    //                     .collect::<Vec<_>>(),
-    //                 vec![
-    //                     SectionType::Null,     // null
-    //                     SectionType::Progbits, // .text
-    //                     SectionType::Progbits, // .data
-    //                     SectionType::Nobits,   // .bss
-    //                 ]
-    //             );
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(sections.len(), 11);
-    //             assert_eq!(
-    //                 sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
-    //                 vec!["", ".text", ".data", ".bss",]
-    //             );
-    //             assert_eq!(
-    //                 sections
-    //                     .iter()
-    //                     .take(4)
-    //                     .map(|s| s.section_type)
-    //                     .collect::<Vec<_>>(),
-    //                 vec![
-    //                     SectionType::Null,     // null
-    //                     SectionType::Progbits, // .text
-    //                     SectionType::Progbits, // .data
-    //                     SectionType::Nobits,   // .bss
-    //                 ]
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_section_header_gcc_data_o() {
-    //     // Manually check with command `readelf -S gcc/data.o`
-    //     let binary = get_example_file_binary("gcc/data.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let sections = read_section_headers(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(sections.len(), 14);
-    //             assert_eq!(
-    //                 sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
-    //                 vec!["", ".text", ".rela.text", ".data",]
-    //             );
-    //             assert_eq!(
-    //                 sections
-    //                     .iter()
-    //                     .take(4)
-    //                     .map(|s| s.section_type)
-    //                     .collect::<Vec<_>>(),
-    //                 vec![
-    //                     SectionType::Null,     // null
-    //                     SectionType::Progbits, // .text
-    //                     SectionType::Rela,     // .rela.text
-    //                     SectionType::Progbits, // .data
-    //                 ]
-    //             );
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(sections.len(), 13);
-    //             assert_eq!(
-    //                 sections.iter().take(4).map(|s| &s.name).collect::<Vec<_>>(),
-    //                 vec!["", ".text", ".rela.text", ".data",]
-    //             );
-    //             assert_eq!(
-    //                 sections
-    //                     .iter()
-    //                     .take(4)
-    //                     .map(|s| s.section_type)
-    //                     .collect::<Vec<_>>(),
-    //                 vec![
-    //                     SectionType::Null,     // null
-    //                     SectionType::Progbits, // .text
-    //                     SectionType::Rela,     // .rela.text
-    //                     SectionType::Progbits, // .data
-    //                 ]
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_symbols_gcc_minimal_o() {
-    //     // Only check a few entries for testing purposes.
-
-    //     // Manually check with command `readelf -s gcc/minimal.o`
-    //     let binary = get_example_file_binary("gcc/minimal.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let symbols = read_symbols(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(symbols.len(), 6);
-    //             assert_eq!(symbols[0], Symbol::Other);
-    //             assert_eq!(
-    //                 symbols[5],
-    //                 Symbol::Defined {
-    //                     name: "_start".to_string(),
-    //                     section_index: 1,
-    //                     bind: SymbolBind::Global,
-    //                     symbol_type: SymbolType::Func,
-    //                     offset: 0x42,
-    //                 }
-    //             );
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(symbols.len(), 13);
-
-    //             assert_eq!(symbols[0], Symbol::Other);
-
-    //             assert_eq!(
-    //                 symbols[12],
-    //                 Symbol::Defined {
-    //                     name: "_start".to_string(),
-    //                     section_index: 1,
-    //                     bind: SymbolBind::Global,
-    //                     symbol_type: SymbolType::Func,
-    //                     offset: 0x40,
-    //                 }
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_symbols_gcc_data_o() {
-    //     // Manually check with command `readelf -s gcc/data.o`
-    //     let binary = get_example_file_binary("gcc/data.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let symbols = read_symbols(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(symbols.len(), 12);
-
-    //             assert_eq!(symbols[0], Symbol::Other);
-    //             assert_eq!(
-    //                 symbols[5],
-    //                 Symbol::Defined {
-    //                     name: "foo".to_string(),
-    //                     section_index: 5,
-    //                     bind: SymbolBind::Global,
-    //                     symbol_type: SymbolType::Object,
-    //                     offset: 0,
-    //                 }
-    //             );
-
-    //             assert_eq!(
-    //                 symbols[11],
-    //                 Symbol::Defined {
-    //                     name: "_start".to_string(),
-    //                     section_index: 1,
-    //                     bind: SymbolBind::Global,
-    //                     symbol_type: SymbolType::Func,
-    //                     offset: 0x42,
-    //                 }
-    //             );
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(symbols.len(), 23);
-
-    //             assert_eq!(symbols[0], Symbol::Other);
-
-    //             assert_eq!(
-    //                 symbols[22],
-    //                 Symbol::Defined {
-    //                     name: "_start".to_string(),
-    //                     section_index: 1,
-    //                     bind: SymbolBind::Global,
-    //                     symbol_type: SymbolType::Func,
-    //                     offset: 0x40,
-    //                 }
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_symbols_gcc_symbol_import_o() {
-    //     // Manually check with command `readelf -s gcc/symbol-import.o`
-    //     let binary = get_example_file_binary("gcc/symbol-import.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let symbols = read_symbols(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(symbols.len(), 14);
-
-    //             assert_eq!(symbols[0], Symbol::Other);
-    //             assert_eq!(
-    //                 symbols[5],
-    //                 Symbol::Defined {
-    //                     name: "_start".to_string(),
-    //                     section_index: 1,
-    //                     bind: SymbolBind::Global,
-    //                     symbol_type: SymbolType::Func,
-    //                     offset: 0x42,
-    //                 }
-    //             );
-
-    //             assert_eq!(symbols[6], Symbol::External("foo".to_string()));
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(symbols.len(), 21);
-
-    //             assert_eq!(symbols[0], Symbol::Other);
-    //             assert_eq!(
-    //                 symbols[12],
-    //                 Symbol::Defined {
-    //                     name: "_start".to_string(),
-    //                     section_index: 1,
-    //                     bind: SymbolBind::Global,
-    //                     symbol_type: SymbolType::Func,
-    //                     offset: 0x40,
-    //                 }
-    //             );
-
-    //             assert_eq!(symbols[20], Symbol::External("y".to_string()));
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_symbols_gcc_override_weak_o() {
-    //     // Manually check with command `readelf -s gcc/override-weak.o`
-    //     let binary = get_example_file_binary("gcc/override-weak.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let symbols = read_symbols(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(symbols.len(), 5);
-
-    //             assert_eq!(symbols[0], Symbol::Other);
-    //             assert_eq!(
-    //                 symbols[3],
-    //                 Symbol::Defined {
-    //                     name: "foo".to_string(),
-    //                     bind: SymbolBind::Weak,
-    //                     symbol_type: SymbolType::Func,
-    //                     section_index: 1,
-    //                     offset: 0
-    //                 }
-    //             );
-    //             assert_eq!(
-    //                 symbols[4],
-    //                 Symbol::Defined {
-    //                     name: "bar".to_string(),
-    //                     bind: SymbolBind::Weak,
-    //                     symbol_type: SymbolType::Func,
-    //                     section_index: 1,
-    //                     offset: 0xb
-    //                 }
-    //             );
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(symbols.len(), 12);
-
-    //             assert_eq!(
-    //                 symbols[10],
-    //                 Symbol::Defined {
-    //                     name: "foo".to_string(),
-    //                     bind: SymbolBind::Weak,
-    //                     symbol_type: SymbolType::Func,
-    //                     section_index: 1,
-    //                     offset: 0x0
-    //                 }
-    //             );
-
-    //             assert_eq!(
-    //                 symbols[11],
-    //                 Symbol::Defined {
-    //                     name: "bar".to_string(),
-    //                     bind: SymbolBind::Weak,
-    //                     symbol_type: SymbolType::Func,
-    //                     section_index: 1,
-    //                     offset: 0x8
-    //                 }
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_relocations_gcc_minimal_o() {
-    //     // Only check a few entries for testing purposes.
-
-    //     // Manually check with command `readelf -r gcc/minimal.o`
-    //     let binary = get_example_file_binary("gcc/minimal.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(relocation_sections.len(), 1);
-
-    //             let relocation_section = &relocation_sections[0];
-    //             assert_eq!(relocation_section.name, ".rela.eh_frame");
-    //         }
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(relocation_sections.len(), 1);
-
-    //             let relocation_section = &relocation_sections[0];
-    //             assert_eq!(relocation_section.name, ".rela.eh_frame");
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_relocations_gcc_data_o() {
-    //     // Manually check with command `readelf -r gcc/data.o`
-    //     let binary = get_example_file_binary("gcc/data.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let sections = read_section_headers(elf, &binary).unwrap();
-    //     let symbols = read_symbols(elf, &binary).unwrap();
-    //     let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(relocation_sections.len(), 2);
-
-    //             let relocation_section = &relocation_sections[0];
-    //             assert_eq!(relocation_section.name, ".rela.text");
-    //             assert_eq!(relocation_section.target_section_index, 1);
-
-    //             let relocations = &relocation_section.relocations;
-    //             assert_eq!(relocations.len(), 8);
-
-    //             assert_eq!(
-    //                 relocations[0],
-    //                 Relocation {
-    //                     relocation_type: RelocationType::R_X86_64_PC32,
-    //                     placeholder_offset: 0x52,
-    //                     symbol_index: 7,
-    //                     addend: -4
-    //                 }
-    //             );
-    //             assert_eq!(
-    //                 relocations[1],
-    //                 Relocation {
-    //                     relocation_type: RelocationType::R_X86_64_PC32,
-    //                     placeholder_offset: 0x62,
-    //                     symbol_index: 8,
-    //                     addend: -4
-    //                 }
-    //             );
-    //         }
-    //         ARCH::AARCH64 => {
-    //             assert!(
-    //                 relocation_sections
-    //                     .iter()
-    //                     .find(|s| s.name == ".rela.text")
-    //                     .is_some()
-    //             );
-
-    //             let relocation_section = relocation_sections
-    //                 .iter()
-    //                 .find(|s| s.name == ".rela.text")
-    //                 .unwrap();
-
-    //             assert_eq!(
-    //                 relocation_section.target_section_index,
-    //                 sections.iter().position(|s| s.name == ".text").unwrap()
-    //             );
-
-    //             let relocations = &relocation_section.relocations;
-
-    //             assert_eq!(
-    //                 relocations[0].relocation_type,
-    //                 RelocationType::R_AARCH64_ADR_PREL_PG_HI21
-    //             );
-    //             assert!(matches!(
-    //                 &symbols[relocations[0].symbol_index],
-    //                 Symbol::Defined { name, .. } if name == "foo"
-    //             ));
-
-    //             assert_eq!(
-    //                 relocations[1].relocation_type,
-    //                 RelocationType::R_AARCH64_ADD_ABS_LO12_NC
-    //             );
-    //             assert!(matches!(
-    //                 &symbols[relocations[1].symbol_index],
-    //                 Symbol::Defined { name, .. } if name == "foo"
-    //             ));
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_relocations_gcc_relocate_within_data_no_pie_o() {
-    //     // Note:
-    //     // Don't test relocation sections with `relocate-within-data.o` because
-    //     // the GCC compiler generates ".rela.data.rel.local" and ".rela.data.rel.ro.local"
-    //     // because it uses the `-fPIE` flag by default, which is not supported by this crate.
-
-    //     // Manually check with command `readelf -r gcc/relocate-within-data-no-pie.o`
-    //     let binary = get_example_file_binary("gcc/relocate-within-data-no-pie.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let sections = read_section_headers(elf, &binary).unwrap();
-    //     let symbols = read_symbols(elf, &binary).unwrap();
-    //     let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(relocation_sections.len(), 4);
-
-    //             // `.rela.text`
-    //             {
-    //                 let relocation_section = &relocation_sections[0];
-    //                 assert_eq!(relocation_section.name, ".rela.text");
-    //                 assert_eq!(relocation_section.target_section_index, 1); // `.text` section index
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 8);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_32,
-    //                         placeholder_offset: 0x6f,
-    //                         symbol_index: 5,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_PC32,
-    //                         placeholder_offset: 0x7d,
-    //                         symbol_index: 9,
-    //                         addend: -4
-    //                     }
-    //                 );
-    //             }
-
-    //             // `.rela.data`
-    //             {
-    //                 let relocation_section = &relocation_sections[1];
-    //                 assert_eq!(relocation_section.name, ".rela.data");
-    //                 assert_eq!(relocation_section.target_section_index, 3);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 2);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_64,
-    //                         placeholder_offset: 0x10,
-    //                         symbol_index: 0x7,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_64,
-    //                         placeholder_offset: 0x18,
-    //                         symbol_index: 0x8,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //             }
-
-    //             // `.rela.rodata`
-    //             {
-    //                 let relocation_section = &relocation_sections[2];
-    //                 assert_eq!(relocation_section.name, ".rela.rodata");
-    //                 assert_eq!(relocation_section.target_section_index, 6);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 2);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_64,
-    //                         placeholder_offset: 0,
-    //                         symbol_index: 5,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_X86_64_64,
-    //                         placeholder_offset: 0x8,
-    //                         symbol_index: 6,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //             }
-    //         }
-    //         ARCH::AARCH64 => {
-    //             assert_contains_all(
-    //                 &relocation_sections
-    //                     .iter()
-    //                     .map(|s| s.name.as_str())
-    //                     .collect::<Vec<_>>(),
-    //                 &[".rela.text", ".rela.data", ".rela.rodata"],
-    //             );
-
-    //             // `.rela.text`
-    //             {
-    //                 let relocation_section = relocation_sections
-    //                     .iter()
-    //                     .find(|s| s.name == ".rela.text")
-    //                     .unwrap();
-
-    //                 assert_eq!(
-    //                     relocation_section.target_section_index,
-    //                     sections.iter().position(|s| s.name == ".text").unwrap()
-    //                 );
-
-    //                 let relocations = &relocation_section.relocations;
-
-    //                 assert_eq!(
-    //                     relocations[0].relocation_type,
-    //                     RelocationType::R_AARCH64_ADR_PREL_PG_HI21
-    //                 );
-    //                 assert!(matches!(
-    //                     &symbols[relocations[0].symbol_index],
-    //                     Symbol::Defined { name, .. } if name == "foo"
-    //                 ));
-
-    //                 assert_eq!(
-    //                     relocations[1].relocation_type,
-    //                     RelocationType::R_AARCH64_ADD_ABS_LO12_NC
-    //                 );
-    //                 assert!(matches!(
-    //                     &symbols[relocations[1].symbol_index],
-    //                     Symbol::Defined { name, .. } if name == "foo"
-    //                 ));
-    //             }
-
-    //             // `.rela.data`
-    //             {
-    //                 let relocation_section = &relocation_sections[1];
-    //                 assert_eq!(relocation_section.name, ".rela.data");
-    //                 assert_eq!(relocation_section.target_section_index, 3);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 2);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_ABS64,
-    //                         placeholder_offset: 0x20,
-    //                         symbol_index: 0x13,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_ABS64,
-    //                         placeholder_offset: 0x28,
-    //                         symbol_index: 0x14,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //             }
-
-    //             // `.rela.rodata`
-    //             {
-    //                 let relocation_section = &relocation_sections[2];
-    //                 assert_eq!(relocation_section.name, ".rela.rodata");
-    //                 assert_eq!(relocation_section.target_section_index, 6);
-
-    //                 let relocations = &relocation_section.relocations;
-    //                 assert_eq!(relocations.len(), 2);
-
-    //                 assert_eq!(
-    //                     relocations[0],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_ABS64,
-    //                         placeholder_offset: 0,
-    //                         symbol_index: 2,
-    //                         addend: 0
-    //                     }
-    //                 );
-    //                 assert_eq!(
-    //                     relocations[1],
-    //                     Relocation {
-    //                         relocation_type: RelocationType::R_AARCH64_ABS64,
-    //                         placeholder_offset: 0x8,
-    //                         symbol_index: 2,
-    //                         addend: 8
-    //                     }
-    //                 );
-    //             }
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_program_headers_gcc_minimal_o() {
-    //     // Only check a few entries for testing purposes.
-
-    //     // Manually check with command `readelf -l gcc/minimal.o`
-    //     let binary = get_example_file_binary("gcc/minimal.o");
-    //     let elf = read_file(&binary).unwrap();
-    //     let program_headers = read_program_headers(elf, &binary).unwrap();
-
-    //     assert_eq!(program_headers.len(), 0);
-    // }
-
-    // #[test]
-    // fn test_read_program_headers_gcc_minimal_elf() {
-    //     // Manually check with command `readelf -l gcc/minimal.elf`
-    //     let binary = get_example_file_binary("gcc/minimal.elf");
-    //     let elf = read_file(&binary).unwrap();
-    //     let program_headers = read_program_headers(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(program_headers.len(), 7);
-
-    //             assert_eq!(
-    //                 program_headers[0],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Read,],
-    //                     offset: 0,
-    //                     virtual_address: 0x400000,
-    //                     file_size: 0x1ec, // includes the section `.note.gnu.build-id`
-    //                     memory_size: 0x1ec,
-    //                     align: 0x1000
-    //                 }
-    //             );
-
-    //             assert_eq!(
-    //                 program_headers[1],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-    //                     offset: 0x1000,
-    //                     virtual_address: 0x401000,
-    //                     file_size: 0x50,
-    //                     memory_size: 0x50,
-    //                     align: 0x1000
-    //                 }
-    //             );
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(program_headers.len(), 1);
-
-    //             assert_eq!(
-    //                 program_headers[0],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-    //                     offset: 0,
-    //                     virtual_address: 0x400000,
-    //                     file_size: 0x84,
-    //                     memory_size: 0x84,
-    //                     align: 0x10000
-    //                 }
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
-
-    // #[test]
-    // fn test_read_program_headers_gcc_data_elf() {
-    //     // Manually check with command `readelf -l gcc/data.elf`
-
-    //     let binary = get_example_file_binary("gcc/data.elf");
-    //     let elf = read_file(&binary).unwrap();
-    //     let program_headers = read_program_headers(elf, &binary).unwrap();
-
-    //     match get_arch() {
-    //         ARCH::X86_64 => {
-    //             assert_eq!(program_headers.len(), 8);
-
-    //             assert_eq!(
-    //                 program_headers[0],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Read,],
-    //                     offset: 0,
-    //                     virtual_address: 0x400000,
-    //                     file_size: 0x224, // includes the section `.note.gnu.build-id`
-    //                     memory_size: 0x224,
-    //                     align: 0x1000
-    //                 }
-    //             );
-
-    //             assert_eq!(
-    //                 program_headers[1],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-    //                     offset: 0x1000,
-    //                     virtual_address: 0x401000,
-    //                     file_size: 0x9a,
-    //                     memory_size: 0x9a,
-    //                     align: 0x1000
-    //                 }
-    //             );
-    //         }
-
-    //         ARCH::AARCH64 => {
-    //             assert_eq!(program_headers.len(), 2);
-
-    //             assert_eq!(
-    //                 program_headers[0],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Execute, SegmentFlag::Read],
-    //                     offset: 0,
-    //                     virtual_address: 0x400000,
-    //                     file_size: 0x128,
-    //                     memory_size: 0x128,
-    //                     align: 0x10000
-    //                 }
-    //             );
-
-    //             assert_eq!(
-    //                 program_headers[1],
-    //                 ProgramHeader {
-    //                     segment_type: SegmentType::Load,
-    //                     segment_flags: vec![SegmentFlag::Write, SegmentFlag::Read,],
-    //                     offset: 0x128,
-    //                     virtual_address: 0x410128,
-    //                     file_size: 0x10,
-    //                     memory_size: 0x20,
-    //                     align: 0x10000
-    //                 }
-    //             );
-    //         }
-    //         _ => unimplemented!(),
-    //     }
-    // }
+    #[test]
+    fn test_read_relocations_gcc_relocate_within_data_o() {
+        // Manually check with command `readelf -r gcc/relocate-within-data.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/relocate-within-data.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+            let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+            // Check relocation section `.rela.text`
+            {
+                let relocation_section_opt = relocation_sections
+                    .iter_mut()
+                    .find(|s| s.name == ".rela.text");
+
+                assert!(relocation_section_opt.is_some());
+
+                let relocation_section = relocation_section_opt.unwrap();
+                assert_eq!(
+                    sections[relocation_section.target_section_index].name,
+                    ".text"
+                );
+
+                // Check relocation entries in `.rela.text` section
+                let relocations = &mut relocation_section.relocations;
+
+                // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+
+                // Only check a few entries for testing purposes.
+                match arch {
+                    Machine::X86_64 => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_32);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "pdec"));
+                    }
+                    Machine::AArch64 => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(
+                            relocation0.relocation_type,
+                            RelocationType::R_AARCH64_ADR_PREL_PG_HI21
+                        );
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(
+                            relocation1.relocation_type,
+                            RelocationType::R_AARCH64_ADD_ABS_LO12_NC
+                        );
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "foo"));
+                    }
+                    Machine::RiscV => {
+                        // todo
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+
+            // Check relocation section `.rela.data`
+            {
+                let relocation_section_opt = relocation_sections
+                    .iter_mut()
+                    .find(|s| s.name == ".rela.data");
+
+                assert!(relocation_section_opt.is_some());
+
+                let relocation_section = relocation_section_opt.unwrap();
+                assert_eq!(
+                    sections[relocation_section.target_section_index].name,
+                    ".data"
+                );
+
+                // Check relocation entries in `.rela.data` section
+                let relocations = &mut relocation_section.relocations;
+
+                // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+
+                // Only check a few entries for testing purposes.
+                match arch {
+                    Machine::X86_64 => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_64);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_64);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
+                    }
+                    Machine::AArch64 => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_AARCH64_ABS64);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_AARCH64_ABS64);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
+                    }
+                    Machine::RiscV => {
+                        // todo
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+
+            // Check relocation section `.rela.rodata`
+            {
+                let relocation_section_opt = relocation_sections
+                    .iter_mut()
+                    .find(|s| s.name == ".rela.rodata");
+
+                assert!(relocation_section_opt.is_some());
+
+                let relocation_section = relocation_section_opt.unwrap();
+                assert_eq!(
+                    sections[relocation_section.target_section_index].name,
+                    ".rodata"
+                );
+
+                // Check relocation entries in `.rela.rodata` section
+                let relocations = &mut relocation_section.relocations;
+
+                // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+
+                // Only check a few entries for testing purposes.
+                match arch {
+                    Machine::X86_64 => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_64);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_64);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "bar"));
+                    }
+                    Machine::AArch64 => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_AARCH64_ABS64);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_AARCH64_ABS64);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "bar"));
+                    }
+                    Machine::RiscV => {
+                        // todo
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_program_headers_gcc_minimal_o() {
+        // Manually check with command `readelf -l gcc/minimal.o`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            assert!(program_headers.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_read_program_headers_gcc_minimal_elf() {
+        // Manually check with command `readelf -l gcc/minimal.elf`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/minimal.elf");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            match arch {
+                Machine::X86_64 => {
+                    // Segment offset, virtual address, file size, memory size and alignment
+                    // may vary across different versions of the assembler and platforms.
+                    // Check segment types and flags, but not check the other fields.
+
+                    // segment that covers file header and program headers
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+
+                    // segment that covers .text
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::AArch64 => {
+                    // segment that covers .text
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_program_headers_gcc_data_elf() {
+        // Manually check with command `readelf -l gcc/data.elf`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(arch, "gcc/data.elf");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            match arch {
+                Machine::X86_64 => {
+                    // Segment offset, virtual address, file size, memory size and alignment
+                    // may vary across different versions of the assembler and platforms.
+                    // Check segment types and flags, but not check the other fields.
+
+                    // segment that covers file header and program headers
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+
+                    // segment that covers .text
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment that covers .rodata
+                    assert_eq!(program_headers[2].segment_type, SegmentType::Load);
+                    assert_eq!(program_headers[2].segment_flags, vec![SegmentFlag::Read]);
+
+                    // segment that covers .data and .bss
+                    assert_eq!(program_headers[3].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[3].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
+                }
+                Machine::AArch64 => {
+                    // segment that covers .text, .rodata
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment that covers .data and .bss
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
 }
