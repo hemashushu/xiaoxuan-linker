@@ -839,28 +839,28 @@ mod tests {
     }
 
     #[test]
-    fn test_write_minimal_asm() {
+    fn test_write_asm_minimal() {
         let file = link_example_file_to_executable(&["asm/minimal.o"], "test-asm-minimal.elf");
         execute_and_assert(&file, 42, "");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_function_asm() {
+    fn test_write_asm_function() {
         let file = link_example_file_to_executable(&["asm/function.o"], "test-asm-function.elf");
         execute_and_assert(&file, 0, "Hello, world!\n");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_data_asm() {
+    fn test_write_asm_data() {
         let file = link_example_file_to_executable(&["asm/data.o"], "test-asm-data.elf");
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_symbol_asm() {
+    fn test_write_asm_symbol() {
         let file = link_example_file_to_executable(
             &["asm/symbol-export.o", "asm/symbol-import.o"],
             "test-asm-symbol.elf",
@@ -870,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_override_asm() {
+    fn test_write_asm_override() {
         let file = link_example_file_to_executable(
             &["asm/override-weak.o", "asm/override-strong.o"],
             "test-asm-override.elf",
@@ -880,7 +880,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_relocate_within_data_asm() {
+    fn test_write_asm_relocate_within_data() {
         let file = link_example_file_to_executable(
             &["asm/relocate-within-data.o"],
             "test-asm-relocate-within-data.elf",
@@ -890,28 +890,28 @@ mod tests {
     }
 
     #[test]
-    fn test_write_minimal_gcc() {
+    fn test_write_gcc_minimal() {
         let file = link_example_file_to_executable(&["gcc/minimal.o"], "test-gcc-minimal.elf");
         execute_and_assert(&file, 42, "");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_function_gcc() {
+    fn test_write_gcc_function() {
         let file = link_example_file_to_executable(&["gcc/function.o"], "test-gcc-function.elf");
         execute_and_assert(&file, 0, "Hello, world!\n");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_data_gcc() {
+    fn test_write_gcc_data() {
         let file = link_example_file_to_executable(&["gcc/data.o"], "test-gcc-data.elf");
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);
     }
 
     #[test]
-    fn test_write_symbol_gcc() {
+    fn test_write_gcc_symbol() {
         let file = link_example_file_to_executable(
             &["gcc/symbol-export.o", "gcc/symbol-import.o"],
             "test-gcc-symbol.elf",
@@ -921,7 +921,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_override_gcc() {
+    fn test_write_gcc_override() {
         let file = link_example_file_to_executable(
             &["gcc/override-weak.o", "gcc/override-strong.o"],
             "test-gcc-override.elf",
@@ -931,16 +931,10 @@ mod tests {
     }
 
     #[test]
-    fn test_write_relocate_within_data_gcc_no_pie() {
-        // Note:
-        // GCC in modern Linux distributions (e.g., Ubuntu 22.04) generates PIE (Position Independent Executable) by default,
-        // which means that the `.data.rel.ro.local` section is generated instead of the `.data` section,
-        // and the `.rela.data.rel.ro.local` section is generated instead of the `.rela.data` section.
-        // However, the current implementation of the linker does not support PIE, so we need to use a non-PIE object file for testing.
-
+    fn test_write_gcc_relocate_within_data() {
         let file = link_example_file_to_executable(
-            &["gcc/relocate-within-data-no-pie.o"],
-            "test-gcc-relocate-within-data-no-pie.elf",
+            &["gcc/relocate-within-data.o"],
+            "test-gcc-relocate-within-data.elf",
         );
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);

@@ -425,7 +425,7 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
                             patch_value: PatchValue::Value32(relocated_value as u32),
                         }
                     }
-                    RelocationType::R_X86_64_PC32 /* | RelocationType::R_X86_64_PLT32 */ => {
+                    RelocationType::R_X86_64_PC32 | RelocationType::R_X86_64_PLT32 => {
                         // R_X86_64_PC32: S + A - P
                         let section_text =
                             module.sections.get(&RelocatableSectionType::Text).unwrap();
@@ -442,32 +442,31 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
                             patch_value: PatchValue::Value32(relocated_value as u32),
                         }
                     }
-                    // todo:: not implemented yet
-                    // RelocationType::R_X86_64_TPOFF32 => {
-                    //     // R_X86_64_TPOFF32: S + A - TP
-                    //     // The formula for calculating the value to be written at the relocation site is:
-                    //     // TPOFF(sym) = symbol_offset_in_tls_block − tls_block_size
-                    //     let section_tdata =
-                    //         module.sections.get(&RelocatableSectionType::TData).unwrap();
-                    //     let section_tbss =
-                    //         module.sections.get(&RelocatableSectionType::TBss).unwrap();
-                    //
-                    //     let tls_block_size = section_tbss.resolved_virtual_address
-                    //         - section_tdata.resolved_virtual_address
-                    //         + section_tbss.size;
-                    //     let symbol_offset_in_tls_block = target_symbol.resolved_offset;
-                    //
-                    //     let relocated_value = symbol_offset_in_tls_block
-                    //         .wrapping_add(addend as usize)
-                    //         .wrapping_sub(tls_block_size);
-                    //
-                    //     PatchItem {
-                    //         module_index,
-                    //         patch_section_type: *patch_section_type,
-                    //         patch_offset: placeholder_offset,
-                    //         patch_value: PatchValue::Value32(relocated_value as u32),
-                    //     }
-                    // }
+                    RelocationType::R_X86_64_TPOFF32 => {
+                        // R_X86_64_TPOFF32: S + A - TP
+                        // The formula for calculating the value to be written at the relocation site is:
+                        // TPOFF(sym) = symbol_offset_in_tls_block − tls_block_size
+                        let section_tdata =
+                            module.sections.get(&RelocatableSectionType::TData).unwrap();
+                        let section_tbss =
+                            module.sections.get(&RelocatableSectionType::TBss).unwrap();
+
+                        let tls_block_size = section_tbss.resolved_virtual_address
+                            - section_tdata.resolved_virtual_address
+                            + section_tbss.size;
+                        let symbol_offset_in_tls_block = target_symbol.resolved_offset;
+
+                        let relocated_value = symbol_offset_in_tls_block
+                            .wrapping_add(addend as usize)
+                            .wrapping_sub(tls_block_size);
+
+                        PatchItem {
+                            module_index,
+                            patch_section_type: *patch_section_type,
+                            patch_offset: placeholder_offset,
+                            patch_value: PatchValue::Value32(relocated_value as u32),
+                        }
+                    }
                     _ => {
                         unimplemented!()
                     }
@@ -789,7 +788,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_minimal_asm() {
+    fn test_link_asm_minimal() {
         let file_binaries = get_example_file_binaries(&["asm/minimal.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
@@ -799,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_function_asm() {
+    fn test_link_asm_function() {
         let file_binaries = get_example_file_binaries(&["asm/function.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
@@ -809,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_data_asm() {
+    fn test_link_asm_data() {
         let file_binaries = get_example_file_binaries(&["asm/data.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
@@ -819,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_symbol_asm() {
+    fn test_link_asm_symbol() {
         let file_binaries =
             get_example_file_binaries(&["asm/symbol-export.o", "asm/symbol-import.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
@@ -830,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_override_asm() {
+    fn test_link_asm_override() {
         let file_binaries =
             get_example_file_binaries(&["asm/override-weak.o", "asm/override-strong.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
@@ -841,7 +840,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_relocate_within_data_asm() {
+    fn test_link_asm_relocate_within_data() {
         let file_binaries = get_example_file_binaries(&["asm/relocate-within-data.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
@@ -851,7 +850,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_minimal_gcc() {
+    fn test_link_gcc_minimal() {
         let file_binaries = get_example_file_binaries(&["gcc/minimal.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
@@ -861,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_function_gcc() {
+    fn test_link_gcc_function() {
         let file_binaries = get_example_file_binaries(&["gcc/function.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
@@ -871,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_data_gcc() {
+    fn test_link_gcc_data() {
         let file_binaries = get_example_file_binaries(&["gcc/data.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
@@ -881,7 +880,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_symbol_gcc() {
+    fn test_link_gcc_symbol() {
         let file_binaries =
             get_example_file_binaries(&["gcc/symbol-export.o", "gcc/symbol-import.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
@@ -892,7 +891,7 @@ mod tests {
     }
 
     #[test]
-    fn test_link_override_gcc() {
+    fn test_link_gcc_override() {
         let file_binaries =
             get_example_file_binaries(&["gcc/override-weak.o", "gcc/override-strong.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
@@ -903,14 +902,8 @@ mod tests {
     }
 
     #[test]
-    fn test_link_relocate_within_data_gcc_no_pie() {
-        // Note:
-        // GCC in modern Linux distributions (e.g., Ubuntu 22.04) generates PIE (Position Independent Executable) by default,
-        // which means that the `.data.rel.ro.local` section is generated instead of the `.data` section,
-        // and the `.rela.data.rel.ro.local` section is generated instead of the `.rela.data` section.
-        // However, the current implementation of the linker does not support PIE, so we need to use a non-PIE object file for testing.
-
-        let file_binaries = get_example_file_binaries(&["gcc/relocate-within-data-no-pie.o"]);
+    fn test_link_gcc_relocate_within_data() {
+        let file_binaries = get_example_file_binaries(&["gcc/relocate-within-data.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);

@@ -9,20 +9,29 @@
 //! It assumes that an object file contains only:
 //!
 //! - At most one code section `.text`
-//! - At most one read-only data section `.rodata` (and `.data.rel.ro.local` for PIE)
+//! - At most one read-only data section `.rodata`
 //! - At most one thread local data section `.tdata`
 //! - At most one thread local uninitialized section `.tbss`
-//! - At most one data section `.data` (and `.data.rel.local` for PIE)
+//! - At most one data section `.data`
 //! - At most one uninitialized data section `.bss`
 //! - At most one symbol table `.symtab`
 //! - At most one relocation table `.rela.text`
-//! - At most one relocation table `.rela.rodata` (and `.rela.data.rel.ro.local` for PIE)
-//! - At most one relocation table `.rela.data` (and `.rela.data.rel.local` for PIE)
+//! - At most one relocation table `.rela.rodata`
+//! - At most one relocation table `.rela.data`
 //! - At most one relocation table `.rela.tdata`
 //! - At most one string table `.strtab` (for symbol names)
 //! - One section header string table `.shstrtab` (for section names)
 //!
 //! Other sections and details of the object file are ignored without notice.
+
+// Note:
+// GCC in modern Linux distributions (e.g., Ubuntu 22.04) generates PIE (Position Independent Executable) by default,
+// which means that the `.data.rel.local` section is generated instead of the `.data` section,
+// and the `.rela.data.rel.local` section is generated instead of the `.rela.data` section.
+// As well as `.data.rel.ro.local` and `.rela.data.rel.ro.local` sections are generated
+// instead of the `.rodata` and `.rela.rodata` sections.
+// However, the current implementation of the linker does not support PIE, so we need to use a non-PIE object file for testing.
+
 
 use std::collections::HashMap;
 
@@ -40,19 +49,15 @@ use crate::{
 // The names of the sections that are relevant for merging.
 const SECTION_NAME_TEXT: &str = ".text";
 const SECTION_NAME_RODATA: &str = ".rodata";
-// const SECTION_NAME_RODATA_REL: &str = ".data.rel.ro.local";
 const SECTION_NAME_TDATA: &str = ".tdata";
 const SECTION_NAME_TBSS: &str = ".tbss";
 const SECTION_NAME_DATA: &str = ".data";
-// const SECTION_NAME_DATA_REL: &str = ".data.rel.local";
 const SECTION_NAME_BSS: &str = ".bss";
 
 // The names of the relocation sections that are relevant for relocation.
 const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
 const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
-// const SECTION_NAME_RELA_RODATA_REL: &str = ".rela.data.rel.ro.local";
 const SECTION_NAME_RELA_DATA: &str = ".rela.data";
-// const SECTION_NAME_RELA_DATA_REL: &str = ".rela.data.rel.local";
 const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
 
 /// A module represents essential elements of an object file,
@@ -373,119 +378,113 @@ mod tests {
     }
 
     #[test]
-    fn test_read_minimal_asm() {
+    fn test_read_asm_minimal() {
         let binary = get_example_file_binary("asm/minimal.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_function_asm() {
+    fn test_read_asm_function() {
         let binary = get_example_file_binary("asm/function.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_data_asm() {
+    fn test_read_asm_data() {
         let binary = get_example_file_binary("asm/data.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_symbol_export_asm() {
+    fn test_read_asm_symbol_export() {
         let binary = get_example_file_binary("asm/symbol-export.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_symbol_import_asm() {
+    fn test_read_asm_symbol_import() {
         let binary = get_example_file_binary("asm/symbol-import.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_override_weak_asm() {
+    fn test_read_asm_override_weak() {
         let binary = get_example_file_binary("asm/override-weak.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_override_strong_asm() {
+    fn test_read_asm_override_strong() {
         let binary = get_example_file_binary("asm/override-strong.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_relocate_within_data_asm() {
+    fn test_read_asm_relocate_within_data() {
         let binary = get_example_file_binary("asm/relocate-within-data.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_minimal_gcc() {
+    fn test_read_gcc_minimal() {
         let binary = get_example_file_binary("gcc/minimal.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_function_gcc() {
+    fn test_read_gcc_function() {
         let binary = get_example_file_binary("gcc/function.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_data_gcc() {
+    fn test_read_gcc_data() {
         let binary = get_example_file_binary("gcc/data.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_symbol_export_gcc() {
+    fn test_read_gcc_symbol_export() {
         let binary = get_example_file_binary("gcc/symbol-export.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_symbol_import_gcc() {
+    fn test_read_gcc_symbol_import() {
         let binary = get_example_file_binary("gcc/symbol-import.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_override_weak_gcc() {
+    fn test_read_gcc_override_weak() {
         let binary = get_example_file_binary("gcc/override-weak.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_override_strong_gcc() {
+    fn test_read_gcc_override_strong() {
         let binary = get_example_file_binary("gcc/override-strong.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
-    fn test_read_relocate_within_data_gcc_no_pie() {
-        // Note:
-        // GCC in modern Linux distributions (e.g., Ubuntu 22.04) generates PIE (Position Independent Executable) by default,
-        // which means that the `.data.rel.ro.local` section is generated instead of the `.data` section,
-        // and the `.rela.data.rel.ro.local` section is generated instead of the `.rela.data` section.
-        // However, the current implementation of the linker does not support PIE, so we need to use a non-PIE object file for testing.
-
-        let binary = get_example_file_binary("gcc/relocate-within-data-no-pie.o");
+    fn test_read_gcc_relocate_within_data() {
+        let binary = get_example_file_binary("gcc/relocate-within-data.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }

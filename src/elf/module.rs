@@ -298,8 +298,7 @@ pub enum RelocationType {
     ///
     /// Because this linker does not support dynamic linking, we can treat `R_X86_64_PLT32` the
     /// same as `R_X86_64_PC32` for static linking purposes.
-    // TODO: Not implemented yet
-    // R_X86_64_PLT32,
+    R_X86_64_PLT32,
 
     /// The `R_X86_64_64` relocation type represents a 64-bit absolute relocation.
     /// It is produced by the assembler/compiler whenever a full 64-bit address is stored
@@ -365,8 +364,7 @@ pub enum RelocationType {
     /// | var1 (offset 0)           | [fs:-8] = FS.base - 8 (tpoff = -8)
     /// +---------------------------+
     /// Lower addresses
-    // TODO: Not implemented yet
-    // R_X86_64_TPOFF32,
+    R_X86_64_TPOFF32,
 
     /// `R_AARCH64_ADR_PREL_PG_HI21` and `R_AARCH64_ADD_ABS_LO12_NC/R_AARCH64_LDST64_ABS_LO12_NC` are used for PC-relative addressing.
     ///

@@ -385,9 +385,10 @@ fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, Lin
     match relocation_type_raw {
         /* x86_64 */
         object::elf::R_X86_64_PC32 => Ok(RelocationType::R_X86_64_PC32),
+        object::elf::R_X86_64_PLT32 => Ok(RelocationType::R_X86_64_PLT32),
         object::elf::R_X86_64_64 => Ok(RelocationType::R_X86_64_64),
         object::elf::R_X86_64_32 => Ok(RelocationType::R_X86_64_32),
-        // object::elf::R_X86_64_TPOFF32 => Ok(RelocationType::R_X86_64_TPOFF32),
+        object::elf::R_X86_64_TPOFF32 => Ok(RelocationType::R_X86_64_TPOFF32),
 
         /* aarch64 */
         object::elf::R_AARCH64_ADR_PREL_PG_HI21 => Ok(RelocationType::R_AARCH64_ADR_PREL_PG_HI21),
@@ -464,13 +465,12 @@ pub fn read_program_headers(
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use std::{str::Matches, vec};
+    use std::vec;
 
     use crate::elf::{
         module::{
-            DataEncoding, FileClass, FileHeader, FileType, Machine, OSABI, ProgramHeader,
-            Relocation, RelocationType, SectionType, SegmentFlag, SegmentType, Symbol, SymbolBind,
-            SymbolType,
+            DataEncoding, FileClass, FileType, Machine, OSABI, RelocationType, SectionType,
+            SegmentFlag, SegmentType, Symbol, SymbolBind, SymbolType,
         },
         reader::{
             read_file, read_file_header, read_program_headers, read_relocation_sections,
