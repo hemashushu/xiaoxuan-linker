@@ -5,7 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 ARCH="${1:-}"
 if [[ -z "$ARCH" ]]; then
-    read -r -p "Enter ARCH (aarch64, riscv64, x86_64, all): " ARCH
+    echo "Usage: $0 <ARCH>"
+    echo "ARCH: aarch64 | riscv64 | x86_64 | all"
+    exit 1
 fi
 
 case "$ARCH" in
@@ -21,19 +23,19 @@ select_gcc() {
     local arch="$1"
     case "$arch" in
         aarch64)
-            GCC=${GCC:-/usr/bin/aarch64-linux-gnu-gcc}
+            GCC=/usr/bin/aarch64-linux-gnu-gcc
             [[ -x "$GCC" ]] || GCC=gcc
             CFLAGS_ARCH=()
             LDFLAGS_ARCH=()
             ;;
         riscv64)
-            GCC=${GCC:-/usr/bin/riscv64-linux-gnu-gcc}
+            GCC=/usr/bin/riscv64-linux-gnu-gcc
             [[ -x "$GCC" ]] || GCC=gcc
             CFLAGS_ARCH=(-mno-relax)
             LDFLAGS_ARCH=(-Wl,--no-relax)
             ;;
         x86_64)
-            GCC=${GCC:-/usr/bin/x86_64-linux-gnu-gcc}
+            GCC=/usr/bin/x86_64-linux-gnu-gcc
             [[ -x "$GCC" ]] || GCC=gcc
             CFLAGS_ARCH=()
             LDFLAGS_ARCH=()

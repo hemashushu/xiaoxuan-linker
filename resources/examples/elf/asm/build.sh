@@ -5,7 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 ARCH="${1:-}"
 if [[ -z "$ARCH" ]]; then
-    read -r -p "Enter ARCH (aarch64, riscv64, x86_64, all): " ARCH
+    echo "Usage: $0 <ARCH>"
+    echo "ARCH: aarch64 | riscv64 | x86_64 | all"
+    exit 1
 fi
 
 case "$ARCH" in
@@ -21,22 +23,22 @@ select_tools() {
     local arch="$1"
     case "$arch" in
         aarch64)
-            AS=${AS:-/usr/bin/aarch64-linux-gnu-as}
-            LD=${LD:-/usr/bin/aarch64-linux-gnu-ld}
+            AS=/usr/bin/aarch64-linux-gnu-as
+            LD=/usr/bin/aarch64-linux-gnu-ld
             [[ -x "$AS" ]] || AS=as
             [[ -x "$LD" ]] || LD=ld
             AS_ARGS=()
             ;;
         riscv64)
-            AS=${AS:-/usr/bin/riscv64-linux-gnu-as}
-            LD=${LD:-/usr/bin/riscv64-linux-gnu-ld}
+            AS=/usr/bin/riscv64-linux-gnu-as
+            LD=/usr/bin/riscv64-linux-gnu-ld
             [[ -x "$AS" ]] || AS=as
             [[ -x "$LD" ]] || LD=ld
             AS_ARGS=(-mno-relax)
             ;;
         x86_64)
-            AS=${AS:-/usr/bin/x86_64-linux-gnu-as}
-            LD=${LD:-/usr/bin/x86_64-linux-gnu-ld}
+            AS=/usr/bin/x86_64-linux-gnu-as
+            LD=/usr/bin/x86_64-linux-gnu-ld
             [[ -x "$AS" ]] || AS=as
             [[ -x "$LD" ]] || LD=ld
             AS_ARGS=(--64)

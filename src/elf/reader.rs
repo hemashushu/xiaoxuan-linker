@@ -465,7 +465,7 @@ pub fn read_program_headers(
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use std::vec;
+    use std::{fmt::Display, vec};
 
     use crate::elf::{
         module::{
@@ -478,6 +478,21 @@ mod tests {
         },
     };
 
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    enum SourceType {
+        Assembly,
+        GCC,
+    }
+
+    impl Display for SourceType {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SourceType::Assembly => f.write_str("asm"),
+                SourceType::GCC => f.write_str("gcc"),
+            }
+        }
+    }
+
     const IMPLEMENTED_ARCHS: &[Machine] = &[
         Machine::X86_64,
         Machine::AArch64,
@@ -489,20 +504,25 @@ mod tests {
 
     fn get_arch_dir_name(arch: &Machine) -> &'static str {
         match arch {
-            Machine::X86_64 => "x86_64-linux",
-            Machine::AArch64 => "aarch64-linux",
-            Machine::RiscV => "riscv64-linux",
-            Machine::LoongArch => "loongarch64-linux",
-            Machine::PowerPC64 => "powerpc64le-linux",
-            Machine::S390 => "s390x-linux",
+            Machine::X86_64 => "x86_64",
+            Machine::AArch64 => "aarch64",
+            Machine::RiscV => "riscv64",
+            Machine::LoongArch => "loongarch64",
+            Machine::PowerPC64 => "powerpc64le",
+            Machine::S390 => "s390x",
             Machine::Other(_) => unimplemented!(),
         }
     }
 
-    fn get_example_file_binary(arch: &Machine, file_name: &str) -> Vec<u8> {
+    fn get_example_file_binary(
+        source_type: SourceType,
+        arch: &Machine,
+        file_name: &str,
+    ) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
-            .join("resources/examples")
+            .join("resources/examples/elf")
+            .join(source_type.to_string())
             .join(get_arch_dir_name(arch))
             .join(file_name);
 
@@ -526,10 +546,10 @@ mod tests {
 
     #[test]
     fn test_read_file_header_asm_minimal_o() {
-        // Manually check with command `readelf -h asm/minimal.o`
+        // Manually check with command `readelf -h asm/ARCH/minimal.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/minimal.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let file_header = read_file_header(elf).unwrap();
 
@@ -555,10 +575,10 @@ mod tests {
 
     #[test]
     fn test_read_file_header_asm_minimal_elf() {
-        // Manually check with command `readelf -h asm/minimal.elf`
+        // Manually check with command `readelf -h asm/ARCH/minimal.elf`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/minimal.elf");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.elf");
             let elf = read_file(&binary).unwrap();
             let file_header = read_file_header(elf).unwrap();
 
@@ -589,8 +609,8 @@ mod tests {
         // to be the same across different versions of the assembler and platforms.
 
         for arch in IMPLEMENTED_ARCHS {
-            // Manually check with command `readelf -S asm/minimal.o`
-            let binary = get_example_file_binary(arch, "asm/minimal.o");
+            // Manually check with command `readelf -S asm/ARCH/minimal.o`
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
@@ -651,9 +671,9 @@ mod tests {
 
     #[test]
     fn test_read_section_header_asm_data_o() {
-        // Manually check with command `readelf -S asm/data.o`
+        // Manually check with command `readelf -S asm/ARCH/data.o`
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/data.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "data.o");
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
@@ -691,9 +711,9 @@ mod tests {
 
     #[test]
     fn test_read_symbols_asm_minimal_o() {
-        // Manually check with command `readelf -s asm/minimal.o`
+        // Manually check with command `readelf -s asm/ARCH/minimal.o`
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/minimal.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -716,8 +736,8 @@ mod tests {
     #[test]
     fn test_read_symbols_asm_data_o() {
         for arch in IMPLEMENTED_ARCHS {
-            // Manually check with command `readelf -s asm/data.o`
-            let binary = get_example_file_binary(arch, "asm/data.o");
+            // Manually check with command `readelf -s asm/ARCH/data.o`
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "data.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -798,8 +818,8 @@ mod tests {
     #[test]
     fn test_read_symbols_asm_symbol_export_o() {
         for arch in IMPLEMENTED_ARCHS {
-            // Manually check with command `readelf -s asm/symbol-export.o`
-            let binary = get_example_file_binary(arch, "asm/symbol-export.o");
+            // Manually check with command `readelf -s asm/ARCH/symbol-export.o`
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "symbol-export.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -871,10 +891,10 @@ mod tests {
 
     #[test]
     fn test_read_symbols_asm_symbol_import_o() {
-        // Manually check with command `readelf -s asm/symbol-import.o`
+        // Manually check with command `readelf -s asm/ARCH/symbol-import.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/symbol-import.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "symbol-import.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -898,10 +918,10 @@ mod tests {
 
     #[test]
     fn test_read_symbols_asm_override_weak_o() {
-        // Manually check with command `readelf -s asm/override-weak.o`
+        // Manually check with command `readelf -s asm/ARCH/override-weak.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/override-weak.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "override-weak.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -927,10 +947,10 @@ mod tests {
 
     #[test]
     fn test_read_symbols_asm_override_strong_o() {
-        // Manually check with command `readelf -s asm/override-strong.o`
+        // Manually check with command `readelf -s asm/ARCH/override-strong.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/override-strong.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "override-strong.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -975,9 +995,9 @@ mod tests {
 
     #[test]
     fn test_read_relocations_asm_minimal_o() {
-        // Manually check with command `readelf -r asm/minimal.o`
+        // Manually check with command `readelf -r asm/ARCH/minimal.o`
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/minimal.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
@@ -987,10 +1007,10 @@ mod tests {
 
     #[test]
     fn test_read_relocations_asm_data_o() {
-        // Manually check with command `readelf -r asm/data.o`
+        // Manually check with command `readelf -r asm/ARCH/data.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/data.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "data.o");
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
@@ -1091,10 +1111,11 @@ mod tests {
 
     #[test]
     fn test_read_relocations_asm_relocate_within_data_o() {
-        // Manually check with command `readelf -r asm/relocate-within-data.o`
+        // Manually check with command `readelf -r asm/ARCH/relocate-within-data.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/relocate-within-data.o");
+            let binary =
+                get_example_file_binary(SourceType::Assembly, arch, "relocate-within-data.o");
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
@@ -1280,10 +1301,10 @@ mod tests {
 
     #[test]
     fn test_read_program_headers_asm_minimal_o() {
-        // Manually check with command `readelf -l asm/minimal.o`
+        // Manually check with command `readelf -l asm/ARCH/minimal.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/minimal.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
@@ -1293,10 +1314,10 @@ mod tests {
 
     #[test]
     fn test_read_program_headers_asm_minimal_elf() {
-        // Manually check with command `readelf -l asm/minimal.elf`
+        // Manually check with command `readelf -l asm/ARCH/minimal.elf`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/minimal.elf");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.elf");
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
@@ -1332,10 +1353,10 @@ mod tests {
 
     #[test]
     fn test_read_program_headers_asm_data_elf() {
-        // Manually check with command `readelf -l asm/data.elf`
+        // Manually check with command `readelf -l asm/ARCH/data.elf`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "asm/data.elf");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "data.elf");
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
@@ -1393,10 +1414,10 @@ mod tests {
 
     #[test]
     fn test_read_file_header_gcc_minimal_o() {
-        // Manually check with command `readelf -h gcc/minimal.o`
+        // Manually check with command `readelf -h gcc/ARCH/minimal.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let file_header = read_file_header(elf).unwrap();
 
@@ -1422,10 +1443,10 @@ mod tests {
 
     #[test]
     fn test_read_file_header_gcc_minimal_elf() {
-        // Manually check with command `readelf -h gcc/minimal.elf`
+        // Manually check with command `readelf -h gcc/ARCH/minimal.elf`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/minimal.elf");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.elf");
             let elf = read_file(&binary).unwrap();
             let file_header = read_file_header(elf).unwrap();
 
@@ -1456,8 +1477,8 @@ mod tests {
         // to be the same across different versions of the assembler and platforms.
 
         for arch in IMPLEMENTED_ARCHS {
-            // Manually check with command `readelf -S gcc/minimal.o`
-            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            // Manually check with command `readelf -S gcc/ARCH/minimal.o`
+            let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
@@ -1518,9 +1539,9 @@ mod tests {
 
     #[test]
     fn test_read_section_header_gcc_data_o() {
-        // Manually check with command `readelf -S gcc/data.o`
+        // Manually check with command `readelf -S gcc/ARCH/data.o`
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/data.o");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "data.o");
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
@@ -1558,9 +1579,9 @@ mod tests {
 
     #[test]
     fn test_read_symbols_gcc_minimal_o() {
-        // Manually check with command `readelf -s gcc/minimal.o`
+        // Manually check with command `readelf -s gcc/ARCH/minimal.o`
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -1585,8 +1606,8 @@ mod tests {
     #[test]
     fn test_read_symbols_gcc_data_o() {
         for arch in IMPLEMENTED_ARCHS {
-            // Manually check with command `readelf -s gcc/data.o`
-            let binary = get_example_file_binary(arch, "gcc/data.o");
+            // Manually check with command `readelf -s gcc/ARCH/data.o`
+            let binary = get_example_file_binary(SourceType::GCC, arch, "data.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -1670,8 +1691,8 @@ mod tests {
     #[test]
     fn test_read_symbols_gcc_symbol_export_o() {
         for arch in IMPLEMENTED_ARCHS {
-            // Manually check with command `readelf -s gcc/symbol-export.o`
-            let binary = get_example_file_binary(arch, "gcc/symbol-export.o");
+            // Manually check with command `readelf -s gcc/ARCH/symbol-export.o`
+            let binary = get_example_file_binary(SourceType::GCC, arch, "symbol-export.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -1746,10 +1767,10 @@ mod tests {
 
     #[test]
     fn test_read_symbols_gcc_symbol_import_o() {
-        // Manually check with command `readelf -s gcc/symbol-import.o`
+        // Manually check with command `readelf -s gcc/ARCH/symbol-import.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/symbol-import.o");
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "symbol-import.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -1773,10 +1794,10 @@ mod tests {
 
     #[test]
     fn test_read_symbols_gcc_override_weak_o() {
-        // Manually check with command `readelf -s gcc/override-weak.o`
+        // Manually check with command `readelf -s gcc/ARCH/override-weak.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/override-weak.o");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "override-weak.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -1802,10 +1823,10 @@ mod tests {
 
     #[test]
     fn test_read_symbols_gcc_override_strong_o() {
-        // Manually check with command `readelf -s gcc/override-strong.o`
+        // Manually check with command `readelf -s gcc/ARCH/override-strong.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/override-strong.o");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "override-strong.o");
             let elf = read_file(&binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
 
@@ -1833,9 +1854,9 @@ mod tests {
 
     #[test]
     fn test_read_relocations_gcc_minimal_o() {
-        // Manually check with command`
+        // Manually check with command `readelf -r gcc/ARCH/minimal.o`
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
@@ -1850,10 +1871,10 @@ mod tests {
 
     #[test]
     fn test_read_relocations_gcc_data_o() {
-        // Manually check with command `readelf -r gcc/data.o`
+        // Manually check with command `readelf -r gcc/ARCH/data.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/data.o");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "data.o");
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
@@ -1929,10 +1950,10 @@ mod tests {
 
     #[test]
     fn test_read_relocations_gcc_relocate_within_data_o() {
-        // Manually check with command `readelf -r gcc/relocate-within-data.o`
+        // Manually check with command `readelf -r gcc/ARCH/relocate-within-data.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/relocate-within-data.o");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "relocate-within-data.o");
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
@@ -2101,10 +2122,10 @@ mod tests {
 
     #[test]
     fn test_read_program_headers_gcc_minimal_o() {
-        // Manually check with command `readelf -l gcc/minimal.o`
+        // Manually check with command `readelf -l gcc/ARCH/minimal.o`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/minimal.o");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.o");
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
@@ -2114,10 +2135,10 @@ mod tests {
 
     #[test]
     fn test_read_program_headers_gcc_minimal_elf() {
-        // Manually check with command `readelf -l gcc/minimal.elf`
+        // Manually check with command `readelf -l gcc/ARCH/minimal.elf`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/minimal.elf");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.elf");
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 
@@ -2153,10 +2174,10 @@ mod tests {
 
     #[test]
     fn test_read_program_headers_gcc_data_elf() {
-        // Manually check with command `readelf -l gcc/data.elf`
+        // Manually check with command `readelf -l gcc/ARCH/data.elf`
 
         for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(arch, "gcc/data.elf");
+            let binary = get_example_file_binary(SourceType::GCC, arch, "data.elf");
             let elf = read_file(&binary).unwrap();
             let program_headers = read_program_headers(elf, &binary).unwrap();
 

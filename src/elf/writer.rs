@@ -703,6 +703,7 @@ fn get_first_not_null_section<'a>(
 mod tests {
 
     use std::{
+        fmt::Display,
         fs,
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
@@ -713,58 +714,70 @@ mod tests {
 
     use crate::elf::{
         linker::link,
+        module::Machine,
         relocatable::{RelocatableModule, read_relocatable},
         writer::write_executable,
     };
 
-    enum ARCH {
-        X86_64,
-        AARCH64,
-        RISCV64,
-        LOONGARCH64,
-        POWERSPC64LE,
-        S390X,
-        UNSUPPORTED,
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    enum SourceType {
+        Assembly,
+        GCC,
     }
 
-    fn get_arch() -> ARCH {
-        match std::env::consts::ARCH {
-            "x86_64" => ARCH::X86_64,
-            "aarch64" => ARCH::AARCH64,
-            "riscv64" => ARCH::RISCV64,
-            "loongarch64" => ARCH::LOONGARCH64,
-            "powerpc64" => ARCH::POWERSPC64LE,
-            "s390x" => ARCH::S390X,
-            _ => ARCH::UNSUPPORTED,
+    impl Display for SourceType {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SourceType::Assembly => f.write_str("asm"),
+                SourceType::GCC => f.write_str("gcc"),
+            }
         }
     }
 
-    fn get_arch_dir_name() -> &'static str {
-        match get_arch() {
-            ARCH::X86_64 => "x86_64-linux",
-            ARCH::AARCH64 => "aarch64-linux",
-            ARCH::RISCV64 => "riscv64-linux",
-            ARCH::LOONGARCH64 => "loongarch64-linux",
-            ARCH::POWERSPC64LE => "powerpc64le-linux",
-            ARCH::S390X => "s390x-linux",
-            ARCH::UNSUPPORTED => panic!("Unsupported architecture"),
+    const IMPLEMENTED_ARCHS: &[Machine] = &[
+        Machine::X86_64,
+        Machine::AArch64,
+        // Machine::RiscV,
+        // Machine::LoongArch,
+        // Machine::PowerPC64,
+        // Machine::S390,
+    ];
+
+    fn get_arch_dir_name(arch: &Machine) -> &'static str {
+        match arch {
+            Machine::X86_64 => "x86_64",
+            Machine::AArch64 => "aarch64",
+            Machine::RiscV => "riscv64",
+            Machine::LoongArch => "loongarch64",
+            Machine::PowerPC64 => "powerpc64le",
+            Machine::S390 => "s390x",
+            Machine::Other(_) => unimplemented!(),
         }
     }
 
-    fn get_example_file_binary(file_name: &str) -> Vec<u8> {
+    fn get_example_file_binary(
+        source_type: SourceType,
+        arch: &Machine,
+        file_name: &str,
+    ) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
-            .join("resources/examples")
-            .join(get_arch_dir_name())
+            .join("resources/examples/elf")
+            .join(source_type.to_string())
+            .join(get_arch_dir_name(arch))
             .join(file_name);
 
         std::fs::read(file_path).unwrap()
     }
 
-    fn get_example_file_binaries(file_names: &[&str]) -> Vec<Vec<u8>> {
+    fn get_example_file_binaries(
+        source_type: SourceType,
+        arch: &Machine,
+        file_names: &[&str],
+    ) -> Vec<Vec<u8>> {
         file_names
             .iter()
-            .map(|file_name| get_example_file_binary(file_name))
+            .map(|file_name| get_example_file_binary(source_type, arch, file_name))
             .collect()
     }
 
@@ -779,20 +792,37 @@ mod tests {
             .collect()
     }
 
-    fn link_example_files(file_names: &[&str], output_buffer: &mut dyn WritableBuffer) {
-        let file_binaries = get_example_file_binaries(file_names);
+    fn link_example_files(
+        source_type: SourceType,
+        arch: &Machine,
+        file_names: &[&str],
+        output_buffer: &mut dyn WritableBuffer,
+    ) {
+        let file_binaries = get_example_file_binaries(source_type, arch, file_names);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules: Vec<RelocatableModule> = get_example_file_modules(&file_binaries_ref);
         let link_result = link(&mut modules).unwrap();
         write_executable(&mut modules, &link_result, output_buffer).unwrap();
     }
 
-    fn link_example_file_to_executable(file_names: &[&str], output_file_name: &str) -> PathBuf {
+    fn generate_example_executable(
+        source_type: SourceType,
+        arch: &Machine,
+        file_names: &[&str],
+        output_base_name: &str,
+    ) -> PathBuf {
+        let output_file_name = format!(
+            "test_{}_{}_{}.elf",
+            source_type,
+            get_arch_dir_name(arch),
+            output_base_name
+        );
+
         let tmp_dir = std::env::temp_dir();
         let path = tmp_dir.join(output_file_name);
         let mut file = fs::File::create(&path).unwrap();
         let mut buffer = StreamingBuffer::new(&mut file);
-        link_example_files(file_names, &mut buffer);
+        link_example_files(source_type, arch, file_names, &mut buffer);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .expect("failed to set permissions");
         path
@@ -840,30 +870,47 @@ mod tests {
 
     #[test]
     fn test_write_asm_minimal() {
-        let file = link_example_file_to_executable(&["asm/minimal.o"], "test-asm-minimal.elf");
+        let file = generate_example_executable(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            &["minimal.o"],
+            "minimal",
+        );
         execute_and_assert(&file, 42, "");
         delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_asm_function() {
-        let file = link_example_file_to_executable(&["asm/function.o"], "test-asm-function.elf");
+        let file = generate_example_executable(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            &["function.o"],
+            "function",
+        );
         execute_and_assert(&file, 0, "Hello, world!\n");
         delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_asm_data() {
-        let file = link_example_file_to_executable(&["asm/data.o"], "test-asm-data.elf");
+        let file = generate_example_executable(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            &["data.o"],
+            "data",
+        );
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_asm_symbol() {
-        let file = link_example_file_to_executable(
-            &["asm/symbol-export.o", "asm/symbol-import.o"],
-            "test-asm-symbol.elf",
+        let file = generate_example_executable(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            &["symbol-export.o", "symbol-import.o"],
+            "symbol",
         );
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);
@@ -871,9 +918,11 @@ mod tests {
 
     #[test]
     fn test_write_asm_override() {
-        let file = link_example_file_to_executable(
-            &["asm/override-weak.o", "asm/override-strong.o"],
-            "test-asm-override.elf",
+        let file = generate_example_executable(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            &["override-weak.o", "override-strong.o"],
+            "override",
         );
         execute_and_assert(&file, 53, "");
         delete_temporary_file(&file);
@@ -881,9 +930,11 @@ mod tests {
 
     #[test]
     fn test_write_asm_relocate_within_data() {
-        let file = link_example_file_to_executable(
-            &["asm/relocate-within-data.o"],
-            "test-asm-relocate-within-data.elf",
+        let file = generate_example_executable(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            &["relocate-within-data.o"],
+            "relocate-within-data",
         );
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);
@@ -891,30 +942,43 @@ mod tests {
 
     #[test]
     fn test_write_gcc_minimal() {
-        let file = link_example_file_to_executable(&["gcc/minimal.o"], "test-gcc-minimal.elf");
+        let file = generate_example_executable(
+            SourceType::GCC,
+            &Machine::X86_64,
+            &["minimal.o"],
+            "minimal",
+        );
         execute_and_assert(&file, 42, "");
         delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_gcc_function() {
-        let file = link_example_file_to_executable(&["gcc/function.o"], "test-gcc-function.elf");
+        let file = generate_example_executable(
+            SourceType::GCC,
+            &Machine::X86_64,
+            &["function.o"],
+            "function",
+        );
         execute_and_assert(&file, 0, "Hello, world!\n");
         delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_gcc_data() {
-        let file = link_example_file_to_executable(&["gcc/data.o"], "test-gcc-data.elf");
+        let file =
+            generate_example_executable(SourceType::GCC, &Machine::X86_64, &["data.o"], "data");
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);
     }
 
     #[test]
     fn test_write_gcc_symbol() {
-        let file = link_example_file_to_executable(
-            &["gcc/symbol-export.o", "gcc/symbol-import.o"],
-            "test-gcc-symbol.elf",
+        let file = generate_example_executable(
+            SourceType::GCC,
+            &Machine::X86_64,
+            &["symbol-export.o", "symbol-import.o"],
+            "symbol",
         );
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);
@@ -922,9 +986,11 @@ mod tests {
 
     #[test]
     fn test_write_gcc_override() {
-        let file = link_example_file_to_executable(
-            &["gcc/override-weak.o", "gcc/override-strong.o"],
-            "test-gcc-override.elf",
+        let file = generate_example_executable(
+            SourceType::GCC,
+            &Machine::X86_64,
+            &["override-weak.o", "override-strong.o"],
+            "override",
         );
         execute_and_assert(&file, 53, "");
         delete_temporary_file(&file);
@@ -932,9 +998,11 @@ mod tests {
 
     #[test]
     fn test_write_gcc_relocate_within_data() {
-        let file = link_example_file_to_executable(
-            &["gcc/relocate-within-data.o"],
-            "test-gcc-relocate-within-data.elf",
+        let file = generate_example_executable(
+            SourceType::GCC,
+            &Machine::X86_64,
+            &["relocate-within-data.o"],
+            "relocate-within-data",
         );
         execute_and_assert(&file, 24, "");
         delete_temporary_file(&file);

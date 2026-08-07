@@ -32,7 +32,6 @@
 // instead of the `.rodata` and `.rela.rodata` sections.
 // However, the current implementation of the linker does not support PIE, so we need to use a non-PIE object file for testing.
 
-
 use std::collections::HashMap;
 
 use crate::{
@@ -331,47 +330,55 @@ pub fn read_relocatable<'a>(binary: &'a [u8]) -> Result<RelocatableModule<'a>, L
 
 #[cfg(test)]
 mod tests {
-    use crate::elf::relocatable::read_relocatable;
+    use crate::elf::{module::Machine, relocatable::read_relocatable};
+    use std::fmt::Display;
 
-    enum ARCH {
-        X86_64,
-        AARCH64,
-        RISCV64,
-        LOONGARCH64,
-        POWERSPC64LE,
-        S390X,
-        UNSUPPORTED,
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    enum SourceType {
+        Assembly,
+        GCC,
     }
 
-    fn get_arch() -> ARCH {
-        match std::env::consts::ARCH {
-            "x86_64" => ARCH::X86_64,
-            "aarch64" => ARCH::AARCH64,
-            "riscv64" => ARCH::RISCV64,
-            "loongarch64" => ARCH::LOONGARCH64,
-            "powerpc64" => ARCH::POWERSPC64LE,
-            "s390x" => ARCH::S390X,
-            _ => ARCH::UNSUPPORTED,
+    impl Display for SourceType {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SourceType::Assembly => f.write_str("asm"),
+                SourceType::GCC => f.write_str("gcc"),
+            }
         }
     }
 
-    fn get_arch_dir_name() -> &'static str {
-        match get_arch() {
-            ARCH::X86_64 => "x86_64-linux",
-            ARCH::AARCH64 => "aarch64-linux",
-            ARCH::RISCV64 => "riscv64-linux",
-            ARCH::LOONGARCH64 => "loongarch64-linux",
-            ARCH::POWERSPC64LE => "powerpc64le-linux",
-            ARCH::S390X => "s390x-linux",
-            ARCH::UNSUPPORTED => panic!("Unsupported architecture"),
+    const IMPLEMENTED_ARCHS: &[Machine] = &[
+        Machine::X86_64,
+        Machine::AArch64,
+        // Machine::RiscV,
+        // Machine::LoongArch,
+        // Machine::PowerPC64,
+        // Machine::S390,
+    ];
+
+    fn get_arch_dir_name(arch: &Machine) -> &'static str {
+        match arch {
+            Machine::X86_64 => "x86_64",
+            Machine::AArch64 => "aarch64",
+            Machine::RiscV => "riscv64",
+            Machine::LoongArch => "loongarch64",
+            Machine::PowerPC64 => "powerpc64le",
+            Machine::S390 => "s390x",
+            Machine::Other(_) => unimplemented!(),
         }
     }
 
-    fn get_example_file_binary(file_name: &str) -> Vec<u8> {
+    fn get_example_file_binary(
+        source_type: SourceType,
+        arch: &Machine,
+        file_name: &str,
+    ) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
-            .join("resources/examples")
-            .join(get_arch_dir_name())
+            .join("resources/examples/elf")
+            .join(source_type.to_string())
+            .join(get_arch_dir_name(arch))
             .join(file_name);
 
         std::fs::read(file_path).unwrap()
@@ -379,112 +386,122 @@ mod tests {
 
     #[test]
     fn test_read_asm_minimal() {
-        let binary = get_example_file_binary("asm/minimal.o");
+        let binary = get_example_file_binary(SourceType::Assembly, &Machine::X86_64, "minimal.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_asm_function() {
-        let binary = get_example_file_binary("asm/function.o");
+        let binary = get_example_file_binary(SourceType::Assembly, &Machine::X86_64, "function.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_asm_data() {
-        let binary = get_example_file_binary("asm/data.o");
+        let binary = get_example_file_binary(SourceType::Assembly, &Machine::X86_64, "data.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_asm_symbol_export() {
-        let binary = get_example_file_binary("asm/symbol-export.o");
+        let binary =
+            get_example_file_binary(SourceType::Assembly, &Machine::X86_64, "symbol-export.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_asm_symbol_import() {
-        let binary = get_example_file_binary("asm/symbol-import.o");
+        let binary =
+            get_example_file_binary(SourceType::Assembly, &Machine::X86_64, "symbol-import.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_asm_override_weak() {
-        let binary = get_example_file_binary("asm/override-weak.o");
+        let binary =
+            get_example_file_binary(SourceType::Assembly, &Machine::X86_64, "override-weak.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_asm_override_strong() {
-        let binary = get_example_file_binary("asm/override-strong.o");
+        let binary =
+            get_example_file_binary(SourceType::Assembly, &Machine::X86_64, "override-strong.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_asm_relocate_within_data() {
-        let binary = get_example_file_binary("asm/relocate-within-data.o");
+        let binary = get_example_file_binary(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            "relocate-within-data.o",
+        );
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_gcc_minimal() {
-        let binary = get_example_file_binary("gcc/minimal.o");
+        let binary = get_example_file_binary(SourceType::GCC, &Machine::X86_64, "minimal.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_gcc_function() {
-        let binary = get_example_file_binary("gcc/function.o");
+        let binary = get_example_file_binary(SourceType::GCC, &Machine::X86_64, "function.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_gcc_data() {
-        let binary = get_example_file_binary("gcc/data.o");
+        let binary = get_example_file_binary(SourceType::GCC, &Machine::X86_64, "data.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_gcc_symbol_export() {
-        let binary = get_example_file_binary("gcc/symbol-export.o");
+        let binary = get_example_file_binary(SourceType::GCC, &Machine::X86_64, "symbol-export.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_gcc_symbol_import() {
-        let binary = get_example_file_binary("gcc/symbol-import.o");
+        let binary = get_example_file_binary(SourceType::GCC, &Machine::X86_64, "symbol-import.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_gcc_override_weak() {
-        let binary = get_example_file_binary("gcc/override-weak.o");
+        let binary = get_example_file_binary(SourceType::GCC, &Machine::X86_64, "override-weak.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_gcc_override_strong() {
-        let binary = get_example_file_binary("gcc/override-strong.o");
+        let binary =
+            get_example_file_binary(SourceType::GCC, &Machine::X86_64, "override-strong.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }
 
     #[test]
     fn test_read_gcc_relocate_within_data() {
-        let binary = get_example_file_binary("gcc/relocate-within-data.o");
+        let binary =
+            get_example_file_binary(SourceType::GCC, &Machine::X86_64, "relocate-within-data.o");
         let module = read_relocatable(&binary);
         assert!(module.is_ok());
     }

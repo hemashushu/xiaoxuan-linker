@@ -720,59 +720,73 @@ fn find_global_symbol(
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Display;
+
     use crate::elf::{
         linker::link,
+        module::Machine,
         relocatable::{RelocatableModule, read_relocatable},
     };
 
-    enum ARCH {
-        X86_64,
-        AARCH64,
-        RISCV64,
-        LOONGARCH64,
-        POWERSPC64LE,
-        S390X,
-        UNSUPPORTED,
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    enum SourceType {
+        Assembly,
+        GCC,
     }
 
-    fn get_arch() -> ARCH {
-        match std::env::consts::ARCH {
-            "x86_64" => ARCH::X86_64,
-            "aarch64" => ARCH::AARCH64,
-            "riscv64" => ARCH::RISCV64,
-            "loongarch64" => ARCH::LOONGARCH64,
-            "powerpc64" => ARCH::POWERSPC64LE,
-            "s390x" => ARCH::S390X,
-            _ => ARCH::UNSUPPORTED,
+    impl Display for SourceType {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SourceType::Assembly => f.write_str("asm"),
+                SourceType::GCC => f.write_str("gcc"),
+            }
         }
     }
 
-    fn get_arch_dir_name() -> &'static str {
-        match get_arch() {
-            ARCH::X86_64 => "x86_64-linux",
-            ARCH::AARCH64 => "aarch64-linux",
-            ARCH::RISCV64 => "riscv64-linux",
-            ARCH::LOONGARCH64 => "loongarch64-linux",
-            ARCH::POWERSPC64LE => "powerpc64le-linux",
-            ARCH::S390X => "s390x-linux",
-            ARCH::UNSUPPORTED => panic!("Unsupported architecture"),
+    const IMPLEMENTED_ARCHS: &[Machine] = &[
+        Machine::X86_64,
+        Machine::AArch64,
+        // Machine::RiscV,
+        // Machine::LoongArch,
+        // Machine::PowerPC64,
+        // Machine::S390,
+    ];
+
+    fn get_arch_dir_name(arch: &Machine) -> &'static str {
+        match arch {
+            Machine::X86_64 => "x86_64",
+            Machine::AArch64 => "aarch64",
+            Machine::RiscV => "riscv64",
+            Machine::LoongArch => "loongarch64",
+            Machine::PowerPC64 => "powerpc64le",
+            Machine::S390 => "s390x",
+            Machine::Other(_) => unimplemented!(),
         }
     }
 
-    fn get_example_file_binary(file_name: &str) -> Vec<u8> {
+    fn get_example_file_binary(
+        source_type: SourceType,
+        arch: &Machine,
+        file_name: &str,
+    ) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
-            .join("resources/examples")
-            .join(get_arch_dir_name())
+            .join("resources/examples/elf")
+            .join(source_type.to_string())
+            .join(get_arch_dir_name(arch))
             .join(file_name);
 
         std::fs::read(file_path).unwrap()
     }
 
-    fn get_example_file_binaries(file_names: &[&str]) -> Vec<Vec<u8>> {
+    fn get_example_file_binaries(
+        source_type: SourceType,
+        arch: &Machine,
+        file_names: &[&str],
+    ) -> Vec<Vec<u8>> {
         file_names
             .iter()
-            .map(|file_name| get_example_file_binary(file_name))
+            .map(|file_name| get_example_file_binary(source_type, arch, file_name))
             .collect()
     }
 
@@ -789,7 +803,8 @@ mod tests {
 
     #[test]
     fn test_link_asm_minimal() {
-        let file_binaries = get_example_file_binaries(&["asm/minimal.o"]);
+        let file_binaries =
+            get_example_file_binaries(SourceType::Assembly, &Machine::X86_64, &["minimal.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -799,7 +814,8 @@ mod tests {
 
     #[test]
     fn test_link_asm_function() {
-        let file_binaries = get_example_file_binaries(&["asm/function.o"]);
+        let file_binaries =
+            get_example_file_binaries(SourceType::Assembly, &Machine::X86_64, &["function.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -809,7 +825,8 @@ mod tests {
 
     #[test]
     fn test_link_asm_data() {
-        let file_binaries = get_example_file_binaries(&["asm/data.o"]);
+        let file_binaries =
+            get_example_file_binaries(SourceType::Assembly, &Machine::X86_64, &["data.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -819,8 +836,11 @@ mod tests {
 
     #[test]
     fn test_link_asm_symbol() {
-        let file_binaries =
-            get_example_file_binaries(&["asm/symbol-export.o", "asm/symbol-import.o"]);
+        let file_binaries = get_example_file_binaries(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            &["symbol-export.o", "symbol-import.o"],
+        );
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -830,8 +850,11 @@ mod tests {
 
     #[test]
     fn test_link_asm_override() {
-        let file_binaries =
-            get_example_file_binaries(&["asm/override-weak.o", "asm/override-strong.o"]);
+        let file_binaries = get_example_file_binaries(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            &["override-weak.o", "override-strong.o"],
+        );
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -841,7 +864,11 @@ mod tests {
 
     #[test]
     fn test_link_asm_relocate_within_data() {
-        let file_binaries = get_example_file_binaries(&["asm/relocate-within-data.o"]);
+        let file_binaries = get_example_file_binaries(
+            SourceType::Assembly,
+            &Machine::X86_64,
+            &["relocate-within-data.o"],
+        );
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -851,7 +878,8 @@ mod tests {
 
     #[test]
     fn test_link_gcc_minimal() {
-        let file_binaries = get_example_file_binaries(&["gcc/minimal.o"]);
+        let file_binaries =
+            get_example_file_binaries(SourceType::GCC, &Machine::X86_64, &["minimal.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -861,7 +889,8 @@ mod tests {
 
     #[test]
     fn test_link_gcc_function() {
-        let file_binaries = get_example_file_binaries(&["gcc/function.o"]);
+        let file_binaries =
+            get_example_file_binaries(SourceType::GCC, &Machine::X86_64, &["function.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -871,7 +900,8 @@ mod tests {
 
     #[test]
     fn test_link_gcc_data() {
-        let file_binaries = get_example_file_binaries(&["gcc/data.o"]);
+        let file_binaries =
+            get_example_file_binaries(SourceType::GCC, &Machine::X86_64, &["data.o"]);
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -881,8 +911,11 @@ mod tests {
 
     #[test]
     fn test_link_gcc_symbol() {
-        let file_binaries =
-            get_example_file_binaries(&["gcc/symbol-export.o", "gcc/symbol-import.o"]);
+        let file_binaries = get_example_file_binaries(
+            SourceType::GCC,
+            &Machine::X86_64,
+            &["symbol-export.o", "symbol-import.o"],
+        );
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -892,8 +925,11 @@ mod tests {
 
     #[test]
     fn test_link_gcc_override() {
-        let file_binaries =
-            get_example_file_binaries(&["gcc/override-weak.o", "gcc/override-strong.o"]);
+        let file_binaries = get_example_file_binaries(
+            SourceType::GCC,
+            &Machine::X86_64,
+            &["override-weak.o", "override-strong.o"],
+        );
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);
@@ -903,7 +939,11 @@ mod tests {
 
     #[test]
     fn test_link_gcc_relocate_within_data() {
-        let file_binaries = get_example_file_binaries(&["gcc/relocate-within-data.o"]);
+        let file_binaries = get_example_file_binaries(
+            SourceType::GCC,
+            &Machine::X86_64,
+            &["relocate-within-data.o"],
+        );
         let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
         let mut modules = get_example_file_modules(&file_binaries_ref);
         let result = link(&mut modules);

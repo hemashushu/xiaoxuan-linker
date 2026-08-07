@@ -6,7 +6,9 @@ HOST_ARCH="$(uname -m)"
 
 ARCH="${1:-}"
 if [[ -z "$ARCH" ]]; then
-    read -r -p "Enter ARCH (aarch64, riscv64, x86_64, all): " ARCH
+    echo "Usage: $0 <ARCH>"
+    echo "ARCH: aarch64 | riscv64 | x86_64 | all"
+    exit 1
 fi
 
 case "$ARCH" in
