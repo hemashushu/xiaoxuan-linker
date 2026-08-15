@@ -7,12 +7,12 @@ HOST_ARCH="$(uname -m)"
 ARCH="${1:-}"
 if [[ -z "$ARCH" ]]; then
     echo "Usage: $0 <ARCH>"
-    echo "ARCH: aarch64 | riscv64 | x86_64 | all"
+    echo "ARCH: aarch64 | loongarch64 | powerpc64le | riscv64 | s390x | x86_64 | all"
     exit 1
 fi
 
 case "$ARCH" in
-    aarch64|riscv64|x86_64|all)
+    aarch64|loongarch64|powerpc64le|riscv64|s390x|x86_64|all)
         ;;
     *)
         echo "Unsupported ARCH: $ARCH" >&2
@@ -44,11 +44,35 @@ configure_runner() {
                 RUNNER_ARGS=(-L "$SYSROOT")
             fi
             ;;
+        loongarch64)
+            RUNNER=${QEMU_USER:-/usr/bin/qemu-loongarch64}
+            [[ -x "$RUNNER" ]] || RUNNER=qemu-loongarch64
+            if [[ -x /usr/bin/loongarch64-linux-gnu-gcc ]]; then
+                SYSROOT="$(/usr/bin/loongarch64-linux-gnu-gcc -print-sysroot)"
+                RUNNER_ARGS=(-L "$SYSROOT")
+            fi
+            ;;
+        powerpc64le)
+            RUNNER=${QEMU_USER:-/usr/bin/qemu-ppc64le}
+            [[ -x "$RUNNER" ]] || RUNNER=qemu-ppc64le
+            if [[ -x /usr/bin/powerpc64le-linux-gnu-gcc ]]; then
+                SYSROOT="$(/usr/bin/powerpc64le-linux-gnu-gcc -print-sysroot)"
+                RUNNER_ARGS=(-L "$SYSROOT")
+            fi
+            ;;
         riscv64)
             RUNNER=${QEMU_USER:-/usr/bin/qemu-riscv64}
             [[ -x "$RUNNER" ]] || RUNNER=qemu-riscv64
             if [[ -x /usr/bin/riscv64-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/riscv64-linux-gnu-gcc -print-sysroot)"
+                RUNNER_ARGS=(-L "$SYSROOT")
+            fi
+            ;;
+        s390x)
+            RUNNER=${QEMU_USER:-/usr/bin/qemu-s390x}
+            [[ -x "$RUNNER" ]] || RUNNER=qemu-s390x
+            if [[ -x /usr/bin/s390x-linux-gnu-gcc ]]; then
+                SYSROOT="$(/usr/bin/s390x-linux-gnu-gcc -print-sysroot)"
                 RUNNER_ARGS=(-L "$SYSROOT")
             fi
             ;;
@@ -133,7 +157,10 @@ test_arch() {
 
 if [[ "$ARCH" == "all" ]]; then
     test_arch aarch64
+    test_arch loongarch64
+    test_arch powerpc64le
     test_arch riscv64
+    test_arch s390x
     test_arch x86_64
 else
     test_arch "$ARCH"

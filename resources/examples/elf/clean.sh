@@ -11,8 +11,15 @@ delete_outputs() {
 }
 
 delete_outputs "$SCRIPT_DIR/asm/aarch64"
+delete_outputs "$SCRIPT_DIR/asm/loongarch64"
+delete_outputs "$SCRIPT_DIR/asm/powerpc64le"
 delete_outputs "$SCRIPT_DIR/asm/riscv64"
+delete_outputs "$SCRIPT_DIR/asm/s390x"
 delete_outputs "$SCRIPT_DIR/asm/x86_64"
+
 delete_outputs "$SCRIPT_DIR/gcc/aarch64"
+delete_outputs "$SCRIPT_DIR/gcc/loongarch64"
+delete_outputs "$SCRIPT_DIR/gcc/powerpc64le"
 delete_outputs "$SCRIPT_DIR/gcc/riscv64"
+delete_outputs "$SCRIPT_DIR/gcc/s390x"
 delete_outputs "$SCRIPT_DIR/gcc/x86_64"

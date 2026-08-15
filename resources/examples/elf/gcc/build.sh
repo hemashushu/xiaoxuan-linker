@@ -6,12 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ARCH="${1:-}"
 if [[ -z "$ARCH" ]]; then
     echo "Usage: $0 <ARCH>"
-    echo "ARCH: aarch64 | riscv64 | x86_64 | all"
+    echo "ARCH: aarch64 | loongarch64 | powerpc64le | riscv64 | s390x | x86_64 | all"
     exit 1
 fi
 
 case "$ARCH" in
-    aarch64|riscv64|x86_64|all)
+    aarch64|loongarch64|powerpc64le|riscv64|s390x|x86_64|all)
         ;;
     *)
         echo "Unsupported ARCH: $ARCH" >&2
@@ -28,11 +28,29 @@ select_gcc() {
             CFLAGS_ARCH=()
             LDFLAGS_ARCH=()
             ;;
+        loongarch64)
+            GCC=/usr/bin/loongarch64-linux-gnu-gcc
+            [[ -x "$GCC" ]] || GCC=gcc
+            CFLAGS_ARCH=()
+            LDFLAGS_ARCH=()
+            ;;
+        powerpc64le)
+            GCC=/usr/bin/powerpc64le-linux-gnu-gcc
+            [[ -x "$GCC" ]] || GCC=gcc
+            CFLAGS_ARCH=()
+            LDFLAGS_ARCH=()
+            ;;
         riscv64)
             GCC=/usr/bin/riscv64-linux-gnu-gcc
             [[ -x "$GCC" ]] || GCC=gcc
             CFLAGS_ARCH=(-mno-relax -msmall-data-limit=0)
             LDFLAGS_ARCH=(-Wl,--no-relax)
+            ;;
+        s390x)
+            GCC=/usr/bin/s390x-linux-gnu-gcc
+            [[ -x "$GCC" ]] || GCC=gcc
+            CFLAGS_ARCH=()
+            LDFLAGS_ARCH=()
             ;;
         x86_64)
             GCC=/usr/bin/x86_64-linux-gnu-gcc
@@ -87,7 +105,10 @@ build_arch() {
 
 if [[ "$ARCH" == "all" ]]; then
     build_arch aarch64
+    build_arch loongarch64
+    build_arch powerpc64le
     build_arch riscv64
+    build_arch s390x
     build_arch x86_64
 else
     build_arch "$ARCH"

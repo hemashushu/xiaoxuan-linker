@@ -6,12 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ARCH="${1:-}"
 if [[ -z "$ARCH" ]]; then
     echo "Usage: $0 <ARCH>"
-    echo "ARCH: aarch64 | riscv64 | x86_64 | all"
+    echo "ARCH: aarch64 | loongarch64 | powerpc64le | riscv64 | s390x | x86_64 | all"
     exit 1
 fi
 
 case "$ARCH" in
-    aarch64|riscv64|x86_64|all)
+    aarch64|loongarch64|powerpc64le|riscv64|s390x|x86_64|all)
         ;;
     *)
         echo "Unsupported ARCH: $ARCH" >&2
@@ -29,12 +29,33 @@ select_tools() {
             [[ -x "$LD" ]] || LD=ld
             AS_ARGS=()
             ;;
+        loongarch64)
+            AS=/usr/bin/loongarch64-linux-gnu-as
+            LD=/usr/bin/loongarch64-linux-gnu-ld
+            [[ -x "$AS" ]] || AS=as
+            [[ -x "$LD" ]] || LD=ld
+            AS_ARGS=()
+            ;;
+        powerpc64le)
+            AS=/usr/bin/powerpc64le-linux-gnu-as
+            LD=/usr/bin/powerpc64le-linux-gnu-ld
+            [[ -x "$AS" ]] || AS=as
+            [[ -x "$LD" ]] || LD=ld
+            AS_ARGS=()
+            ;;
         riscv64)
             AS=/usr/bin/riscv64-linux-gnu-as
             LD=/usr/bin/riscv64-linux-gnu-ld
             [[ -x "$AS" ]] || AS=as
             [[ -x "$LD" ]] || LD=ld
             AS_ARGS=(-mno-relax)
+            ;;
+        s390x)
+            AS=/usr/bin/s390x-linux-gnu-as
+            LD=/usr/bin/s390x-linux-gnu-ld
+            [[ -x "$AS" ]] || AS=as
+            [[ -x "$LD" ]] || LD=ld
+            AS_ARGS=()
             ;;
         x86_64)
             AS=/usr/bin/x86_64-linux-gnu-as
@@ -77,7 +98,10 @@ build_arch() {
 
 if [[ "$ARCH" == "all" ]]; then
     build_arch aarch64
+    build_arch loongarch64
+    build_arch powerpc64le
     build_arch riscv64
+    build_arch s390x
     build_arch x86_64
 else
     build_arch "$ARCH"

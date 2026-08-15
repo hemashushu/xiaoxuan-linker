@@ -97,6 +97,93 @@ static inline void init_gp(void)
         :
         : "gp");
 }
+#elif defined(__loongarch64)
+#define SYS_write 64
+#define SYS_exit 93
+
+static inline long __syscall1(long nr, long arg1)
+{
+    register long a7 __asm__("a7") = nr;
+    register long a0 __asm__("a0") = arg1;
+    __asm__ volatile(
+        "syscall 0"
+        : "+r"(a0)
+        : "r"(a7)
+        : "memory");
+    return a0;
+}
+
+static inline long __syscall3(long nr, long arg1, long arg2, long arg3)
+{
+    register long a7 __asm__("a7") = nr;
+    register long a0 __asm__("a0") = arg1;
+    register long a1 __asm__("a1") = arg2;
+    register long a2 __asm__("a2") = arg3;
+    __asm__ volatile(
+        "syscall 0"
+        : "+r"(a0)
+        : "r"(a7), "r"(a1), "r"(a2)
+        : "memory");
+    return a0;
+}
+#elif defined(__powerpc64__)
+#define SYS_write 4
+#define SYS_exit 1
+
+static inline long __syscall1(long nr, long arg1)
+{
+    register long r0 __asm__("r0") = nr;
+    register long r3 __asm__("r3") = arg1;
+    __asm__ volatile(
+        "sc"
+        : "+r"(r3)
+        : "r"(r0)
+        : "memory", "cr0");
+    return r3;
+}
+
+static inline long __syscall3(long nr, long arg1, long arg2, long arg3)
+{
+    register long r0 __asm__("r0") = nr;
+    register long r3 __asm__("r3") = arg1;
+    register long r4 __asm__("r4") = arg2;
+    register long r5 __asm__("r5") = arg3;
+    __asm__ volatile(
+        "sc"
+        : "+r"(r3)
+        : "r"(r0), "r"(r4), "r"(r5)
+        : "memory", "cr0");
+    return r3;
+}
+#elif defined(__s390x__)
+#define SYS_write 4
+#define SYS_exit 1
+
+static inline long __syscall1(long nr, long arg1)
+{
+    register long r1 __asm__("r1") = nr;
+    register long r2 __asm__("r2") = arg1;
+    __asm__ volatile(
+        "svc 0"
+        : "+r"(r2)
+        : "r"(r1)
+        : "memory");
+    return r2;
+}
+
+static inline long __syscall3(long nr, long arg1, long arg2, long arg3)
+{
+    register long r1 __asm__("r1") = nr;
+    register long r2 __asm__("r2") = arg1;
+    register long r3 __asm__("r3") = arg2;
+    register long r4 __asm__("r4") = arg3;
+    __asm__ volatile(
+        "svc 0"
+        : "+r"(r2)
+        : "r"(r1), "r"(r3), "r"(r4)
+        : "memory");
+    return r2;
+}
 #else
 #error "Unsupported architecture"
 #endif
