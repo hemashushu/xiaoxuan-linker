@@ -84,6 +84,8 @@ static inline long __syscall3(long n, long a, long b, long c)
     __asm_syscall("r"(a7), "0"(a0), "r"(a1), "r"(a2))
 }
 
+// Since current build script uses `-fno-pic -fno-pie -mno-relax` for RISC-V,
+// this function has no reference in the current project, but it is kept here for future use.
 static inline void init_gp(void)
 {
     __asm__ volatile(

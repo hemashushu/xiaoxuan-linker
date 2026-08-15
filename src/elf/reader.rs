@@ -277,6 +277,7 @@ pub fn read_relocation_sections(
     };
 
     let is_mips64el = elf.is_mips64el(endian);
+    let machine = Machine::from(elf.e_machine(endian));
 
     let mut relocation_sections = vec![];
 
@@ -298,7 +299,7 @@ pub fn read_relocation_sections(
                 return Err(LinkerError::new("Failed to read relocation entries"));
             };
 
-            let relocations = parse_relocations(relas, endian, is_mips64el)?;
+            let relocations = parse_relocations(relas, endian, is_mips64el, machine)?;
 
             // There are two fields provide more information about the relocation section:
             // - `sh_link`: it gives the index of the symbol table section linked by the
@@ -331,6 +332,7 @@ fn parse_relocations(
     relas: &[object::elf::Rela64<Endianness>],
     endian: Endianness,
     is_mips64el: bool,
+    machine: Machine,
 ) -> Result<Vec<Relocation>, LinkerError> {
     let mut relocations = Vec::new();
 
@@ -359,7 +361,7 @@ fn parse_relocations(
 
         let symbol_index = rela.r_sym(endian, is_mips64el);
         let relocation_type_raw = rela.r_type(endian, is_mips64el);
-        let relocation_type = parse_relocation_type(relocation_type_raw)?;
+        let relocation_type = parse_relocation_type(machine, relocation_type_raw)?;
 
         // Common relocation type (r_type) includes:
         // - object::elf::R_X86_64_64 => "R_X86_64_64"
@@ -381,33 +383,63 @@ fn parse_relocations(
     Ok(relocations)
 }
 
-fn parse_relocation_type(relocation_type_raw: u32) -> Result<RelocationType, LinkerError> {
-    match relocation_type_raw {
-        /* x86_64 */
-        object::elf::R_X86_64_PC32 => Ok(RelocationType::R_X86_64_PC32),
-        object::elf::R_X86_64_PLT32 => Ok(RelocationType::R_X86_64_PLT32),
-        object::elf::R_X86_64_64 => Ok(RelocationType::R_X86_64_64),
-        object::elf::R_X86_64_32 => Ok(RelocationType::R_X86_64_32),
-        object::elf::R_X86_64_TPOFF32 => Ok(RelocationType::R_X86_64_TPOFF32),
-
-        /* aarch64 */
-        object::elf::R_AARCH64_ADR_PREL_PG_HI21 => Ok(RelocationType::R_AARCH64_ADR_PREL_PG_HI21),
-        object::elf::R_AARCH64_ADD_ABS_LO12_NC => Ok(RelocationType::R_AARCH64_ADD_ABS_LO12_NC),
-        object::elf::R_AARCH64_LDST64_ABS_LO12_NC => {
-            Ok(RelocationType::R_AARCH64_LDST64_ABS_LO12_NC)
+fn parse_relocation_type(
+    machine: Machine,
+    relocation_type_raw: u32,
+) -> Result<RelocationType, LinkerError> {
+    match machine {
+        Machine::X86_64 => {
+            match relocation_type_raw {
+                object::elf::R_X86_64_PC32 => Ok(RelocationType::R_X86_64_PC32),
+                object::elf::R_X86_64_PLT32 => Ok(RelocationType::R_X86_64_PLT32),
+                object::elf::R_X86_64_64 => Ok(RelocationType::R_X86_64_64),
+                object::elf::R_X86_64_32 => Ok(RelocationType::R_X86_64_32),
+                object::elf::R_X86_64_TPOFF32 => Ok(RelocationType::R_X86_64_TPOFF32),
+                /* unsupported */
+                _ => Err(LinkerError::new(&format!(
+                    "Unsupported relocation type \"{relocation_type_raw}\" for x86_64 architecture"
+                ))),
+            }
         }
-        object::elf::R_AARCH64_CALL26 => Ok(RelocationType::R_AARCH64_CALL26),
-        object::elf::R_AARCH64_ABS64 => Ok(RelocationType::R_AARCH64_ABS64),
-        object::elf::R_AARCH64_PREL32 => Ok(RelocationType::R_AARCH64_PREL32),
+        Machine::AArch64 => {
+            match relocation_type_raw {
+                object::elf::R_AARCH64_ADR_PREL_PG_HI21 => {
+                    Ok(RelocationType::R_AARCH64_ADR_PREL_PG_HI21)
+                }
+                object::elf::R_AARCH64_ADD_ABS_LO12_NC => {
+                    Ok(RelocationType::R_AARCH64_ADD_ABS_LO12_NC)
+                }
+                object::elf::R_AARCH64_LDST64_ABS_LO12_NC => {
+                    Ok(RelocationType::R_AARCH64_LDST64_ABS_LO12_NC)
+                }
+                object::elf::R_AARCH64_CALL26 => Ok(RelocationType::R_AARCH64_CALL26),
+                object::elf::R_AARCH64_ABS64 => Ok(RelocationType::R_AARCH64_ABS64),
+                /* unsupported */
+                _ => Err(LinkerError::new(&format!(
+                    "Unsupported relocation type \"{relocation_type_raw}\" for AArch64 architecture"
+                ))),
+            }
+        }
+        Machine::RiscV => {
+            match relocation_type_raw {
+                object::elf::R_RISCV_PCREL_HI20 => Ok(RelocationType::R_RISCV_PCREL_HI20),
+                object::elf::R_RISCV_PCREL_LO12_I => Ok(RelocationType::R_RISCV_PCREL_LO12_I),
 
-        /* riscv */
-        // object::elf::R_RISCV_PCREL_HI20 => Ok(RelocationType::R_RISCV_PCREL_HI20),
-        // object::elf::R_RISCV_PCREL_LO12_I => Ok(RelocationType::R_RISCV_PCREL_LO12_I),
+                object::elf::R_RISCV_HI20 => Ok(RelocationType::R_RISCV_HI20),
+                object::elf::R_RISCV_LO12_I => Ok(RelocationType::R_RISCV_LO12_I),
+                object::elf::R_RISCV_LO12_S => Ok(RelocationType::R_RISCV_LO12_S),
 
-        /* unsupported */
-        _ => Err(LinkerError::new(&format!(
-            "Unsupported relocation type: {relocation_type_raw}"
-        ))),
+                object::elf::R_RISCV_CALL_PLT => Ok(RelocationType::R_RISCV_CALL_PLT),
+                object::elf::R_RISCV_64 => Ok(RelocationType::R_RISCV_64),
+                /* unsupported */
+                _ => Err(LinkerError::new(&format!(
+                    "Unsupported relocation type \"{relocation_type_raw}\" for RISC-V architecture"
+                ))),
+            }
+        }
+        _ => {
+            unimplemented!()
+        }
     }
 }
 
@@ -496,7 +528,7 @@ mod tests {
     const IMPLEMENTED_ARCHS: &[Machine] = &[
         Machine::X86_64,
         Machine::AArch64,
-        // Machine::RiscV,
+        Machine::RiscV,
         // Machine::LoongArch,
         // Machine::PowerPC64,
         // Machine::S390,
@@ -670,6 +702,46 @@ mod tests {
     }
 
     #[test]
+    fn test_read_section_header_asm_function_o() {
+        // Manually check with command `readelf -S asm/ARCH/function.o`
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "function.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+
+            // Check section names
+            assert_contains_all(
+                &sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+                &[
+                    ".text",
+                    ".rela.text",
+                    ".data",
+                    ".bss",
+                    ".rodata",
+                    ".symtab",
+                    ".strtab",
+                    ".shstrtab",
+                ],
+            );
+
+            // Check section types
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".rela.text"),
+                Some(s) if s.section_type == SectionType::Rela
+            ));
+
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".rodata"),
+                Some(s) if s.section_type == SectionType::Progbits
+            ));
+        }
+    }
+
+    #[test]
     fn test_read_section_header_asm_data_o() {
         // Manually check with command `readelf -S asm/ARCH/data.o`
         for arch in IMPLEMENTED_ARCHS {
@@ -720,12 +792,67 @@ mod tests {
             // The first symbol table entry (index 0) is reserved and must be undefined.
             assert_eq!(symbols[0], Symbol::Other);
 
+            // Assembler generates `Notype` for function symbols.
             assert!(matches!(
                 symbols
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined {name,..} if name == "_start")),
                 Some(Symbol::Defined {
                     bind: SymbolBind::Global,
+                    symbol_type: SymbolType::Notype,
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn test_read_symbols_asm_function_o() {
+        for arch in IMPLEMENTED_ARCHS {
+            // Manually check with command `readelf -s asm/ARCH/function.o`
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "function.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // Check symbol names
+            assert_contains_all(
+                &symbols
+                    .iter()
+                    .filter(|s| matches!(s, Symbol::Defined { .. }))
+                    .map(|s| {
+                        if let Symbol::Defined { name, .. } = s {
+                            name.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                &["print_hello", "print_world"],
+            );
+
+            // Check symbols names, types and binds, but not check the section index and offset,
+            // because they may vary across different platforms and versions of the assembler.
+
+            // Check certain entries for testing purposes.
+
+            // Assembler generates `Notype` for function symbols.
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "print_hello")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Notype,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "print_world")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Local,
                     symbol_type: SymbolType::Notype,
                     ..
                 })
@@ -760,7 +887,9 @@ mod tests {
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
 
-            // Only check a few entries for testing purposes.
+            // Check certain entries for testing purposes.
+
+            // Assembler generates `Notype` for data symbols.
             assert!(matches!(
                 symbols
                     .iter()
@@ -842,7 +971,9 @@ mod tests {
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
 
-            // Only check a few entries for testing purposes.
+            // Check certain entries for testing purposes.
+
+            // Assembler generates `Notype` for data and function symbols.
             assert!(matches!(
                 symbols
                     .iter()
@@ -963,45 +1094,115 @@ mod tests {
             );
 
             // Check strong symbol
-            match arch {
-                Machine::X86_64 => {
-                    assert!(matches!(
-                        symbols
-                            .iter()
-                            .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
-                        Some(Symbol::Defined {
-                            bind: SymbolBind::Local,
-                            symbol_type: SymbolType::Notype,
-                            ..
-                        })
-                    ));
-                }
-                Machine::AArch64 => {
-                    assert!(matches!(
-                        symbols
-                            .iter()
-                            .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
-                        Some(Symbol::Defined {
-                            bind: SymbolBind::Global, // AArch64 assembler generates a global symbol for `bar` in this case.
-                            symbol_type: SymbolType::Notype,
-                            ..
-                        })
-                    ));
-                }
-                _ => unimplemented!(),
-            }
+
+            // Assembler generates `Notype` for function symbols.
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Local,
+                    symbol_type: SymbolType::Notype,
+                    ..
+                })
+            ));
         }
     }
 
     #[test]
-    fn test_read_relocations_asm_minimal_o() {
-        // Manually check with command `readelf -r asm/ARCH/minimal.o`
-        for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+    fn test_read_relocations_asm_function_o() {
+        // Manually check with command `readelf -r asm/ARCH/function.o`
 
-            assert!(relocation_sections.is_empty());
+        // for arch in IMPLEMENTED_ARCHS {
+        let arch = &Machine::RiscV;
+        let binary = get_example_file_binary(SourceType::Assembly, arch, "function.o");
+        let elf = read_file(&binary).unwrap();
+        let sections = read_section_headers(elf, &binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
+        let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+        // Check relocation section `.rela.text`
+        let relocation_section_opt = relocation_sections
+            .iter_mut()
+            .find(|s| s.name == ".rela.text");
+
+        assert!(relocation_section_opt.is_some());
+
+        let relocation_section = relocation_section_opt.unwrap();
+        assert_eq!(
+            sections[relocation_section.target_section_index].name,
+            ".text"
+        );
+
+        // Check relocation entries in `.rela.text` section
+        let relocations = &mut relocation_section.relocations;
+
+        // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+        relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+
+        // Check certain entries for testing purposes.
+        match arch {
+            Machine::X86_64 => {
+                // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+                let relocation0 = &relocations[0];
+                let symbol0 = &symbols[relocation0.symbol_index];
+                assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
+                assert!(
+                    matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                );
+
+                let relocation1 = &relocations[1];
+                let symbol1 = &symbols[relocation1.symbol_index];
+                assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
+                assert!(
+                    matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                );
+            }
+            Machine::AArch64 => {
+                // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+
+                // Combination: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
+
+                let relocation0 = &relocations[0];
+                let symbol0 = &symbols[relocation0.symbol_index];
+                assert_eq!(
+                    relocation0.relocation_type,
+                    RelocationType::R_AARCH64_ADR_PREL_PG_HI21
+                );
+                assert!(
+                    matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                );
+
+                let relocation1 = &relocations[1];
+                let symbol1 = &symbols[relocation1.symbol_index];
+                assert_eq!(
+                    relocation1.relocation_type,
+                    RelocationType::R_AARCH64_ADD_ABS_LO12_NC
+                );
+                assert!(
+                    matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                );
+            }
+            Machine::RiscV => {
+                // Relocation for symbol `hello`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
+
+                let relocation0 = &relocations[0];
+                let symbol0 = &symbols[relocation0.symbol_index];
+                assert_eq!(
+                    relocation0.relocation_type,
+                    RelocationType::R_RISCV_PCREL_HI20
+                );
+                assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "hello"));
+
+                let relocation1 = &relocations[1];
+                let symbol1 = &symbols[relocation1.symbol_index];
+                assert_eq!(
+                    relocation1.relocation_type,
+                    RelocationType::R_RISCV_PCREL_LO12_I
+                );
+                assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Symbol name has a trailing space
+            }
+            _ => unimplemented!(),
         }
     }
 
@@ -1009,103 +1210,136 @@ mod tests {
     fn test_read_relocations_asm_data_o() {
         // Manually check with command `readelf -r asm/ARCH/data.o`
 
-        for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(SourceType::Assembly, arch, "data.o");
-            let elf = read_file(&binary).unwrap();
-            let sections = read_section_headers(elf, &binary).unwrap();
-            let symbols = read_symbols(elf, &binary).unwrap();
-            let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+        // for arch in IMPLEMENTED_ARCHS {
+        let arch = &Machine::RiscV;
+        let binary = get_example_file_binary(SourceType::Assembly, arch, "data.o");
+        let elf = read_file(&binary).unwrap();
+        let sections = read_section_headers(elf, &binary).unwrap();
+        let symbols = read_symbols(elf, &binary).unwrap();
+        let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
-            // Check relocation section `.rela.text`
-            let relocation_section_opt = relocation_sections
-                .iter_mut()
-                .find(|s| s.name == ".rela.text");
+        // Check relocation section `.rela.text`
+        let relocation_section_opt = relocation_sections
+            .iter_mut()
+            .find(|s| s.name == ".rela.text");
 
-            assert!(relocation_section_opt.is_some());
+        assert!(relocation_section_opt.is_some());
 
-            let relocation_section = relocation_section_opt.unwrap();
-            assert_eq!(
-                sections[relocation_section.target_section_index].name,
-                ".text"
-            );
+        let relocation_section = relocation_section_opt.unwrap();
+        assert_eq!(
+            sections[relocation_section.target_section_index].name,
+            ".text"
+        );
 
-            // Check relocation entries in `.rela.text` section
-            let relocations = &mut relocation_section.relocations;
+        // Check relocation entries in `.rela.text` section
+        let relocations = &mut relocation_section.relocations;
 
-            // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-            relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+        // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+        relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
 
-            // Only check a few entries for testing purposes.
-            match arch {
-                Machine::X86_64 => {
-                    // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
-                    assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
+        // Check certain entries for testing purposes.
+        match arch {
+            Machine::X86_64 => {
+                // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+                let relocation0 = &relocations[0];
+                let symbol0 = &symbols[relocation0.symbol_index];
+                assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
+                assert!(
+                    matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                );
 
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
-                    assert!(
-                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
-                    );
-                }
-
-                Machine::AArch64 => {
-                    // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
-
-                    // R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
-
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(
-                        relocation0.relocation_type,
-                        RelocationType::R_AARCH64_ADR_PREL_PG_HI21
-                    );
-                    assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(
-                        relocation1.relocation_type,
-                        RelocationType::R_AARCH64_ADD_ABS_LO12_NC
-                    );
-                    assert!(
-                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
-
-                    // R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_LDST64_ABS_LO12_NC
-
-                    let relocation4 = &relocations[4];
-                    let symbol4 = &symbols[relocation4.symbol_index];
-                    assert_eq!(
-                        relocation4.relocation_type,
-                        RelocationType::R_AARCH64_ADR_PREL_PG_HI21
-                    );
-                    assert!(
-                        matches!(symbol4, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
-
-                    let relocation5 = &relocations[5];
-                    let symbol5 = &symbols[relocation5.symbol_index];
-                    assert_eq!(
-                        relocation5.relocation_type,
-                        RelocationType::R_AARCH64_LDST64_ABS_LO12_NC
-                    );
-                    assert!(
-                        matches!(symbol5, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
-                }
-                Machine::RiscV => {
-                    // todo
-                }
-                _ => unimplemented!(),
+                let relocation1 = &relocations[1];
+                let symbol1 = &symbols[relocation1.symbol_index];
+                assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
+                assert!(
+                    matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
+                );
             }
+            Machine::AArch64 => {
+                // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+
+                // Case 1: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
+
+                let relocation0 = &relocations[0];
+                let symbol0 = &symbols[relocation0.symbol_index];
+                assert_eq!(
+                    relocation0.relocation_type,
+                    RelocationType::R_AARCH64_ADR_PREL_PG_HI21
+                );
+                assert!(
+                    matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                );
+
+                let relocation1 = &relocations[1];
+                let symbol1 = &symbols[relocation1.symbol_index];
+                assert_eq!(
+                    relocation1.relocation_type,
+                    RelocationType::R_AARCH64_ADD_ABS_LO12_NC
+                );
+                assert!(
+                    matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                );
+
+                // Case 2: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_LDST64_ABS_LO12_NC
+
+                let relocation4 = &relocations[4];
+                let symbol4 = &symbols[relocation4.symbol_index];
+                assert_eq!(
+                    relocation4.relocation_type,
+                    RelocationType::R_AARCH64_ADR_PREL_PG_HI21
+                );
+                assert!(
+                    matches!(symbol4, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                );
+
+                let relocation5 = &relocations[5];
+                let symbol5 = &symbols[relocation5.symbol_index];
+                assert_eq!(
+                    relocation5.relocation_type,
+                    RelocationType::R_AARCH64_LDST64_ABS_LO12_NC
+                );
+                assert!(
+                    matches!(symbol5, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
+                );
+            }
+            Machine::RiscV => {
+                // Relocation for symbol `__global_pointer$`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
+
+                let relocation0 = &relocations[0];
+                let symbol0 = &symbols[relocation0.symbol_index];
+                assert_eq!(
+                    relocation0.relocation_type,
+                    RelocationType::R_RISCV_PCREL_HI20
+                );
+                assert!(matches!(symbol0, Symbol::External(name) if name == "__global_pointer$"));
+
+                let relocation1 = &relocations[1];
+                let symbol1 = &symbols[relocation1.symbol_index];
+                assert_eq!(
+                    relocation1.relocation_type,
+                    RelocationType::R_RISCV_PCREL_LO12_I
+                );
+                assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Symbol name has a trailing space
+
+                // Relocation for symbol `foo`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
+
+                let relocation2 = &relocations[2];
+                let symbol2 = &symbols[relocation2.symbol_index];
+                assert_eq!(
+                    relocation2.relocation_type,
+                    RelocationType::R_RISCV_PCREL_HI20
+                );
+                assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "foo"));
+
+                let relocation3 = &relocations[3];
+                let symbol3 = &symbols[relocation3.symbol_index];
+                assert_eq!(
+                    relocation3.relocation_type,
+                    RelocationType::R_RISCV_PCREL_LO12_I
+                );
+                assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == ".L0 ")); // Symbol name has a trailing space
+            }
+            _ => unimplemented!(),
         }
     }
 
@@ -1141,7 +1375,7 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
 
-                // Only check a few entries for testing purposes.
+                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
@@ -1159,7 +1393,6 @@ mod tests {
                             matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
                         );
                     }
-
                     Machine::AArch64 => {
                         // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
                         let relocation0 = &relocations[0];
@@ -1183,7 +1416,43 @@ mod tests {
                         );
                     }
                     Machine::RiscV => {
-                        // todo
+                        // Relocation for symbol `__global_pointer$`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
+
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(
+                            relocation0.relocation_type,
+                            RelocationType::R_RISCV_PCREL_HI20
+                        );
+                        assert!(
+                            matches!(symbol0, Symbol::External(name) if name == "__global_pointer$")
+                        );
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(
+                            relocation1.relocation_type,
+                            RelocationType::R_RISCV_PCREL_LO12_I
+                        );
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 "));
+
+                        // Relocation for symbol `foo`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
+
+                        let relocation2 = &relocations[2];
+                        let symbol2 = &symbols[relocation2.symbol_index];
+                        assert_eq!(
+                            relocation2.relocation_type,
+                            RelocationType::R_RISCV_PCREL_HI20
+                        );
+                        assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "pfoo"));
+
+                        let relocation3 = &relocations[3];
+                        let symbol3 = &symbols[relocation3.symbol_index];
+                        assert_eq!(
+                            relocation3.relocation_type,
+                            RelocationType::R_RISCV_PCREL_LO12_I
+                        );
+                        assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == ".L0 "));
                     }
                     _ => unimplemented!(),
                 }
@@ -1209,7 +1478,7 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
 
-                // Only check a few entries for testing purposes.
+                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         let relocation0 = &relocations[0];
@@ -1234,7 +1503,15 @@ mod tests {
                         assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
                     }
                     Machine::RiscV => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_RISCV_64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "inc"));
                     }
                     _ => unimplemented!(),
                 }
@@ -1260,7 +1537,7 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
 
-                // Only check a few entries for testing purposes.
+                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         let relocation0 = &relocations[0];
@@ -1291,7 +1568,15 @@ mod tests {
                         );
                     }
                     Machine::RiscV => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_RISCV_64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
                     }
                     _ => unimplemented!(),
                 }
@@ -1343,6 +1628,65 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::RiscV => {
+                    // segment 0 is RISCV_ATTRIBUTE
+
+                    // segment that covers file header, program headers and .text
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_program_headers_asm_function_elf() {
+        // Manually check with command `readelf -l asm/ARCH/function.elf`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "function.elf");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            match arch {
+                Machine::X86_64 => {
+                    // Segment offset, virtual address, file size, memory size and alignment
+                    // may vary across different versions of the assembler and platforms.
+                    // Check segment types and flags, but not check the other fields.
+
+                    // segment that covers file header and program headers
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+
+                    // segment that covers .text
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::AArch64 => {
+                    // segment that covers .text and .rodata
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::RiscV => {
+                    // segment 0 is RISCV_ATTRIBUTE
+
+                    // segment that covers file header, program headers, .text and .rodata
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
                 }
@@ -1400,6 +1744,23 @@ mod tests {
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
+                }
+                Machine::RiscV => {
+                    // Segment 0 is RISCV_ATTRIBUTE
+
+                    // segment that covers .text and .rodata
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment that covers .data and .bss
+                    assert_eq!(program_headers[2].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[2].segment_flags,
                         vec![SegmentFlag::Write, SegmentFlag::Read]
                     );
                 }
@@ -1538,6 +1899,46 @@ mod tests {
     }
 
     #[test]
+    fn test_read_section_header_gcc_function_o() {
+        // Manually check with command `readelf -S gcc/ARCH/function.o`
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(SourceType::GCC, arch, "function.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+
+            // Check section names
+            assert_contains_all(
+                &sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+                &[
+                    ".text",
+                    ".rela.text",
+                    ".data",
+                    ".bss",
+                    ".rodata",
+                    ".symtab",
+                    ".strtab",
+                    ".shstrtab",
+                ],
+            );
+
+            // Check section types
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".rela.text"),
+                Some(s) if s.section_type == SectionType::Rela
+            ));
+
+            assert!(matches!(
+                sections
+                    .iter()
+                    .find(|s| s.name == ".rodata"),
+                Some(s) if s.section_type == SectionType::Progbits
+            ));
+        }
+    }
+
+    #[test]
     fn test_read_section_header_gcc_data_o() {
         // Manually check with command `readelf -S gcc/ARCH/data.o`
         for arch in IMPLEMENTED_ARCHS {
@@ -1604,6 +2005,61 @@ mod tests {
     }
 
     #[test]
+    fn test_read_symbols_gcc_function_o() {
+        for arch in IMPLEMENTED_ARCHS {
+            // Manually check with command `readelf -s gcc/ARCH/function.o`
+            let binary = get_example_file_binary(SourceType::GCC, arch, "function.o");
+            let elf = read_file(&binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+
+            // Check symbol names
+            assert_contains_all(
+                &symbols
+                    .iter()
+                    .filter(|s| matches!(s, Symbol::Defined { .. }))
+                    .map(|s| {
+                        if let Symbol::Defined { name, .. } = s {
+                            name.as_str()
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                &["print_hello", "print_world"],
+            );
+
+            // Check symbols names, types and binds, but not check the section index and offset,
+            // because they may vary across different platforms and versions of the assembler.
+
+            // Check certain entries for testing purposes.
+
+            // GCC generates correct symbol type for data and function symbols,
+            // while the assembler generates `Notype` for data and function symbols.
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "print_hello")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global, // C function symbols are global by default
+                    symbol_type: SymbolType::Func,
+                    ..
+                })
+            ));
+
+            assert!(matches!(
+                symbols
+                    .iter()
+                    .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "print_world")),
+                Some(Symbol::Defined {
+                    bind: SymbolBind::Global, // C function symbols are global by default
+                    symbol_type: SymbolType::Func,
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
     fn test_read_symbols_gcc_data_o() {
         for arch in IMPLEMENTED_ARCHS {
             // Manually check with command `readelf -s gcc/ARCH/data.o`
@@ -1630,7 +2086,7 @@ mod tests {
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
 
-            // Only check a few entries for testing purposes.
+            // Check certain entries for testing purposes.
 
             // GCC generates correct symbol type for data and function symbols,
             // while the assembler generates `Notype` for data and function symbols.
@@ -1666,25 +2122,6 @@ mod tests {
                     ..
                 })
             ));
-
-            match arch {
-                Machine::X86_64 => {
-                    // ok
-                }
-                Machine::AArch64 => {
-                    // ok
-                }
-                Machine::RiscV => {
-                    // The assembler generates a special symbol `__global_pointer$` for the global pointer register (gp).
-                    assert!(
-                        symbols
-                            .iter()
-                            .find(|s| matches!(s, Symbol::External(name) if name == "__global_pointer$"))
-                            .is_some()
-                    );
-                }
-                _ => unimplemented!(),
-            }
         }
     }
 
@@ -1715,7 +2152,7 @@ mod tests {
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
 
-            // Only check a few entries for testing purposes.
+            // Check certain entries for testing purposes.
 
             // GCC generates correct symbol type for data and function symbols,
             // while the assembler generates `Notype` for data and function symbols.
@@ -1839,12 +2276,15 @@ mod tests {
             );
 
             // Check strong symbol
+
+            // GCC generates correct symbol type for data and function symbols,
+            // while the assembler generates `Notype` for data and function symbols.
             assert!(matches!(
                 symbols
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Global,
+                    bind: SymbolBind::Global, // C function symbols are global by default
                     symbol_type: SymbolType::Func,
                     ..
                 })
@@ -1853,19 +2293,128 @@ mod tests {
     }
 
     #[test]
-    fn test_read_relocations_gcc_minimal_o() {
-        // Manually check with command `readelf -r gcc/ARCH/minimal.o`
-        for arch in IMPLEMENTED_ARCHS {
-            let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.o");
-            let elf = read_file(&binary).unwrap();
-            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+    fn test_read_relocations_gcc_function_o() {
+        // Manually check with command `readelf -r gcc/ARCH/function.o`
 
-            // GCC generates relocation section `.rela.eh_frame` for exception handling,
-            // while assembler does not generate this section.
-            assert!(matches!(
-                relocation_sections.first(),
-                Some(section) if section.name == ".rela.eh_frame"
-            ));
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(SourceType::GCC, arch, "function.o");
+            let elf = read_file(&binary).unwrap();
+            let sections = read_section_headers(elf, &binary).unwrap();
+            let symbols = read_symbols(elf, &binary).unwrap();
+            let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+
+            // Check relocation section `.rela.text`
+            let relocation_section_opt = relocation_sections
+                .iter_mut()
+                .find(|s| s.name == ".rela.text");
+
+            assert!(relocation_section_opt.is_some());
+
+            let relocation_section = relocation_section_opt.unwrap();
+            assert_eq!(
+                sections[relocation_section.target_section_index].name,
+                ".text"
+            );
+
+            // Check relocation entries in `.rela.text` section
+            let relocations = &mut relocation_section.relocations;
+
+            // Sort the relocations by placeholder_offset to ensure consistent order for testing.
+            relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+
+            // Check certain entries for testing purposes.
+            match arch {
+                Machine::X86_64 => {
+                    let relocation0 = &relocations[0];
+                    let symbol0 = &symbols[relocation0.symbol_index];
+                    assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_32);
+                    assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "hello"));
+
+                    let relocation1 = &relocations[1];
+                    let symbol1 = &symbols[relocation1.symbol_index];
+                    assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_32);
+                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "world"));
+
+                    let relocation2 = &relocations[2];
+                    let symbol2 = &symbols[relocation2.symbol_index];
+                    assert_eq!(relocation2.relocation_type, RelocationType::R_X86_64_PLT32);
+                    assert!(
+                        matches!(symbol2, Symbol::Defined { name, ..} if name == "print_hello")
+                    );
+
+                    let relocation3 = &relocations[3];
+                    let symbol3 = &symbols[relocation3.symbol_index];
+                    assert_eq!(relocation3.relocation_type, RelocationType::R_X86_64_PLT32);
+                    assert!(
+                        matches!(symbol3, Symbol::Defined { name, ..} if name == "print_world")
+                    );
+                }
+                Machine::AArch64 => {
+                    // Combination: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
+
+                    let relocation0 = &relocations[0];
+                    let symbol0 = &symbols[relocation0.symbol_index];
+                    assert_eq!(
+                        relocation0.relocation_type,
+                        RelocationType::R_AARCH64_ADR_PREL_PG_HI21
+                    );
+                    assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "hello"));
+
+                    let relocation1 = &relocations[1];
+                    let symbol1 = &symbols[relocation1.symbol_index];
+                    assert_eq!(
+                        relocation1.relocation_type,
+                        RelocationType::R_AARCH64_ADD_ABS_LO12_NC
+                    );
+                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "hello"));
+
+                    // Relocation for functions `print_hello` and `print_world`: R_AARCH64_CALL26
+                    let relocation4 = &relocations[4];
+                    let symbol4 = &symbols[relocation4.symbol_index];
+                    assert_eq!(
+                        relocation4.relocation_type,
+                        RelocationType::R_AARCH64_CALL26
+                    );
+                    assert!(
+                        matches!(symbol4, Symbol::Defined { name, ..} if name == "print_hello")
+                    );
+
+                    let relocation5 = &relocations[5];
+                    let symbol5 = &symbols[relocation5.symbol_index];
+                    assert_eq!(
+                        relocation5.relocation_type,
+                        RelocationType::R_AARCH64_CALL26
+                    );
+                    assert!(
+                        matches!(symbol5, Symbol::Defined { name, ..} if name == "print_world")
+                    );
+                }
+                Machine::RiscV => {
+                    // Relocation for symbol `hello`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
+
+                    let relocation2 = &relocations[2];
+                    let symbol2 = &symbols[relocation2.symbol_index];
+                    assert_eq!(relocation2.relocation_type, RelocationType::R_RISCV_HI20);
+                    assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "hello"));
+
+                    let relocation3 = &relocations[3];
+                    let symbol3 = &symbols[relocation3.symbol_index];
+                    assert_eq!(relocation3.relocation_type, RelocationType::R_RISCV_LO12_I);
+                    assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == "hello"));
+
+                    // Relocation for functions `print_hello`: R_RISCV_CALL_PLT
+                    let relocation8 = &relocations[8];
+                    let symbol8 = &symbols[relocation8.symbol_index];
+                    assert_eq!(
+                        relocation8.relocation_type,
+                        RelocationType::R_RISCV_CALL_PLT
+                    );
+                    assert!(
+                        matches!(symbol8, Symbol::Defined { name, ..} if name == "print_hello")
+                    );
+                }
+                _ => unimplemented!(),
+            }
         }
     }
 
@@ -1899,7 +2448,7 @@ mod tests {
             // Sort the relocations by placeholder_offset to ensure consistent order for testing.
             relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
 
-            // Only check a few entries for testing purposes.
+            // Check certain entries for testing purposes.
             match arch {
                 Machine::X86_64 => {
                     // The assembler generates relocations with section symbols.
@@ -1917,7 +2466,6 @@ mod tests {
                         matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
                     );
                 }
-
                 Machine::AArch64 => {
                     // The assembler generates relocations with section symbols.
                     let relocation0 = &relocations[0];
@@ -1941,7 +2489,17 @@ mod tests {
                     );
                 }
                 Machine::RiscV => {
-                    // todo
+                    // Relocation for symbol `a`: R_RISCV_HI20 + R_RISCV_LO12_S
+
+                    let relocation1 = &relocations[1];
+                    let symbol1 = &symbols[relocation1.symbol_index];
+                    assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_HI20);
+                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "a"));
+
+                    let relocation2 = &relocations[2];
+                    let symbol2 = &symbols[relocation2.symbol_index];
+                    assert_eq!(relocation2.relocation_type, RelocationType::R_RISCV_LO12_S);
+                    assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "a"));
                 }
                 _ => unimplemented!(),
             }
@@ -1979,7 +2537,7 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
 
-                // Only check a few entries for testing purposes.
+                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         let relocation0 = &relocations[0];
@@ -2010,13 +2568,24 @@ mod tests {
                         assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "foo"));
                     }
                     Machine::RiscV => {
-                        // todo
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_HI20);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "foo"));
+
+                        let relocation2 = &relocations[2];
+                        let symbol2 = &symbols[relocation2.symbol_index];
+                        assert_eq!(relocation2.relocation_type, RelocationType::R_RISCV_LO12_I);
+                        assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "foo"));
                     }
                     _ => unimplemented!(),
                 }
             }
 
             // Check relocation section `.rela.data`
+
+            // RISC-V GCC generates section `.sdata` and `rela.sdata` for small data by default,
+            // to generate `.data` and `.rela.data` sections, you need to compile with `-msmall-data-limit=0` option.
             {
                 let relocation_section_opt = relocation_sections
                     .iter_mut()
@@ -2036,7 +2605,7 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
 
-                // Only check a few entries for testing purposes.
+                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         let relocation0 = &relocations[0];
@@ -2061,13 +2630,23 @@ mod tests {
                         assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
                     }
                     Machine::RiscV => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_RISCV_64);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_64);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
                     }
                     _ => unimplemented!(),
                 }
             }
 
             // Check relocation section `.rela.rodata`
+            // RISC-V GCC generates section `.srodata` and `rela.srodata` for small read-only data,
+            // to generate `.data` and `.rela.data` sections, you need to compile with `-msmall-data-limit=0` option.
             {
                 let relocation_section_opt = relocation_sections
                     .iter_mut()
@@ -2087,7 +2666,7 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
 
-                // Only check a few entries for testing purposes.
+                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         let relocation0 = &relocations[0];
@@ -2112,7 +2691,15 @@ mod tests {
                         assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "bar"));
                     }
                     Machine::RiscV => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_RISCV_64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
                     }
                     _ => unimplemented!(),
                 }
@@ -2164,6 +2751,69 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::RiscV => {
+                    // segment 0 is RISCV_ATTRIBUTE
+
+                    // segment that covers file header, program headers and .text
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_program_headers_gcc_function_elf() {
+        // Manually check with command `readelf -l gcc/ARCH/function.elf`
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(SourceType::GCC, arch, "function.elf");
+            let elf = read_file(&binary).unwrap();
+            let program_headers = read_program_headers(elf, &binary).unwrap();
+
+            match arch {
+                Machine::X86_64 => {
+                    // Segment offset, virtual address, file size, memory size and alignment
+                    // may vary across different versions of the assembler and platforms.
+                    // Check segment types and flags, but not check the other fields.
+
+                    // segment that covers file header and program headers
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+
+                    // segment that covers .text
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment that covers .rodata
+                    assert_eq!(program_headers[2].segment_type, SegmentType::Load);
+                    assert_eq!(program_headers[2].segment_flags, vec![SegmentFlag::Read]);
+                }
+                Machine::AArch64 => {
+                    // segment that covers .text, .rodata
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::RiscV => {
+                    // Segment 0 is RISCV_ATTRIBUTE
+
+                    // segment that covers .text and .rodata
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
                 }
@@ -2221,6 +2871,23 @@ mod tests {
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
+                }
+                Machine::RiscV => {
+                    // Segment 0 is RISCV_ATTRIBUTE
+
+                    // segment that covers .text and .rodata
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment that covers .data and .bss
+                    assert_eq!(program_headers[2].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[2].segment_flags,
                         vec![SegmentFlag::Write, SegmentFlag::Read]
                     );
                 }

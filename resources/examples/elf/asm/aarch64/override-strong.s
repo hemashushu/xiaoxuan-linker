@@ -6,7 +6,6 @@
 
 .section .text
 .global _start
-.global bar
 
 // Override the weak symbol `bar` with a strong symbol.
 //

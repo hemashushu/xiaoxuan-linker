@@ -406,19 +406,35 @@ pub enum RelocationType {
     /// a full 64-bit address is stored in a data section.
     R_AARCH64_ABS64,
 
-    /// Appears in the `.rela.eh_frame` section.
-    /// This type is necessary for handling GCC generated object files.
-    R_AARCH64_PREL32,
+    // There is an additional relocation type `R_AARCH64_PREL32` appears in the `.rela.eh_frame` section,
+    // add parameters `-fno-unwind-tables -fno-asynchronous-unwind-tables` to the compiler to avoid generating
+    // section `.eh_frame` and this relocation type.
 
-    // TODO
-    // R_RISCV_PCREL_HI20,
-    // R_RISCV_PCREL_LO12_I,
-    // R_RISCV_PCREL_LO12_S,
-    // R_RISCV_32,
-    // R_RISCV_64,
-    // R_RISCV_BRANCH,
-    // R_RISCV_JAL,
-    // R_RISCV_CALL,
+    /// `R_RISCV_PCREL_HI20` and `R_RISCV_PCREL_LO12_I` are used for PC-relative addressing in RISC-V architecture.
+    R_RISCV_PCREL_HI20,
+    R_RISCV_PCREL_LO12_I,
+
+    /// GCC favors
+    R_RISCV_HI20,
+    R_RISCV_LO12_I,
+    R_RISCV_LO12_S,
+
+    /// `R_RISCV_CALL_PLT` is used for PC-relative function calls in RISC-V architecture.
+    R_RISCV_CALL_PLT,
+
+    /// `R_RISCV_64` is used for absolute addressing of 64-bit data in RISC-V architecture.
+    ///
+    /// It is similar to `R_X86_64_64` in x86_64 architecture, and is used when
+    /// a full 64-bit address is stored in a data section.
+    R_RISCV_64,
+
+    // There are additional relocation types:
+    // - R_RISCV_32_PCREL
+    // - R_RISCV_ADD32
+    // - R_RISCV_SUB32
+    // appears in the `.rela.eh_frame` section,
+    // add parameters `-fno-unwind-tables -fno-asynchronous-unwind-tables` to the compiler to avoid generating
+    // section `.eh_frame` and these relocation types.
 }
 
 #[derive(Debug, PartialEq)]

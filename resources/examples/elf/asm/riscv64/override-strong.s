@@ -1,6 +1,8 @@
 .option norvc                   # disable compressed instructions for clarity
+
 .extern foo
 .extern bar
+
 .global _start
 
 .section .text
