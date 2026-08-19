@@ -34,7 +34,7 @@ select_tools() {
             LD=/usr/bin/loongarch64-linux-gnu-ld
             [[ -x "$AS" ]] || AS=as
             [[ -x "$LD" ]] || LD=ld
-            AS_ARGS=()
+            AS_ARGS=(-mno-relax)
             ;;
         powerpc64le)
             AS=/usr/bin/powerpc64le-linux-gnu-as

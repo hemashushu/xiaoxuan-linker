@@ -6,59 +6,99 @@
 
 use object::elf;
 
+/// The ELF file header information used by the linker.
 // https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
 #[derive(Debug, PartialEq)]
 pub struct FileHeader {
+    /// The byte order used by the ELF file.
     pub data_encoding: DataEncoding,
+
+    /// The ELF class: 32-bit or 64-bit.
     pub file_class: FileClass,
+
+    /// The operating-system ABI identified by the ELF header.
     pub os_abi: OSABI,
+
+    /// The target machine architecture.
     pub machine: Machine,
+
+    /// The ELF file type, such as relocatable, executable, or shared object.
     pub file_type: FileType,
+
+    /// The virtual address of the entry point.
     pub entry_point: usize,
+
+    /// The number of entries in the program header table.
     pub program_header_count: usize,
+
+    /// The number of entries in the section header table.
     pub section_header_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The byte order encoded in an ELF file.
 pub enum DataEncoding {
-    LittleEndian, // ELFDATA2LSB
-    BigEndian,    // ELFDATA2MSB
+    /// Least-significant byte first (`ELFDATA2LSB`).
+    LittleEndian,
+    /// Most-significant byte first (`ELFDATA2MSB`).
+    BigEndian,
+    /// An encoding value not recognized by this linker.
     Other(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The word size encoded in an ELF file.
 pub enum FileClass {
-    Elf32, // ELFCLASS32
-    Elf64, // ELFCLASS64
+    /// 32-bit ELF (`ELFCLASS32`).
+    Elf32,
+    /// 64-bit ELF (`ELFCLASS64`).
+    Elf64,
+    /// An ELF class value not recognized by this linker.
     Other(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The operating-system ABI identified by an ELF file.
 pub enum OSABI {
-    SystemV, // ELFOSABI_NONE/ELFOSABI_SYSV
+    /// System V ABI (`ELFOSABI_NONE` or `ELFOSABI_SYSV`).
+    SystemV,
     // NetBSD,  // ELFOSABI_NETBSD
     // FreeBSD, // ELFOSABI_FREEBSD
     // OpenBSD, // ELFOSABI_OPENBSD
     // Hurd,    // ELFOSABI_HURD
+    /// An OS ABI value not recognized by this linker.
     Other(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A target machine architecture supported or recognized by the linker.
 pub enum Machine {
-    X86_64,    // EM_X86_64
-    AArch64,   // EM_AARCH64
-    RiscV,     // EM_RISCV
-    LoongArch, // EM_LOONGARCH
-    PowerPC64, // EM_PPC64
-    S390,      // EM_S390
+    /// x86-64 (`EM_X86_64`).
+    X86_64,
+    /// AArch64 (`EM_AARCH64`).
+    AArch64,
+    /// RISC-V (`EM_RISCV`).
+    RiscV,
+    /// LoongArch (`EM_LOONGARCH`).
+    LoongArch,
+    /// 64-bit PowerPC (`EM_PPC64`).
+    PowerPC64,
+    /// IBM Z (`EM_S390`).
+    S390,
+    /// A machine value not recognized by this linker.
     Other(u16),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The kind of ELF file.
 pub enum FileType {
-    Relocatable,  // ET_REL
-    Executable,   // ET_EXEC
-    SharedObject, // ET_DYN
+    /// Relocatable object file (`ET_REL`).
+    Relocatable,
+    /// Executable file (`ET_EXEC`).
+    Executable,
+    /// Shared object or position-independent executable (`ET_DYN`).
+    SharedObject,
+    /// A file type value not recognized by this linker.
     Other(u16),
 }
 
@@ -118,31 +158,46 @@ impl From<u16> for FileType {
 
 #[derive(Debug, PartialEq)]
 pub struct SectionHeader<'data> {
+    /// The section name.
     pub name: String,
+
+    /// The section type, such as `Progbits`, `Nobits`, or `Symtab`.
     pub section_type: SectionType,
 
-    // the offset of the section in the file
+    /// The byte offset of the section data in the file.
     pub offset: usize,
 
-    // the size of the section (in bytes), note that
-    // it is not the size in file, but the size in memory,
-    // for example, the size of the `.bss` section is 0 in file,
-    // but it may be non-zero in memory.
+    /// The size of the section in bytes.
+    ///
+    /// For a `Nobits` section, such as `.bss`, this is the size occupied in
+    /// memory; the section has no corresponding bytes in the file.
     pub size: usize,
 
+    /// The required alignment of the section in bytes.
     pub align: usize,
 
+    /// The section data stored in the input file.
+    ///
+    /// This is empty for a `Nobits` section.
     pub binary: &'data [u8],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The kind of an ELF section.
 pub enum SectionType {
-    Null,     // SHT_NULL
-    Progbits, // SHT_PROGBITS
-    Symtab,   // SHT_SYMTAB
-    Strtab,   // SHT_STRTAB
-    Rela,     // SHT_RELA
-    Nobits,   // SHT_NOBITS
+    /// Inactive section header (`SHT_NULL`).
+    Null,
+    /// Section containing defined data (`SHT_PROGBITS`).
+    Progbits,
+    /// Symbol table (`SHT_SYMTAB`).
+    Symtab,
+    /// String table (`SHT_STRTAB`).
+    Strtab,
+    /// Relocation entries with explicit addends (`SHT_RELA`).
+    Rela,
+    /// Section occupying memory but no bytes in the file (`SHT_NOBITS`).
+    Nobits,
+    /// A section type value not recognized by this linker.
     Other(u32),
 }
 
@@ -163,42 +218,59 @@ impl From<u32> for SectionType {
 #[derive(Debug, PartialEq)]
 pub enum Symbol {
     Defined {
-        // The name of the symbol
-        // This name may be empty for symbols that represent sections
-        // (e.g. the symbol for the `.text` section).
+        /// The symbol name.
+        ///
+        /// This may be empty for a section symbol, such as the symbol for
+        /// the `.text` section.
         name: String,
+
+        /// The symbol binding, such as `Local`, `Global`, or `Weak`.
         bind: SymbolBind,
+
+        /// The symbol type.
         symbol_type: SymbolType,
 
-        // the index of the section where the symbol is defined,
-        // which can be used to determine the symbol's section type
+        /// The index of the section that defines the symbol.
         section_index: usize,
 
-        // The offset of the symbol in its original section in the object file.
+        /// The offset of the symbol within its original section.
         offset: usize,
     },
-    External(/* name */ String),
+    /// An undefined symbol that must be resolved by the linker.
+    External(String),
 
-    // Symbols that the linker does not care about.
+    /// A symbol that is not relevant to the linker's relocation process.
     Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The binding or visibility scope of a symbol.
 pub enum SymbolBind {
+    /// A symbol local to its object file.
     Local,
+    /// A symbol available for resolution by other object files.
     Global,
+    /// A symbol that may be overridden by a non-weak definition.
     Weak,
+    /// A binding value not recognized by this linker.
     Other(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The kind of entity represented by a symbol.
 pub enum SymbolType {
-    Notype,  // Note that some assembler emit symbols with STT_NOTYPE type for functions and data.
-    Object,  // Data object, e.g. global variable
-    Func,    // Function
-    Section, // Section
+    /// No specific type. Assemblers may use this for functions or data.
+    Notype,
+    /// A data object, such as a global variable.
+    Object,
+    /// A function.
+    Func,
+    /// A section symbol.
+    Section,
     // File,    // File
-    TLS, // Thread-local storage
+    /// Thread-local storage.
+    TLS,
+    /// A symbol type value not recognized by this linker.
     Other(u8),
 }
 
@@ -229,43 +301,55 @@ impl From<u8> for SymbolType {
 
 #[derive(Debug, PartialEq)]
 pub struct RelocationSection {
+    /// The name of the relocation section.
     pub name: String,
+
+    /// The index of the section to which these relocations apply.
     pub target_section_index: usize,
+
+    /// The relocation entries in this section.
     pub relocations: Vec<Relocation>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Relocation {
+    /// The architecture-specific relocation type.
     pub relocation_type: RelocationType,
+
+    /// The offset of the value or instruction field to be patched.
     pub placeholder_offset: usize,
+
+    /// The index of the referenced symbol in the symbol table.
     pub symbol_index: usize,
+
+    /// The addend used by the relocation calculation.
     pub addend: isize,
 }
 
-/// The `RelocationType` enum represents the type of relocation that needs to be applied to
-/// a symbol reference in the code or data.
+/// The type of relocation that must be applied to a symbol reference in code or data.
 ///
 /// For static linking on x86_64, we only need a few common relocation types:
 ///
-/// - `R_X86_64_PC32` (value 2): 32-bit PC-relative. Used by `mov`, `lea`, `call` in PIC code.
+/// - `R_X86_64_PC32` (value 2): 32-bit PC-relative. Used by instructions such as `mov`, `lea`,
+///   and `call` when their encoding uses a 32-bit PC-relative field.
 /// - `R_X86_64_64`  (value 1): 64-bit absolute. Used when a full pointer is stored in `.data`,
 ///   e.g. `dq my_var`.
 ///
-/// When building Dynamic Shared Object (DSO, `.so`) and input relocatable object files
-/// contain `R_X86_64_64` relocations, a linker typically converts those `R_X86_64_64` entries
-/// into `R_X86_64_RELATIVE` relocations (written to `.rela.dyn`) in the final output.
+/// When building a dynamic shared object (DSO, `.so`), a linker may represent an address that
+/// depends only on the load base with an `R_X86_64_RELATIVE` relocation in `.rela.dyn`.
 ///
-/// `R_X86_64_RELATIVE` (value 8) is base-relative pointer, written to `.rela.dyn` by the linker
-/// when building DSO output. The runtime loader (ld.so, the dynamic linker) applies
-/// `*addr = B + A` after mapping the binary at base address `B` at runtime.
+/// `R_X86_64_RELATIVE` (value 8) is a base-relative relocation written to `.rela.dyn` when
+/// building DSO output. The runtime loader (`ld.so`, the dynamic linker) applies
+/// `*addr = B + A` after mapping the binary at base address `B`.
 ///
-/// Note that `R_X86_64_RELATIVE` never appears in a `.o` file, it only appears in the final DSO output.
+/// This relocation is normally emitted in a final dynamically linked image rather than in an
+/// input relocatable object file.
 ///
 /// To support PIC shared libraries, additional relocation types are typically required:
 ///
-/// - `R_X86_64_PLT32` (value 4): 32-bit PC-relative call through PLT.
-///   Generated by the compiler for calls to external functions in PIC code.
-///   The linker resolves it to a PLT stub (or directly if the symbol is in the same module).
+/// - `R_X86_64_PLT32` (value 4): 32-bit PC-relative call target associated with the PLT.
+///   It is commonly generated for calls to external functions. The linker may resolve it to a
+///   PLT stub or directly to a local definition.
 /// - `R_X86_64_GOTPCREL` (value 9): 32-bit PC-relative GOT reference.
 ///   Generated by the compiler for accesses to external data symbols in PIC code.
 ///   The linker resolves it to a GOT entry.
@@ -276,14 +360,15 @@ pub struct Relocation {
 ///   Generated by the compiler for `__thread` variables with `-ftls-model=local-exec`.
 ///
 ///
-/// In summary, for a *static non-PIE* linker, only `R_X86_64_PC32`, `R_X86_64_64`, and
-/// `R_X86_64_TPOFF32` need to be handled as input relocations.
+/// In this linker's current static, non-PIE mode, the relevant x86_64 input relocations are
+/// `R_X86_64_PC32`, `R_X86_64_PLT32`, `R_X86_64_64`, `R_X86_64_32`, and `R_X86_64_TPOFF32`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum RelocationType {
-    /// The `R_X86_64_PC32` relocation type represents a 32-bit PC-relative relocation.
-    /// It is used for instructions that reference symbols, such as `mov`, `lea`, and `call`.
-    /// This type is the most common relocation type used in PIC code.
+    /// A 32-bit PC-relative relocation.
+    ///
+    /// It is used by instruction encodings that reference symbols through a 32-bit
+    /// PC-relative field, including some forms of `mov`, `lea`, and `call`.
     ///
     /// The formula for calculating the value to be written at the relocation site is:
     /// `S + A - P`
@@ -293,16 +378,17 @@ pub enum RelocationType {
     /// - `P` is the address of the relocation site (the `placeholder_offset` field in the `Relocation` struct).
     R_X86_64_PC32,
 
-    /// The `R_X86_64_PLT32` relocation type represents a 32-bit PC-relative relocation to a PLT entry.
-    /// It is used for function calls to external symbols in PIC code.
+    /// A 32-bit PC-relative relocation for a function call associated with a PLT entry.
+    ///
+    /// It is commonly used for calls to external symbols.
     ///
     /// Because this linker does not support dynamic linking, we can treat `R_X86_64_PLT32` the
     /// same as `R_X86_64_PC32` for static linking purposes.
     R_X86_64_PLT32,
 
-    /// The `R_X86_64_64` relocation type represents a 64-bit absolute relocation.
-    /// It is produced by the assembler/compiler whenever a full 64-bit address is stored
-    /// in a data section, for example:
+    /// A 64-bit absolute relocation.
+    ///
+    /// It is used when a full 64-bit address is stored in a data section, for example:
     ///
     /// ```asm
     /// my_array:
@@ -319,15 +405,15 @@ pub enum RelocationType {
     /// For a non-PIE static executable (ET_EXEC), this is resolved at link time by
     /// writing the final absolute address directly into the data section.
     ///
-    /// For a shared library (ET_DYN), the load address is unknown at link time.
-    /// A linker converts each `R_X86_64_64` entry into an `R_X86_64_RELATIVE`
-    /// dynamic relocation (and write to `.rela.dyn`), which the dynamic linker (runtime loader) applies
-    /// after determining the base address. The value stored at the site becomes `B + S + A`
-    /// where `B` is the base address chosen by the loader.
+    /// For a shared library (ET_DYN), the load address is unknown at link time. A dynamic linker
+    /// can use an `R_X86_64_RELATIVE` dynamic relocation in `.rela.dyn` when the symbol is local
+    /// to the image. The dynamic linker then adds the load base `B` to the link-time value.
     R_X86_64_64,
+
+    /// A 32-bit absolute relocation whose result is written to a 32-bit field.
     R_X86_64_32,
 
-    /// For `local-exec` TLS model.
+    /// A 32-bit thread-pointer-relative relocation for the `local-exec` TLS model.
     ///
     /// There are also other TLS models:
     /// - `initial-exec`: `R_X86_64_GOTTPOFF`
@@ -353,7 +439,7 @@ pub enum RelocationType {
     ///
     /// Note that the value is negative because the TLS block grows downwards from the thread pointer (TP).
     ///
-    /// The TLS block layout is:
+    /// A simplified TLS block layout is:
     ///
     /// Higher addresses
     /// +---------------------------+
@@ -366,25 +452,26 @@ pub enum RelocationType {
     /// Lower addresses
     R_X86_64_TPOFF32,
 
-    /// `R_AARCH64_ADR_PREL_PG_HI21` and `R_AARCH64_ADD_ABS_LO12_NC/R_AARCH64_LDST64_ABS_LO12_NC` are used for PC-relative addressing.
+    /// `R_AARCH64_ADR_PREL_PG_HI21` and `R_AARCH64_ADD_ABS_LO12_NC`/
+    /// `R_AARCH64_LDST64_ABS_LO12_NC` are used to form an address from a page and a page offset.
     ///
     /// - Name 'R_AARCH64_ADR_PREL_PG_HI21' = 'ADRP instruction' + 'PC relative' + 'Page' + 'High 21 bits immediate'
     /// - Name 'R_AARCH64_ADD_ABS_LO12_NC' = 'Add instruction' + 'Absolute' + 'Low 12 bits immediate' + 'Non-Checked'
     /// - Name 'R_AARCH64_LDST64_ABS_LO12_NC' = 'Load/Store instruction' + '64-bit' + 'Absolute' + 'Low 12 bits immediate' + 'Non-Checked'
     ///
-    /// There are 2 steps to load/store a 64-bit address in AArch64 architecture:
+    /// There are two steps to form an address and load from it on AArch64:
     ///
     /// ```asm
     /// adrp x0, foo
     /// ldr x0, [x0, :lo12:foo]
     /// ```
     ///
-    /// 1. Use `ADRP` instruction to calculate the page address (high 21 bits) of the target symbol and PC.
-    /// 2. Load/store the value with 12 bits offset within the page of the target symbol.
+    /// 1. Use `ADRP` to calculate the target symbol's page address relative to the PC.
+    /// 2. Use a load/store instruction with the symbol's 12-bit offset within that page.
     ///
     /// The relocation entries for this sequence are `R_AARCH64_ADR_PREL_PG_HI21` + `R_AARCH64_LDST64_ABS_LO12_NC`.
     ///
-    /// These 2 steps can also be written as `ADRP` + `ADD` + `LDR/STR`:
+    /// The page address and page offset can also be combined with `ADD` before loading:
     ///
     /// ```asm
     /// adrp x0, foo
@@ -397,72 +484,111 @@ pub enum RelocationType {
     R_AARCH64_ADD_ABS_LO12_NC,
     R_AARCH64_LDST64_ABS_LO12_NC,
 
-    /// `R_AARCH64_CALL26` is used for PC-relative function calls in AArch64 architecture.
+    /// A 26-bit PC-relative relocation for a function call or jump on AArch64.
     R_AARCH64_CALL26,
 
-    /// `R_AARCH64_ABS64` is used for absolute addressing of 64-bit data in AArch64 architecture.
+    /// A 64-bit absolute relocation on AArch64.
     ///
     /// It is similar to `R_X86_64_64` in x86_64 architecture, and is used when
     /// a full 64-bit address is stored in a data section.
     R_AARCH64_ABS64,
 
-    // There is an additional relocation type `R_AARCH64_PREL32` appears in the `.rela.eh_frame` section,
-    // add parameters `-fno-unwind-tables -fno-asynchronous-unwind-tables` to the compiler to avoid generating
-    // section `.eh_frame` and this relocation type.
-
-    /// `R_RISCV_PCREL_HI20` and `R_RISCV_PCREL_LO12_I` are used for PC-relative addressing in RISC-V architecture.
+    /*
+     * `R_AARCH64_PREL32` can appear in `.rela.eh_frame`; disabling unwind tables avoids
+     * generating `.eh_frame` for the input files used by this linker.
+     */
+    /// A pair of relocations used to construct a PC-relative address on RISC-V.
     R_RISCV_PCREL_HI20,
     R_RISCV_PCREL_LO12_I,
 
-    /// GCC favors
+    /// Absolute high and low-part relocations commonly emitted by GCC.
     R_RISCV_HI20,
     R_RISCV_LO12_I,
     R_RISCV_LO12_S,
 
-    /// `R_RISCV_CALL_PLT` is used for PC-relative function calls in RISC-V architecture.
+    /// A PC-relative function-call relocation that may target a PLT entry on RISC-V.
     R_RISCV_CALL_PLT,
 
-    /// `R_RISCV_64` is used for absolute addressing of 64-bit data in RISC-V architecture.
+    /// A 64-bit absolute relocation on RISC-V.
     ///
     /// It is similar to `R_X86_64_64` in x86_64 architecture, and is used when
     /// a full 64-bit address is stored in a data section.
     R_RISCV_64,
 
-    // There are additional relocation types:
-    // - R_RISCV_32_PCREL
-    // - R_RISCV_ADD32
-    // - R_RISCV_SUB32
-    // appears in the `.rela.eh_frame` section,
-    // add parameters `-fno-unwind-tables -fno-asynchronous-unwind-tables` to the compiler to avoid generating
-    // section `.eh_frame` and these relocation types.
+    /*
+     * The following relocation types can appear in `.rela.eh_frame`:
+     * - R_RISCV_32_PCREL
+     * - R_RISCV_ADD32
+     * - R_RISCV_SUB32
+     * `-fno-unwind-tables -fno-asynchronous-unwind-tables` avoids generating `.eh_frame`
+     * for the input files used by this linker.
+     */
+    /// A 26-bit PC-relative branch relocation on LoongArch.
+    R_LARCH_B26,
+
+    /// The high 20 bits of a PC-relative address on LoongArch.
+    R_LARCH_PCALA_HI20,
+
+    /// The low 12 bits of a PC-relative address on LoongArch.
+    R_LARCH_PCALA_LO12,
+
+    /// A 64-bit absolute relocation on LoongArch.
+    R_LARCH_64,
+
+    /// A 36-bit PC-relative function-call relocation on LoongArch.
+    R_LARCH_CALL36,
 }
 
 #[derive(Debug, PartialEq)]
+/// A loadable or otherwise relevant program segment in an ELF file.
 pub struct ProgramHeader {
+    /// The segment type.
     pub segment_type: SegmentType,
+
+    /// The permissions assigned to the segment.
     pub segment_flags: Vec<SegmentFlag>,
+
+    /// The byte offset of the segment data in the file.
     pub offset: usize,
+
+    /// The number of bytes occupied by the segment in the file.
     pub file_size: usize,
+
+    /// The number of bytes occupied by the segment in memory.
     pub memory_size: usize,
+
+    /// The virtual address at which the segment is loaded.
     pub virtual_address: usize,
+
+    /// The required alignment of the segment in bytes.
     pub align: usize,
 }
 
-// ANLD does not care about some segment types such as
-// `PT_DYNAMIC`, `PT_INTERP`, `PT_NOTE` etc.
+/// Segment types relevant to the linker's output.
+// The linker does not need to model some segment types, such as `PT_DYNAMIC`,
+// `PT_INTERP`, and `PT_NOTE`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentType {
+    /// The program header table itself (`PT_PHDR`).
     PHDR,
+    /// A loadable segment (`PT_LOAD`).
     Load,
+    /// A thread-local storage segment (`PT_TLS`).
     TLS,
+    /// A segment type not recognized by this linker.
     Other(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A permission bit assigned to an ELF program segment.
 pub enum SegmentFlag {
+    /// The segment is executable (`PF_X`).
     Execute,
+    /// The segment is writable (`PF_W`).
     Write,
+    /// The segment is readable (`PF_R`).
     Read,
+    /// A segment flag value not recognized by this linker.
     Other(u32),
 }
 

@@ -31,8 +31,8 @@ select_gcc() {
         loongarch64)
             GCC=/usr/bin/loongarch64-linux-gnu-gcc
             [[ -x "$GCC" ]] || GCC=gcc
-            CFLAGS_ARCH=()
-            LDFLAGS_ARCH=()
+            CFLAGS_ARCH=(-mno-relax)
+            LDFLAGS_ARCH=(-Wl,--no-relax)
             ;;
         powerpc64le)
             GCC=/usr/bin/powerpc64le-linux-gnu-gcc

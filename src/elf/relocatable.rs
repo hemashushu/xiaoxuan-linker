@@ -336,6 +336,8 @@ mod tests {
     #[derive(Debug, PartialEq, Clone, Copy)]
     enum SourceType {
         Assembly,
+
+        #[allow(clippy::upper_case_acronyms)]
         GCC,
     }
 

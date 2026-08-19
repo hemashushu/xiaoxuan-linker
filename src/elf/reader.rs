@@ -337,6 +337,15 @@ fn parse_relocations(
     let mut relocations = Vec::new();
 
     for rela in relas {
+        let relocation_type_raw = rela.r_type(endian, is_mips64el);
+
+        // The assembler emits relaxation markers alongside the actual
+        // relocations. They do not patch a field and are not needed by the
+        // reader's relocation model.
+        if machine == Machine::LoongArch && relocation_type_raw == object::elf::R_LARCH_RELAX {
+            continue;
+        }
+
         let placeholder_offset = rela.r_offset(endian) as usize;
         let addend = rela.r_addend(endian) as isize;
 
@@ -360,7 +369,6 @@ fn parse_relocations(
         // ```
 
         let symbol_index = rela.r_sym(endian, is_mips64el);
-        let relocation_type_raw = rela.r_type(endian, is_mips64el);
         let relocation_type = parse_relocation_type(machine, relocation_type_raw)?;
 
         // Common relocation type (r_type) includes:
@@ -434,6 +442,19 @@ fn parse_relocation_type(
                 /* unsupported */
                 _ => Err(LinkerError::new(&format!(
                     "Unsupported relocation type \"{relocation_type_raw}\" for RISC-V architecture"
+                ))),
+            }
+        }
+        Machine::LoongArch => {
+            match relocation_type_raw {
+                object::elf::R_LARCH_B26 => Ok(RelocationType::R_LARCH_B26),
+                object::elf::R_LARCH_PCALA_HI20 => Ok(RelocationType::R_LARCH_PCALA_HI20),
+                object::elf::R_LARCH_PCALA_LO12 => Ok(RelocationType::R_LARCH_PCALA_LO12),
+                object::elf::R_LARCH_64 => Ok(RelocationType::R_LARCH_64),
+                object::elf::R_LARCH_CALL36 => Ok(RelocationType::R_LARCH_CALL36),
+                /* unsupported */
+                _ => Err(LinkerError::new(&format!(
+                    "Unsupported relocation type \"{relocation_type_raw}\" for LoongArch architecture"
                 ))),
             }
         }
@@ -513,6 +534,8 @@ mod tests {
     #[derive(Debug, PartialEq, Clone, Copy)]
     enum SourceType {
         Assembly,
+
+        #[allow(clippy::upper_case_acronyms)]
         GCC,
     }
 
@@ -529,7 +552,7 @@ mod tests {
         Machine::X86_64,
         Machine::AArch64,
         Machine::RiscV,
-        // Machine::LoongArch,
+        Machine::LoongArch,
         // Machine::PowerPC64,
         // Machine::S390,
     ];
@@ -600,7 +623,16 @@ mod tests {
                 Machine::RiscV => {
                     assert_eq!(file_header.machine, Machine::RiscV);
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(file_header.machine, Machine::LoongArch);
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -629,7 +661,16 @@ mod tests {
                 Machine::RiscV => {
                     assert_eq!(file_header.machine, Machine::RiscV);
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(file_header.machine, Machine::LoongArch);
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -925,10 +966,10 @@ mod tests {
 
             match arch {
                 Machine::X86_64 => {
-                    // ok
+                    // No architecture-specific symbol is emitted for x86_64.
                 }
                 Machine::AArch64 => {
-                    // ok
+                    // No architecture-specific symbol is emitted for aarch64.
                 }
                 Machine::RiscV => {
                     // The assembler generates a special symbol `__global_pointer$` for the global pointer register (gp).
@@ -939,7 +980,16 @@ mod tests {
                             .is_some()
                     );
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    // No architecture-specific symbol is emitted for LoongArch.
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -1138,7 +1188,7 @@ mod tests {
         let relocations = &mut relocation_section.relocations;
 
         // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-        relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+        relocations.sort_by_key(|a| a.placeholder_offset);
 
         // Check certain entries for testing purposes.
         match arch {
@@ -1200,9 +1250,34 @@ mod tests {
                     relocation1.relocation_type,
                     RelocationType::R_RISCV_PCREL_LO12_I
                 );
-                assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Symbol name has a trailing space
+                assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
             }
-            _ => unimplemented!(),
+            Machine::LoongArch => {
+                // Relocation for symbol `hello`: R_LARCH_PCALA_HI20 + R_LARCH_PCALA_LO12
+
+                let relocation0 = &relocations[0];
+                let symbol0 = &symbols[relocation0.symbol_index];
+                assert_eq!(
+                    relocation0.relocation_type,
+                    RelocationType::R_LARCH_PCALA_HI20
+                );
+                assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "hello"));
+
+                let relocation1 = &relocations[1];
+                let symbol1 = &symbols[relocation1.symbol_index];
+                assert_eq!(
+                    relocation1.relocation_type,
+                    RelocationType::R_LARCH_PCALA_LO12
+                );
+                assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "hello"));
+            }
+            Machine::PowerPC64 => {
+                // todo
+            }
+            Machine::S390 => {
+                // todo
+            }
+            Machine::Other(_) => unimplemented!(),
         }
     }
 
@@ -1235,7 +1310,7 @@ mod tests {
         let relocations = &mut relocation_section.relocations;
 
         // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-        relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+        relocations.sort_by_key(|a| a.placeholder_offset);
 
         // Check certain entries for testing purposes.
         match arch {
@@ -1258,7 +1333,7 @@ mod tests {
             Machine::AArch64 => {
                 // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
 
-                // Case 1: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
+                // Case 1: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC (GCC favorite)
 
                 let relocation0 = &relocations[0];
                 let symbol0 = &symbols[relocation0.symbol_index];
@@ -1319,7 +1394,7 @@ mod tests {
                     relocation1.relocation_type,
                     RelocationType::R_RISCV_PCREL_LO12_I
                 );
-                assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Symbol name has a trailing space
+                assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
 
                 // Relocation for symbol `foo`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
 
@@ -1337,9 +1412,34 @@ mod tests {
                     relocation3.relocation_type,
                     RelocationType::R_RISCV_PCREL_LO12_I
                 );
-                assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == ".L0 ")); // Symbol name has a trailing space
+                assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
             }
-            _ => unimplemented!(),
+            Machine::LoongArch => {
+                // Relocation for symbol `foo`: R_LARCH_PCALA_HI20 + R_LARCH_PCALA_LO12
+
+                let relocation0 = &relocations[0];
+                let symbol0 = &symbols[relocation0.symbol_index];
+                assert_eq!(
+                    relocation0.relocation_type,
+                    RelocationType::R_LARCH_PCALA_HI20
+                );
+                assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "foo"));
+
+                let relocation1 = &relocations[1];
+                let symbol1 = &symbols[relocation1.symbol_index];
+                assert_eq!(
+                    relocation1.relocation_type,
+                    RelocationType::R_LARCH_PCALA_LO12
+                );
+                assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "foo"));
+            }
+            Machine::PowerPC64 => {
+                // todo
+            }
+            Machine::S390 => {
+                // todo
+            }
+            Machine::Other(_) => unimplemented!(),
         }
     }
 
@@ -1373,7 +1473,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+                relocations.sort_by_key(|a| a.placeholder_offset);
 
                 // Check certain entries for testing purposes.
                 match arch {
@@ -1434,9 +1534,9 @@ mod tests {
                             relocation1.relocation_type,
                             RelocationType::R_RISCV_PCREL_LO12_I
                         );
-                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 "));
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
 
-                        // Relocation for symbol `foo`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
+                        // Relocation for symbol `pfoo`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
 
                         let relocation2 = &relocations[2];
                         let symbol2 = &symbols[relocation2.symbol_index];
@@ -1452,9 +1552,34 @@ mod tests {
                             relocation3.relocation_type,
                             RelocationType::R_RISCV_PCREL_LO12_I
                         );
-                        assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == ".L0 "));
+                        assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
                     }
-                    _ => unimplemented!(),
+                    Machine::LoongArch => {
+                        // Relocation for symbol `pfoo`: R_LARCH_PCALA_HI20 + R_LARCH_PCALA_LO12
+
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(
+                            relocation0.relocation_type,
+                            RelocationType::R_LARCH_PCALA_HI20
+                        );
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "pfoo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(
+                            relocation1.relocation_type,
+                            RelocationType::R_LARCH_PCALA_LO12
+                        );
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "pfoo"));
+                    }
+                    Machine::PowerPC64 => {
+                        // todo
+                    }
+                    Machine::S390 => {
+                        // todo
+                    }
+                    Machine::Other(_) => unimplemented!(),
                 }
             }
 
@@ -1476,7 +1601,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+                relocations.sort_by_key(|a| a.placeholder_offset);
 
                 // Check certain entries for testing purposes.
                 match arch {
@@ -1513,7 +1638,24 @@ mod tests {
                         assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_64);
                         assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "inc"));
                     }
-                    _ => unimplemented!(),
+                    Machine::LoongArch => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_LARCH_64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_LARCH_64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "inc"));
+                    }
+                    Machine::PowerPC64 => {
+                        // todo
+                    }
+                    Machine::S390 => {
+                        // todo
+                    }
+                    Machine::Other(_) => unimplemented!(),
                 }
             }
 
@@ -1535,7 +1677,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+                relocations.sort_by_key(|a| a.placeholder_offset);
 
                 // Check certain entries for testing purposes.
                 match arch {
@@ -1578,7 +1720,24 @@ mod tests {
                         assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_64);
                         assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
                     }
-                    _ => unimplemented!(),
+                    Machine::LoongArch => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_LARCH_64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_LARCH_64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
+                    }
+                    Machine::PowerPC64 => {
+                        // todo
+                    }
+                    Machine::S390 => {
+                        // todo
+                    }
+                    Machine::Other(_) => unimplemented!(),
                 }
             }
         }
@@ -1641,7 +1800,20 @@ mod tests {
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -1690,7 +1862,20 @@ mod tests {
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -1764,7 +1949,25 @@ mod tests {
                         vec![SegmentFlag::Write, SegmentFlag::Read]
                     );
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -1797,7 +2000,16 @@ mod tests {
                 Machine::RiscV => {
                     assert_eq!(file_header.machine, Machine::RiscV);
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(file_header.machine, Machine::LoongArch);
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -1826,7 +2038,16 @@ mod tests {
                 Machine::RiscV => {
                     assert_eq!(file_header.machine, Machine::RiscV);
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(file_header.machine, Machine::LoongArch);
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -2320,7 +2541,7 @@ mod tests {
             let relocations = &mut relocation_section.relocations;
 
             // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-            relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+            relocations.sort_by_key(|a| a.placeholder_offset);
 
             // Check certain entries for testing purposes.
             match arch {
@@ -2413,7 +2634,40 @@ mod tests {
                         matches!(symbol8, Symbol::Defined { name, ..} if name == "print_hello")
                     );
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    // Relocation for symbol `hello`: R_LARCH_PCALA_HI2 + R_R_LARCH_PCALA_LO12
+
+                    let relocation2 = &relocations[2];
+                    let symbol2 = &symbols[relocation2.symbol_index];
+                    assert_eq!(
+                        relocation2.relocation_type,
+                        RelocationType::R_LARCH_PCALA_HI20
+                    );
+                    assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "hello"));
+
+                    let relocation3 = &relocations[3];
+                    let symbol3 = &symbols[relocation3.symbol_index];
+                    assert_eq!(
+                        relocation3.relocation_type,
+                        RelocationType::R_LARCH_PCALA_LO12
+                    );
+                    assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == "hello"));
+
+                    // Relocation for functions `print_hello`: R_LARCH_CALL36
+                    let relocation8 = &relocations[8];
+                    let symbol8 = &symbols[relocation8.symbol_index];
+                    assert_eq!(relocation8.relocation_type, RelocationType::R_LARCH_CALL36);
+                    assert!(
+                        matches!(symbol8, Symbol::Defined { name, ..} if name == "print_hello")
+                    );
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -2446,7 +2700,7 @@ mod tests {
             let relocations = &mut relocation_section.relocations;
 
             // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-            relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+            relocations.sort_by_key(|a| a.placeholder_offset);
 
             // Check certain entries for testing purposes.
             match arch {
@@ -2468,6 +2722,8 @@ mod tests {
                 }
                 Machine::AArch64 => {
                     // The assembler generates relocations with section symbols.
+
+                    // Relocation for symbol `foo`: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
                     let relocation0 = &relocations[0];
                     let symbol0 = &symbols[relocation0.symbol_index];
                     assert_eq!(
@@ -2501,7 +2757,32 @@ mod tests {
                     assert_eq!(relocation2.relocation_type, RelocationType::R_RISCV_LO12_S);
                     assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "a"));
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    // Relocation for symbol `a`: R_LARCH_PCALA_HI20 + R_LARCH_PCALA_LO12
+
+                    let relocation1 = &relocations[1];
+                    let symbol1 = &symbols[relocation1.symbol_index];
+                    assert_eq!(
+                        relocation1.relocation_type,
+                        RelocationType::R_LARCH_PCALA_HI20
+                    );
+                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "a"));
+
+                    let relocation2 = &relocations[2];
+                    let symbol2 = &symbols[relocation2.symbol_index];
+                    assert_eq!(
+                        relocation2.relocation_type,
+                        RelocationType::R_LARCH_PCALA_LO12
+                    );
+                    assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "a"));
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -2535,7 +2816,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+                relocations.sort_by_key(|a| a.placeholder_offset);
 
                 // Check certain entries for testing purposes.
                 match arch {
@@ -2578,7 +2859,30 @@ mod tests {
                         assert_eq!(relocation2.relocation_type, RelocationType::R_RISCV_LO12_I);
                         assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "foo"));
                     }
-                    _ => unimplemented!(),
+                    Machine::LoongArch => {
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(
+                            relocation1.relocation_type,
+                            RelocationType::R_LARCH_PCALA_HI20
+                        );
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "foo"));
+
+                        let relocation2 = &relocations[2];
+                        let symbol2 = &symbols[relocation2.symbol_index];
+                        assert_eq!(
+                            relocation2.relocation_type,
+                            RelocationType::R_LARCH_PCALA_LO12
+                        );
+                        assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "foo"));
+                    }
+                    Machine::PowerPC64 => {
+                        // todo
+                    }
+                    Machine::S390 => {
+                        // todo
+                    }
+                    Machine::Other(_) => unimplemented!(),
                 }
             }
 
@@ -2603,7 +2907,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+                relocations.sort_by_key(|a| a.placeholder_offset);
 
                 // Check certain entries for testing purposes.
                 match arch {
@@ -2640,7 +2944,24 @@ mod tests {
                         assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_64);
                         assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
                     }
-                    _ => unimplemented!(),
+                    Machine::LoongArch => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_LARCH_64);
+                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_LARCH_64);
+                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
+                    }
+                    Machine::PowerPC64 => {
+                        // todo
+                    }
+                    Machine::S390 => {
+                        // todo
+                    }
+                    Machine::Other(_) => unimplemented!(),
                 }
             }
 
@@ -2664,7 +2985,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by(|a, b| a.placeholder_offset.cmp(&b.placeholder_offset));
+                relocations.sort_by_key(|a| a.placeholder_offset);
 
                 // Check certain entries for testing purposes.
                 match arch {
@@ -2701,7 +3022,24 @@ mod tests {
                         assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_64);
                         assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
                     }
-                    _ => unimplemented!(),
+                    Machine::LoongArch => {
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_LARCH_64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_LARCH_64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
+                    }
+                    Machine::PowerPC64 => {
+                        // todo
+                    }
+                    Machine::S390 => {
+                        // todo
+                    }
+                    Machine::Other(_) => unimplemented!(),
                 }
             }
         }
@@ -2764,7 +3102,20 @@ mod tests {
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -2817,7 +3168,20 @@ mod tests {
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
         }
     }
@@ -2891,8 +3255,80 @@ mod tests {
                         vec![SegmentFlag::Write, SegmentFlag::Read]
                     );
                 }
-                _ => unimplemented!(),
+                Machine::LoongArch => {
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
+                }
+                Machine::PowerPC64 => {
+                    // todo
+                }
+                Machine::S390 => {
+                    // todo
+                }
+                Machine::Other(_) => unimplemented!(),
             }
+        }
+    }
+
+    #[test]
+    fn test_read_loongarch64_examples() {
+        let arch = Machine::LoongArch;
+        let object_files = [
+            "minimal.o",
+            "function.o",
+            "data.o",
+            "symbol-export.o",
+            "symbol-import.o",
+            "override-weak.o",
+            "override-strong.o",
+            "relocate-within-data.o",
+        ];
+
+        let mut relocation_types = Vec::new();
+
+        for file_name in object_files {
+            let binary = get_example_file_binary(SourceType::Assembly, &arch, file_name);
+            let elf = read_file(&binary).unwrap();
+            let file_header = read_file_header(elf).unwrap();
+            assert_eq!(file_header.machine, Machine::LoongArch);
+            assert_eq!(file_header.file_class, FileClass::Elf64);
+            assert_eq!(file_header.data_encoding, DataEncoding::LittleEndian);
+
+            assert!(!read_section_headers(elf, &binary).unwrap().is_empty());
+            assert!(!read_symbols(elf, &binary).unwrap().is_empty());
+
+            for relocation_section in read_relocation_sections(elf, &binary).unwrap() {
+                for relocation in relocation_section.relocations {
+                    relocation_types.push(relocation.relocation_type);
+                }
+            }
+        }
+
+        assert!(relocation_types.contains(&RelocationType::R_LARCH_B26));
+        assert!(relocation_types.contains(&RelocationType::R_LARCH_PCALA_HI20));
+        assert!(relocation_types.contains(&RelocationType::R_LARCH_PCALA_LO12));
+        assert!(relocation_types.contains(&RelocationType::R_LARCH_64));
+
+        for file_name in [
+            "minimal.elf",
+            "function.elf",
+            "data.elf",
+            "symbol.elf",
+            "override.elf",
+            "relocate-within-data.elf",
+        ] {
+            let binary = get_example_file_binary(SourceType::Assembly, &arch, file_name);
+            let elf = read_file(&binary).unwrap();
+            assert_eq!(read_file_header(elf).unwrap().machine, Machine::LoongArch);
+            assert!(!read_program_headers(elf, &binary).unwrap().is_empty());
         }
     }
 }
