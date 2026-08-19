@@ -362,6 +362,16 @@ pub struct Relocation {
 ///
 /// In this linker's current static, non-PIE mode, the relevant x86_64 input relocations are
 /// `R_X86_64_PC32`, `R_X86_64_PLT32`, `R_X86_64_64`, `R_X86_64_32`, and `R_X86_64_TPOFF32`.
+///
+/// The following relocation types can appear in `.rela.eh_frame`:
+///
+/// - R_AARCH64_PREL32
+///
+/// - R_RISCV_32_PCREL
+/// - R_RISCV_ADD32
+/// - R_RISCV_SUB32
+///
+/// Adding parameters `-fno-unwind-tables -fno-asynchronous-unwind-tables` to the compiler avoids generating `.eh_frame`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum RelocationType {
@@ -493,10 +503,6 @@ pub enum RelocationType {
     /// a full 64-bit address is stored in a data section.
     R_AARCH64_ABS64,
 
-    /*
-     * `R_AARCH64_PREL32` can appear in `.rela.eh_frame`; disabling unwind tables avoids
-     * generating `.eh_frame` for the input files used by this linker.
-     */
     /// A pair of relocations used to construct a PC-relative address on RISC-V.
     R_RISCV_PCREL_HI20,
     R_RISCV_PCREL_LO12_I,
@@ -514,17 +520,6 @@ pub enum RelocationType {
     /// It is similar to `R_X86_64_64` in x86_64 architecture, and is used when
     /// a full 64-bit address is stored in a data section.
     R_RISCV_64,
-
-    /*
-     * The following relocation types can appear in `.rela.eh_frame`:
-     * - R_RISCV_32_PCREL
-     * - R_RISCV_ADD32
-     * - R_RISCV_SUB32
-     * `-fno-unwind-tables -fno-asynchronous-unwind-tables` avoids generating `.eh_frame`
-     * for the input files used by this linker.
-     */
-    /// A 26-bit PC-relative branch relocation on LoongArch.
-    R_LARCH_B26,
 
     /// The high 20 bits of a PC-relative address on LoongArch.
     R_LARCH_PCALA_HI20,

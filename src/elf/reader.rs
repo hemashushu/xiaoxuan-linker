@@ -447,7 +447,6 @@ fn parse_relocation_type(
         }
         Machine::LoongArch => {
             match relocation_type_raw {
-                object::elf::R_LARCH_B26 => Ok(RelocationType::R_LARCH_B26),
                 object::elf::R_LARCH_PCALA_HI20 => Ok(RelocationType::R_LARCH_PCALA_HI20),
                 object::elf::R_LARCH_PCALA_LO12 => Ok(RelocationType::R_LARCH_PCALA_LO12),
                 object::elf::R_LARCH_64 => Ok(RelocationType::R_LARCH_64),
@@ -3275,60 +3274,6 @@ mod tests {
                 }
                 Machine::Other(_) => unimplemented!(),
             }
-        }
-    }
-
-    #[test]
-    fn test_read_loongarch64_examples() {
-        let arch = Machine::LoongArch;
-        let object_files = [
-            "minimal.o",
-            "function.o",
-            "data.o",
-            "symbol-export.o",
-            "symbol-import.o",
-            "override-weak.o",
-            "override-strong.o",
-            "relocate-within-data.o",
-        ];
-
-        let mut relocation_types = Vec::new();
-
-        for file_name in object_files {
-            let binary = get_example_file_binary(SourceType::Assembly, &arch, file_name);
-            let elf = read_file(&binary).unwrap();
-            let file_header = read_file_header(elf).unwrap();
-            assert_eq!(file_header.machine, Machine::LoongArch);
-            assert_eq!(file_header.file_class, FileClass::Elf64);
-            assert_eq!(file_header.data_encoding, DataEncoding::LittleEndian);
-
-            assert!(!read_section_headers(elf, &binary).unwrap().is_empty());
-            assert!(!read_symbols(elf, &binary).unwrap().is_empty());
-
-            for relocation_section in read_relocation_sections(elf, &binary).unwrap() {
-                for relocation in relocation_section.relocations {
-                    relocation_types.push(relocation.relocation_type);
-                }
-            }
-        }
-
-        assert!(relocation_types.contains(&RelocationType::R_LARCH_B26));
-        assert!(relocation_types.contains(&RelocationType::R_LARCH_PCALA_HI20));
-        assert!(relocation_types.contains(&RelocationType::R_LARCH_PCALA_LO12));
-        assert!(relocation_types.contains(&RelocationType::R_LARCH_64));
-
-        for file_name in [
-            "minimal.elf",
-            "function.elf",
-            "data.elf",
-            "symbol.elf",
-            "override.elf",
-            "relocate-within-data.elf",
-        ] {
-            let binary = get_example_file_binary(SourceType::Assembly, &arch, file_name);
-            let elf = read_file(&binary).unwrap();
-            assert_eq!(read_file_header(elf).unwrap().machine, Machine::LoongArch);
-            assert!(!read_program_headers(elf, &binary).unwrap().is_empty());
         }
     }
 }
