@@ -1,7 +1,7 @@
 .extern foo
-.extern bar
 
 .globl _start
+.globl bar
 
 bar:
     li.w $a0, 42

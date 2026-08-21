@@ -13,6 +13,8 @@ world_len = . - world           // assembly-time constant: length of ", world!\n
 
 .section .text
 .global _start
+.global print_hello
+.global print_world
 
 // fn print_hello() -> void
 print_hello:

@@ -2,7 +2,16 @@
 # - Exit with status code 24.
 
 .abiversion 2
+
 .globl _start
+
+.globl foo
+.globl bar
+.globl a
+.globl b
+.globl x
+.globl y
+
 
 .section .rodata
     .align 3

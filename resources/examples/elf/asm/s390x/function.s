@@ -3,6 +3,8 @@
 # - Exit with status code 0.
 
 .globl _start
+.globl print_hello
+.globl print_world
 
 .section .rodata
 .align 2

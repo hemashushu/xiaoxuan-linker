@@ -2,6 +2,12 @@
 # - Exit with status code 24.
 
 .globl _start
+.globl foo
+.globl bar
+.globl a
+.globl b
+.globl x
+.globl y
 
 .section .rodata
     .align 8

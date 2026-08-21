@@ -37,17 +37,31 @@ y:
 .section .text
 .global _start
 
+.global foo
+.global bar
+.global a
+.global b
+.global x
+.global y
+
 // fn _start() -> void
 _start:
     // read `foo` and subtract 1, then store the result in `a`.
     // (`a` should be 10 after this)
     adrp x0, foo
-    add x0, x0, :lo12:foo
-    ldr x0, [x0]
+    ldr x0, [x0, :lo12:foo]
     sub x0, x0, #1
     adrp x1, a
-    add x1, x1, :lo12:a
-    str x0, [x1]
+    str x0, [x1, :lo12:a]
+
+    // GCC generates a different sequence of instructions
+    // adrp x0, foo
+    // add x0, x0, :lo12:foo
+    // ldr x0, [x0]
+    // sub x0, x0, #1
+    // adrp x1, a
+    // add x1, x1, :lo12:a
+    // str x0, [x1]
 
     // read `bar` and add 1, then store the result in `b`.
     // (`b` should be 14 after this)

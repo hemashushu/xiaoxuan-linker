@@ -1,6 +1,7 @@
 .extern foo
-.extern bar
+
 .globl _start
+.globl bar
 
 bar:
     lghi %r2, 42

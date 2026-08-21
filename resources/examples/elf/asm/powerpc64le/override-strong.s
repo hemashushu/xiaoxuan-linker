@@ -1,7 +1,8 @@
 .abiversion 2
 .extern foo
-.extern bar
+
 .globl _start
+.globl bar
 
 bar:
     li 3, 42

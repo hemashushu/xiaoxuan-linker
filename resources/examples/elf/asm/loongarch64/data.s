@@ -3,6 +3,13 @@
 
 .globl _start
 
+.globl foo
+.globl bar
+.globl a
+.globl b
+.globl x
+.globl y
+
 .section .rodata
     .align 3
 foo: .dword 11

@@ -530,8 +530,56 @@ pub enum RelocationType {
     /// A 64-bit absolute relocation on LoongArch.
     R_LARCH_64,
 
+    /// A 26-bit PC-relative relocation on LoongArch.
+    R_LARCH_B26,
+
     /// A 36-bit PC-relative function-call relocation on LoongArch.
     R_LARCH_CALL36,
+
+    /// A 16-bit high-part address relocation on PowerPC64.
+    R_PPC64_ADDR16_HI,
+
+    /// A 16-bit low-part address relocation on PowerPC64.
+    R_PPC64_ADDR16_LO,
+
+    /// The higher 16 bits of an address on PowerPC64.
+    R_PPC64_ADDR16_HIGHER,
+
+    /// The adjusted higher 16 bits of an address on PowerPC64.
+    R_PPC64_ADDR16_HIGHERA,
+
+    /// The highest 16 bits of an address on PowerPC64.
+    R_PPC64_ADDR16_HIGHEST,
+
+    /// The adjusted highest 16 bits of an address on PowerPC64.
+    R_PPC64_ADDR16_HIGHESTA,
+
+    /// A 64-bit absolute address relocation on PowerPC64.
+    R_PPC64_ADDR64,
+
+    /// A 24-bit PC-relative branch relocation on PowerPC64.
+    R_PPC64_REL24,
+
+    /// A 16-bit PC-relative high-adjusted relocation on PowerPC64.
+    R_PPC64_REL16_HA,
+
+    /// A 16-bit PC-relative low-part relocation on PowerPC64.
+    R_PPC64_REL16_LO,
+
+    /// A 16-bit high-adjusted TOC-relative relocation on PowerPC64.
+    R_PPC64_TOC16_HA,
+
+    /// A 16-bit low-part TOC-relative relocation on PowerPC64.
+    R_PPC64_TOC16_LO,
+
+    /// A 32-bit PC-relative relocation whose value is divided by two on S390x.
+    R_390_PC32DBL,
+
+    /// A 32-bit PC-relative PLT relocation whose value is divided by two on S390x.
+    R_390_PLT32DBL,
+
+    /// A 64-bit absolute address relocation on S390x.
+    R_390_64,
 }
 
 #[derive(Debug, PartialEq)]

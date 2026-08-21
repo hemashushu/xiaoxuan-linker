@@ -2,10 +2,10 @@
 // - Exit with status code 53.
 
 .extern foo
-.extern bar
 
 .section .text
 .global _start
+.global bar
 
 // Override the weak symbol `bar` with a strong symbol.
 //

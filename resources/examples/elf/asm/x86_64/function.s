@@ -5,6 +5,8 @@
 .intel_syntax noprefix
 
 .global _start
+.global print_hello
+.global print_world
 
 .section .rodata
     hello: .ascii "Hello"       # read-only global variable with a string value

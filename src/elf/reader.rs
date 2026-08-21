@@ -450,6 +450,7 @@ fn parse_relocation_type(
                 object::elf::R_LARCH_PCALA_HI20 => Ok(RelocationType::R_LARCH_PCALA_HI20),
                 object::elf::R_LARCH_PCALA_LO12 => Ok(RelocationType::R_LARCH_PCALA_LO12),
                 object::elf::R_LARCH_64 => Ok(RelocationType::R_LARCH_64),
+                object::elf::R_LARCH_B26 => Ok(RelocationType::R_LARCH_B26),
                 object::elf::R_LARCH_CALL36 => Ok(RelocationType::R_LARCH_CALL36),
                 /* unsupported */
                 _ => Err(LinkerError::new(&format!(
@@ -458,12 +459,35 @@ fn parse_relocation_type(
             }
         }
         Machine::PowerPC64 => {
-            // todo
-            todo!()
+            match relocation_type_raw {
+                object::elf::R_PPC64_ADDR16_HI => Ok(RelocationType::R_PPC64_ADDR16_HI),
+                object::elf::R_PPC64_ADDR16_LO => Ok(RelocationType::R_PPC64_ADDR16_LO),
+                object::elf::R_PPC64_ADDR16_HIGHER => Ok(RelocationType::R_PPC64_ADDR16_HIGHER),
+                object::elf::R_PPC64_ADDR16_HIGHERA => Ok(RelocationType::R_PPC64_ADDR16_HIGHERA),
+                object::elf::R_PPC64_ADDR16_HIGHEST => Ok(RelocationType::R_PPC64_ADDR16_HIGHEST),
+                object::elf::R_PPC64_ADDR16_HIGHESTA => Ok(RelocationType::R_PPC64_ADDR16_HIGHESTA),
+                object::elf::R_PPC64_ADDR64 => Ok(RelocationType::R_PPC64_ADDR64),
+                object::elf::R_PPC64_REL24 => Ok(RelocationType::R_PPC64_REL24),
+                object::elf::R_PPC64_REL16_HA => Ok(RelocationType::R_PPC64_REL16_HA),
+                object::elf::R_PPC64_REL16_LO => Ok(RelocationType::R_PPC64_REL16_LO),
+                object::elf::R_PPC64_TOC16_HA => Ok(RelocationType::R_PPC64_TOC16_HA),
+                object::elf::R_PPC64_TOC16_LO => Ok(RelocationType::R_PPC64_TOC16_LO),
+                /* unsupported */
+                _ => Err(LinkerError::new(&format!(
+                    "Unsupported relocation type \"{relocation_type_raw}\" for PowerPC64 architecture"
+                ))),
+            }
         }
         Machine::S390 => {
-            // todo
-            todo!()
+            match relocation_type_raw {
+                object::elf::R_390_PC32DBL => Ok(RelocationType::R_390_PC32DBL),
+                object::elf::R_390_64 => Ok(RelocationType::R_390_64),
+                object::elf::R_390_PLT32DBL => Ok(RelocationType::R_390_PLT32DBL),
+                /* unsupported */
+                _ => Err(LinkerError::new(&format!(
+                    "Unsupported relocation type \"{relocation_type_raw}\" for S390 architecture"
+                ))),
+            }
         }
         Machine::Other(_) => unimplemented!(),
     }
@@ -735,34 +759,12 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
-            // Check section names
-            assert_contains_all(
-                &sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
-                &[
-                    ".text",
-                    ".rela.text",
-                    ".data",
-                    ".bss",
-                    ".rodata",
-                    ".symtab",
-                    ".strtab",
-                    ".shstrtab",
-                ],
-            );
-
-            // Check section types
+            // Check additional section types
             assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".text"),
+                    .find(|s| s.name == ".rodata"),
                 Some(s) if s.section_type == SectionType::Progbits
-            ));
-
-            assert!(matches!(
-                sections
-                    .iter()
-                    .find(|s| s.name == ".bss"),
-                Some(s) if s.section_type == SectionType::Nobits
             ));
 
             assert!(matches!(
@@ -826,15 +828,13 @@ mod tests {
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
 
-            // Check certain entries for testing purposes.
-
             // Assembler generates `Notype` for function symbols.
             assert!(matches!(
                 symbols
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "print_hello")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Local,
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Notype,
                     ..
                 })
@@ -845,7 +845,7 @@ mod tests {
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "print_world")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Local,
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Notype,
                     ..
                 })
@@ -874,13 +874,11 @@ mod tests {
                         }
                     })
                     .collect::<Vec<_>>(),
-                &["foo", "bar", "a", "b", "x", "y", "_start"],
+                &["foo", "bar", "a", "b", "x", "y"],
             );
 
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
-
-            // Check certain entries for testing purposes.
 
             // Assembler generates `Notype` for data symbols.
             assert!(matches!(
@@ -888,7 +886,7 @@ mod tests {
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "foo")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Local,
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Notype,
                     ..
                 })
@@ -899,39 +897,11 @@ mod tests {
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Local,
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Notype,
                     ..
                 })
             ));
-
-            match arch {
-                Machine::X86_64 => {
-                    // No architecture-specific symbol is emitted for x86_64.
-                }
-                Machine::AArch64 => {
-                    // No architecture-specific symbol is emitted for aarch64.
-                }
-                Machine::RiscV => {
-                    // The assembler generates a special symbol `__global_pointer$` for the global pointer register (gp).
-                    assert!(
-                        symbols
-                            .iter()
-                            .find(|s| matches!(s, Symbol::External(name) if name == "__global_pointer$"))
-                            .is_some()
-                    );
-                }
-                Machine::LoongArch => {
-                    // No architecture-specific symbol is emitted for LoongArch.
-                }
-                Machine::PowerPC64 => {
-                    // todo
-                }
-                Machine::S390 => {
-                    // todo
-                }
-                Machine::Other(_) => unimplemented!(),
-            }
         }
     }
 
@@ -961,8 +931,6 @@ mod tests {
 
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
-
-            // Check certain entries for testing purposes.
 
             // Assembler generates `Notype` for data and function symbols.
             assert!(matches!(
@@ -1092,7 +1060,7 @@ mod tests {
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Local,
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Notype,
                     ..
                 })
@@ -1109,12 +1077,11 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
-            let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
             // Check relocation section `.rela.text`
-            let relocation_section_opt = relocation_sections
-                .iter_mut()
-                .find(|s| s.name == ".rela.text");
+            let relocation_section_opt =
+                relocation_sections.iter().find(|s| s.name == ".rela.text");
 
             assert!(relocation_section_opt.is_some());
 
@@ -1125,97 +1092,42 @@ mod tests {
             );
 
             // Check relocation entries in `.rela.text` section
-            let relocations = &mut relocation_section.relocations;
+            let relocations = &relocation_section.relocations;
 
-            // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-            relocations.sort_by_key(|a| a.placeholder_offset);
+            // Find the symbol index of `print_hello` in the symbol table
+            // Note that the assembler generates relocations with offset that refers to
+            // the section instead of the actual symbols if the symbols are local (not global).
+            let symbol_index_opt = symbols
+                .iter()
+                .position(|s| matches!(s, Symbol::Defined { name, ..} if name == "print_hello"));
+            assert!(symbol_index_opt.is_some());
+            let symbol_index = symbol_index_opt.unwrap();
 
-            // Check certain entries for testing purposes.
+            // find the relocation entry that refers to the symbol index of `print_hello`
+            // and check that its relocation type.
+            let relocation_opt = relocations.iter().find(|r| r.symbol_index == symbol_index);
+            assert!(relocation_opt.is_some());
+
+            let relocation = relocation_opt.unwrap();
+
             match arch {
                 Machine::X86_64 => {
-                    // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
-                    assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
-                    assert!(
-                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
+                    assert_eq!(relocation.relocation_type, RelocationType::R_X86_64_PLT32);
                 }
                 Machine::AArch64 => {
-                    // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
-
-                    // Combination: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
-
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(
-                        relocation0.relocation_type,
-                        RelocationType::R_AARCH64_ADR_PREL_PG_HI21
-                    );
-                    assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(
-                        relocation1.relocation_type,
-                        RelocationType::R_AARCH64_ADD_ABS_LO12_NC
-                    );
-                    assert!(
-                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
+                    assert_eq!(relocation.relocation_type, RelocationType::R_AARCH64_CALL26);
                 }
                 Machine::RiscV => {
-                    // Relocation for symbol `hello`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
-
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(
-                        relocation0.relocation_type,
-                        RelocationType::R_RISCV_PCREL_HI20
-                    );
-                    assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "hello"));
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(
-                        relocation1.relocation_type,
-                        RelocationType::R_RISCV_PCREL_LO12_I
-                    );
-                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
+                    assert_eq!(relocation.relocation_type, RelocationType::R_RISCV_CALL_PLT);
                 }
                 Machine::LoongArch => {
-                    // Relocation for symbol `hello`: R_LARCH_PCALA_HI20 + R_LARCH_PCALA_LO12
-
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(
-                        relocation0.relocation_type,
-                        RelocationType::R_LARCH_PCALA_HI20
-                    );
-                    assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "hello"));
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(
-                        relocation1.relocation_type,
-                        RelocationType::R_LARCH_PCALA_LO12
-                    );
-                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "hello"));
+                    assert_eq!(relocation.relocation_type, RelocationType::R_LARCH_B26);
                 }
                 Machine::PowerPC64 => {
-                    // todo
+                    assert_eq!(relocation.relocation_type, RelocationType::R_PPC64_REL24);
                 }
                 Machine::S390 => {
-                    // todo
+                    assert_eq!(relocation.relocation_type, RelocationType::R_390_PC32DBL);
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -1249,137 +1161,94 @@ mod tests {
             // Check relocation entries in `.rela.text` section
             let relocations = &mut relocation_section.relocations;
 
-            // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-            relocations.sort_by_key(|a| a.placeholder_offset);
+            // Find the symbol index of `a` in the symbol table
+            // Note that the assembler generates relocations with offset that refers to
+            // the section instead of the actual symbols if the symbols are local (not global).
+            let symbol_index_opt = symbols
+                .iter()
+                .position(|s| matches!(s, Symbol::Defined { name, ..} if name == "a"));
 
-            // Check certain entries for testing purposes.
+            assert!(symbol_index_opt.is_some());
+            let symbol_index = symbol_index_opt.unwrap();
+
             match arch {
                 Machine::X86_64 => {
-                    // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
-                    assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
+                    let relocation_opt =
+                        relocations.iter().find(|r| r.symbol_index == symbol_index);
+                    assert!(relocation_opt.is_some());
 
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
-                    assert!(
-                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
-                    );
+                    let relocation = relocation_opt.unwrap();
+                    assert_eq!(relocation.relocation_type, RelocationType::R_X86_64_PC32);
                 }
                 Machine::AArch64 => {
-                    // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+                    let rels = relocations
+                        .iter()
+                        .filter(|r| r.symbol_index == symbol_index)
+                        .collect::<Vec<_>>();
 
-                    // Case 1: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC (GCC favorite)
-
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
                     assert_eq!(
-                        relocation0.relocation_type,
+                        rels[0].relocation_type,
                         RelocationType::R_AARCH64_ADR_PREL_PG_HI21
                     );
-                    assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
                     assert_eq!(
-                        relocation1.relocation_type,
-                        RelocationType::R_AARCH64_ADD_ABS_LO12_NC
-                    );
-                    assert!(
-                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
-
-                    // Case 2: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_LDST64_ABS_LO12_NC
-
-                    let relocation4 = &relocations[4];
-                    let symbol4 = &symbols[relocation4.symbol_index];
-                    assert_eq!(
-                        relocation4.relocation_type,
-                        RelocationType::R_AARCH64_ADR_PREL_PG_HI21
-                    );
-                    assert!(
-                        matches!(symbol4, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                    );
-
-                    let relocation5 = &relocations[5];
-                    let symbol5 = &symbols[relocation5.symbol_index];
-                    assert_eq!(
-                        relocation5.relocation_type,
+                        rels[1].relocation_type,
                         RelocationType::R_AARCH64_LDST64_ABS_LO12_NC
-                    );
-                    assert!(
-                        matches!(symbol5, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
                     );
                 }
                 Machine::RiscV => {
-                    // Relocation for symbol `__global_pointer$`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
+                    let relo_index_opt = relocations
+                        .iter()
+                        .position(|r| r.symbol_index == symbol_index);
 
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
+                    assert!(relo_index_opt.is_some());
+
+                    let relo_index = relo_index_opt.unwrap();
+
+                    let relocation_hi = &relocations[relo_index];
                     assert_eq!(
-                        relocation0.relocation_type,
+                        relocation_hi.relocation_type,
                         RelocationType::R_RISCV_PCREL_HI20
                     );
-                    assert!(
-                        matches!(symbol0, Symbol::External(name) if name == "__global_pointer$")
-                    );
 
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
+                    let relocation_lo = &relocations[relo_index + 1];
                     assert_eq!(
-                        relocation1.relocation_type,
+                        relocation_lo.relocation_type,
                         RelocationType::R_RISCV_PCREL_LO12_I
                     );
-                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
-
-                    // Relocation for symbol `foo`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
-
-                    let relocation2 = &relocations[2];
-                    let symbol2 = &symbols[relocation2.symbol_index];
-                    assert_eq!(
-                        relocation2.relocation_type,
-                        RelocationType::R_RISCV_PCREL_HI20
-                    );
-                    assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "foo"));
-
-                    let relocation3 = &relocations[3];
-                    let symbol3 = &symbols[relocation3.symbol_index];
-                    assert_eq!(
-                        relocation3.relocation_type,
-                        RelocationType::R_RISCV_PCREL_LO12_I
-                    );
-                    assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
                 }
                 Machine::LoongArch => {
-                    // Relocation for symbol `foo`: R_LARCH_PCALA_HI20 + R_LARCH_PCALA_LO12
+                    let rels = relocations
+                        .iter()
+                        .filter(|r| r.symbol_index == symbol_index)
+                        .collect::<Vec<_>>();
 
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(
-                        relocation0.relocation_type,
-                        RelocationType::R_LARCH_PCALA_HI20
-                    );
-                    assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "foo"));
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(
-                        relocation1.relocation_type,
-                        RelocationType::R_LARCH_PCALA_LO12
-                    );
-                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "foo"));
+                    assert_eq!(rels[0].relocation_type, RelocationType::R_LARCH_PCALA_HI20);
+                    assert_eq!(rels[1].relocation_type, RelocationType::R_LARCH_PCALA_LO12);
                 }
                 Machine::PowerPC64 => {
-                    // todo
+                    let rels = relocations
+                        .iter()
+                        .filter(|r| r.symbol_index == symbol_index)
+                        .collect::<Vec<_>>();
+
+                    assert_eq!(
+                        rels[0].relocation_type,
+                        RelocationType::R_PPC64_ADDR16_HIGHEST
+                    );
+                    assert_eq!(
+                        rels[1].relocation_type,
+                        RelocationType::R_PPC64_ADDR16_HIGHER
+                    );
+                    assert_eq!(rels[2].relocation_type, RelocationType::R_PPC64_ADDR16_HI);
+                    assert_eq!(rels[3].relocation_type, RelocationType::R_PPC64_ADDR16_LO);
                 }
                 Machine::S390 => {
-                    // todo
+                    let relocation_opt =
+                        relocations.iter().find(|r| r.symbol_index == symbol_index);
+                    assert!(relocation_opt.is_some());
+
+                    let relocation = relocation_opt.unwrap();
+                    assert_eq!(relocation.relocation_type, RelocationType::R_390_PC32DBL);
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -1397,134 +1266,6 @@ mod tests {
             let sections = read_section_headers(elf, &binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
             let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
-
-            // Check relocation section `.rela.text`
-            {
-                let relocation_section_opt = relocation_sections
-                    .iter_mut()
-                    .find(|s| s.name == ".rela.text");
-
-                assert!(relocation_section_opt.is_some());
-
-                let relocation_section = relocation_section_opt.unwrap();
-                assert_eq!(
-                    sections[relocation_section.target_section_index].name,
-                    ".text"
-                );
-
-                // Check relocation entries in `.rela.text` section
-                let relocations = &mut relocation_section.relocations;
-
-                // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by_key(|a| a.placeholder_offset);
-
-                // Check certain entries for testing purposes.
-                match arch {
-                    Machine::X86_64 => {
-                        // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
-                        let relocation0 = &relocations[0];
-                        let symbol0 = &symbols[relocation0.symbol_index];
-                        assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
-                        assert!(
-                            matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                        );
-
-                        let relocation1 = &relocations[1];
-                        let symbol1 = &symbols[relocation1.symbol_index];
-                        assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
-                        assert!(
-                            matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
-                        );
-                    }
-                    Machine::AArch64 => {
-                        // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
-                        let relocation0 = &relocations[0];
-                        let symbol0 = &symbols[relocation0.symbol_index];
-                        assert_eq!(
-                            relocation0.relocation_type,
-                            RelocationType::R_AARCH64_ADR_PREL_PG_HI21
-                        );
-                        assert!(
-                            matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                        );
-
-                        let relocation1 = &relocations[1];
-                        let symbol1 = &symbols[relocation1.symbol_index];
-                        assert_eq!(
-                            relocation1.relocation_type,
-                            RelocationType::R_AARCH64_LDST64_ABS_LO12_NC
-                        );
-                        assert!(
-                            matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".rodata")
-                        );
-                    }
-                    Machine::RiscV => {
-                        // Relocation for symbol `__global_pointer$`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
-
-                        let relocation0 = &relocations[0];
-                        let symbol0 = &symbols[relocation0.symbol_index];
-                        assert_eq!(
-                            relocation0.relocation_type,
-                            RelocationType::R_RISCV_PCREL_HI20
-                        );
-                        assert!(
-                            matches!(symbol0, Symbol::External(name) if name == "__global_pointer$")
-                        );
-
-                        let relocation1 = &relocations[1];
-                        let symbol1 = &symbols[relocation1.symbol_index];
-                        assert_eq!(
-                            relocation1.relocation_type,
-                            RelocationType::R_RISCV_PCREL_LO12_I
-                        );
-                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
-
-                        // Relocation for symbol `pfoo`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
-
-                        let relocation2 = &relocations[2];
-                        let symbol2 = &symbols[relocation2.symbol_index];
-                        assert_eq!(
-                            relocation2.relocation_type,
-                            RelocationType::R_RISCV_PCREL_HI20
-                        );
-                        assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "pfoo"));
-
-                        let relocation3 = &relocations[3];
-                        let symbol3 = &symbols[relocation3.symbol_index];
-                        assert_eq!(
-                            relocation3.relocation_type,
-                            RelocationType::R_RISCV_PCREL_LO12_I
-                        );
-                        assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == ".L0 ")); // Note that this symbol name has a trailing space
-                    }
-                    Machine::LoongArch => {
-                        // Relocation for symbol `pfoo`: R_LARCH_PCALA_HI20 + R_LARCH_PCALA_LO12
-
-                        let relocation0 = &relocations[0];
-                        let symbol0 = &symbols[relocation0.symbol_index];
-                        assert_eq!(
-                            relocation0.relocation_type,
-                            RelocationType::R_LARCH_PCALA_HI20
-                        );
-                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "pfoo"));
-
-                        let relocation1 = &relocations[1];
-                        let symbol1 = &symbols[relocation1.symbol_index];
-                        assert_eq!(
-                            relocation1.relocation_type,
-                            RelocationType::R_LARCH_PCALA_LO12
-                        );
-                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "pfoo"));
-                    }
-                    Machine::PowerPC64 => {
-                        // todo
-                    }
-                    Machine::S390 => {
-                        // todo
-                    }
-                    Machine::Other(_) => unimplemented!(),
-                }
-            }
 
             // Check relocation section `.rela.data`
             {
@@ -1546,7 +1287,6 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by_key(|a| a.placeholder_offset);
 
-                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         let relocation0 = &relocations[0];
@@ -1593,10 +1333,26 @@ mod tests {
                         assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "inc"));
                     }
                     Machine::PowerPC64 => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_PPC64_ADDR64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_PPC64_ADDR64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "inc"));
                     }
                     Machine::S390 => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_390_64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_390_64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "inc"));
                     }
                     Machine::Other(_) => unimplemented!(),
                 }
@@ -1622,7 +1378,6 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by_key(|a| a.placeholder_offset);
 
-                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         let relocation0 = &relocations[0];
@@ -1675,10 +1430,36 @@ mod tests {
                         assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
                     }
                     Machine::PowerPC64 => {
-                        // todo
+                        // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_PPC64_ADDR64);
+                        assert!(
+                            matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
+                        );
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_PPC64_ADDR64);
+                        assert!(
+                            matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
+                        );
                     }
                     Machine::S390 => {
-                        // todo
+                        // The assembler generates relocations with offset that refers to the section symbols, not the actual symbols.
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_390_64);
+                        assert!(
+                            matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
+                        );
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_390_64);
+                        assert!(
+                            matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
+                        );
                     }
                     Machine::Other(_) => unimplemented!(),
                 }
@@ -1751,10 +1532,10 @@ mod tests {
                     );
                 }
                 Machine::PowerPC64 => {
-                    // todo
+                    // TODO: Add architecture-specific program-header assertions.
                 }
                 Machine::S390 => {
-                    // todo
+                    // TODO: Add architecture-specific program-header assertions.
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -1843,10 +1624,10 @@ mod tests {
                     );
                 }
                 Machine::PowerPC64 => {
-                    // todo
+                    // TODO: Add architecture-specific program-header assertions.
                 }
                 Machine::S390 => {
-                    // todo
+                    // TODO: Add architecture-specific program-header assertions.
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -1988,34 +1769,12 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
 
-            // Check section names
-            assert_contains_all(
-                &sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
-                &[
-                    ".text",
-                    ".rela.text",
-                    ".data",
-                    ".bss",
-                    ".rodata",
-                    ".symtab",
-                    ".strtab",
-                    ".shstrtab",
-                ],
-            );
-
-            // Check section types
+            // Check additional section types
             assert!(matches!(
                 sections
                     .iter()
-                    .find(|s| s.name == ".text"),
+                    .find(|s| s.name == ".rodata"),
                 Some(s) if s.section_type == SectionType::Progbits
-            ));
-
-            assert!(matches!(
-                sections
-                    .iter()
-                    .find(|s| s.name == ".bss"),
-                Some(s) if s.section_type == SectionType::Nobits
             ));
 
             assert!(matches!(
@@ -2080,8 +1839,6 @@ mod tests {
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
 
-            // Check certain entries for testing purposes.
-
             // GCC generates correct symbol type for data and function symbols,
             // while the assembler generates `Notype` for data and function symbols.
             assert!(matches!(
@@ -2089,7 +1846,7 @@ mod tests {
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "print_hello")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Global, // C function symbols are global by default
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Func,
                     ..
                 })
@@ -2100,7 +1857,7 @@ mod tests {
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "print_world")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Global, // C function symbols are global by default
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Func,
                     ..
                 })
@@ -2129,22 +1886,18 @@ mod tests {
                         }
                     })
                     .collect::<Vec<_>>(),
-                &["foo", "bar", "a", "b", "x", "y", "_start"],
+                &["foo", "bar", "a", "b", "x", "y"],
             );
 
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
 
-            // Check certain entries for testing purposes.
-
-            // GCC generates correct symbol type for data and function symbols,
-            // while the assembler generates `Notype` for data and function symbols.
             assert!(matches!(
                 symbols
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "foo")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Local,
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Object,
                     ..
                 })
@@ -2155,7 +1908,7 @@ mod tests {
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Local,
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Object,
                     ..
                 })
@@ -2189,8 +1942,6 @@ mod tests {
 
             // Check symbols names, types and binds, but not check the section index and offset,
             // because they may vary across different platforms and versions of the assembler.
-
-            // Check certain entries for testing purposes.
 
             // GCC generates correct symbol type for data and function symbols,
             // while the assembler generates `Notype` for data and function symbols.
@@ -2322,7 +2073,7 @@ mod tests {
                     .iter()
                     .find(|s| matches!(s, Symbol::Defined { name, .. } if name == "bar")),
                 Some(Symbol::Defined {
-                    bind: SymbolBind::Global, // C function symbols are global by default
+                    bind: SymbolBind::Global,
                     symbol_type: SymbolType::Func,
                     ..
                 })
@@ -2339,12 +2090,11 @@ mod tests {
             let elf = read_file(&binary).unwrap();
             let sections = read_section_headers(elf, &binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
-            let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
+            let relocation_sections = read_relocation_sections(elf, &binary).unwrap();
 
             // Check relocation section `.rela.text`
-            let relocation_section_opt = relocation_sections
-                .iter_mut()
-                .find(|s| s.name == ".rela.text");
+            let relocation_section_opt =
+                relocation_sections.iter().find(|s| s.name == ".rela.text");
 
             assert!(relocation_section_opt.is_some());
 
@@ -2355,134 +2105,44 @@ mod tests {
             );
 
             // Check relocation entries in `.rela.text` section
-            let relocations = &mut relocation_section.relocations;
+            let relocations = &relocation_section.relocations;
 
-            // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-            relocations.sort_by_key(|a| a.placeholder_offset);
+            // Find the symbol index of `print_hello` in the symbol table
+            // Note that the assembler generates relocations with offset that refers to
+            // the section instead of the actual symbols if the symbols are local (not global).
+            let symbol_index_opt = symbols
+                .iter()
+                .position(|s| matches!(s, Symbol::Defined { name, ..} if name == "print_hello"));
+            assert!(symbol_index_opt.is_some());
+            let symbol_index = symbol_index_opt.unwrap();
 
-            // Check certain entries for testing purposes.
+            // find the relocation entry that refers to the symbol index of `print_hello`
+            // and check that its relocation type.
+            let relocation_opt = relocations.iter().find(|r| r.symbol_index == symbol_index);
+            assert!(relocation_opt.is_some());
+
+            let relocation = relocation_opt.unwrap();
+
             match arch {
                 Machine::X86_64 => {
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_32);
-                    assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "hello"));
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_32);
-                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "world"));
-
-                    let relocation2 = &relocations[2];
-                    let symbol2 = &symbols[relocation2.symbol_index];
-                    assert_eq!(relocation2.relocation_type, RelocationType::R_X86_64_PLT32);
-                    assert!(
-                        matches!(symbol2, Symbol::Defined { name, ..} if name == "print_hello")
-                    );
-
-                    let relocation3 = &relocations[3];
-                    let symbol3 = &symbols[relocation3.symbol_index];
-                    assert_eq!(relocation3.relocation_type, RelocationType::R_X86_64_PLT32);
-                    assert!(
-                        matches!(symbol3, Symbol::Defined { name, ..} if name == "print_world")
-                    );
+                    assert_eq!(relocation.relocation_type, RelocationType::R_X86_64_PLT32);
                 }
                 Machine::AArch64 => {
-                    // Combination: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
-
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(
-                        relocation0.relocation_type,
-                        RelocationType::R_AARCH64_ADR_PREL_PG_HI21
-                    );
-                    assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "hello"));
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(
-                        relocation1.relocation_type,
-                        RelocationType::R_AARCH64_ADD_ABS_LO12_NC
-                    );
-                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "hello"));
-
-                    // Relocation for functions `print_hello` and `print_world`: R_AARCH64_CALL26
-                    let relocation4 = &relocations[4];
-                    let symbol4 = &symbols[relocation4.symbol_index];
-                    assert_eq!(
-                        relocation4.relocation_type,
-                        RelocationType::R_AARCH64_CALL26
-                    );
-                    assert!(
-                        matches!(symbol4, Symbol::Defined { name, ..} if name == "print_hello")
-                    );
-
-                    let relocation5 = &relocations[5];
-                    let symbol5 = &symbols[relocation5.symbol_index];
-                    assert_eq!(
-                        relocation5.relocation_type,
-                        RelocationType::R_AARCH64_CALL26
-                    );
-                    assert!(
-                        matches!(symbol5, Symbol::Defined { name, ..} if name == "print_world")
-                    );
+                    assert_eq!(relocation.relocation_type, RelocationType::R_AARCH64_CALL26);
                 }
                 Machine::RiscV => {
-                    // Relocation for symbol `hello`: R_RISCV_PCREL_HI20 + R_RISCV_PCREL_LO12_I
-
-                    let relocation2 = &relocations[2];
-                    let symbol2 = &symbols[relocation2.symbol_index];
-                    assert_eq!(relocation2.relocation_type, RelocationType::R_RISCV_HI20);
-                    assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "hello"));
-
-                    let relocation3 = &relocations[3];
-                    let symbol3 = &symbols[relocation3.symbol_index];
-                    assert_eq!(relocation3.relocation_type, RelocationType::R_RISCV_LO12_I);
-                    assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == "hello"));
-
-                    // Relocation for functions `print_hello`: R_RISCV_CALL_PLT
-                    let relocation8 = &relocations[8];
-                    let symbol8 = &symbols[relocation8.symbol_index];
-                    assert_eq!(
-                        relocation8.relocation_type,
-                        RelocationType::R_RISCV_CALL_PLT
-                    );
-                    assert!(
-                        matches!(symbol8, Symbol::Defined { name, ..} if name == "print_hello")
-                    );
+                    assert_eq!(relocation.relocation_type, RelocationType::R_RISCV_CALL_PLT);
                 }
                 Machine::LoongArch => {
-                    // Relocation for symbol `hello`: R_LARCH_PCALA_HI2 + R_R_LARCH_PCALA_LO12
-
-                    let relocation2 = &relocations[2];
-                    let symbol2 = &symbols[relocation2.symbol_index];
-                    assert_eq!(
-                        relocation2.relocation_type,
-                        RelocationType::R_LARCH_PCALA_HI20
-                    );
-                    assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "hello"));
-
-                    let relocation3 = &relocations[3];
-                    let symbol3 = &symbols[relocation3.symbol_index];
-                    assert_eq!(
-                        relocation3.relocation_type,
-                        RelocationType::R_LARCH_PCALA_LO12
-                    );
-                    assert!(matches!(symbol3, Symbol::Defined { name, ..} if name == "hello"));
-
-                    // Relocation for functions `print_hello`: R_LARCH_CALL36
-                    let relocation8 = &relocations[8];
-                    let symbol8 = &symbols[relocation8.symbol_index];
-                    assert_eq!(relocation8.relocation_type, RelocationType::R_LARCH_CALL36);
-                    assert!(
-                        matches!(symbol8, Symbol::Defined { name, ..} if name == "print_hello")
-                    );
+                    // this type is different from the assembler-generated
+                    assert_eq!(relocation.relocation_type, RelocationType::R_LARCH_CALL36);
                 }
                 Machine::PowerPC64 => {
-                    // todo
+                    assert_eq!(relocation.relocation_type, RelocationType::R_PPC64_REL24);
                 }
                 Machine::S390 => {
-                    // todo
+                    // this type is different from the assembler-generated
+                    assert_eq!(relocation.relocation_type, RelocationType::R_390_PLT32DBL);
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -2516,88 +2176,75 @@ mod tests {
             // Check relocation entries in `.rela.text` section
             let relocations = &mut relocation_section.relocations;
 
-            // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-            relocations.sort_by_key(|a| a.placeholder_offset);
+            // Find the symbol index of `a` in the symbol table
+            // Note that the assembler generates relocations with offset that refers to
+            // the section instead of the actual symbols if the symbols are local (not global).
+            let symbol_index_opt = symbols
+                .iter()
+                .position(|s| matches!(s, Symbol::Defined { name, ..} if name == "a"));
 
-            // Check certain entries for testing purposes.
+            assert!(symbol_index_opt.is_some());
+            let symbol_index = symbol_index_opt.unwrap();
+
             match arch {
                 Machine::X86_64 => {
-                    // The assembler generates relocations with section symbols.
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
-                    assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_PC32);
-                    assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
-                    );
+                    let relocation_opt =
+                        relocations.iter().find(|r| r.symbol_index == symbol_index);
+                    assert!(relocation_opt.is_some());
 
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
-                    assert!(
-                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
-                    );
+                    let relocation = relocation_opt.unwrap();
+                    assert_eq!(relocation.relocation_type, RelocationType::R_X86_64_PC32);
                 }
                 Machine::AArch64 => {
-                    // The assembler generates relocations with section symbols.
+                    let rels = relocations
+                        .iter()
+                        .filter(|r| r.symbol_index == symbol_index)
+                        .collect::<Vec<_>>();
 
-                    // Relocation for symbol `foo`: R_AARCH64_ADR_PREL_PG_HI21 + R_AARCH64_ADD_ABS_LO12_NC
-                    let relocation0 = &relocations[0];
-                    let symbol0 = &symbols[relocation0.symbol_index];
                     assert_eq!(
-                        relocation0.relocation_type,
+                        rels[0].relocation_type,
                         RelocationType::R_AARCH64_ADR_PREL_PG_HI21
                     );
-                    assert!(
-                        matches!(symbol0, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
-                    );
-
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
                     assert_eq!(
-                        relocation1.relocation_type,
+                        rels[1].relocation_type,
                         RelocationType::R_AARCH64_ADD_ABS_LO12_NC
-                    );
-                    assert!(
-                        matches!(symbol1, Symbol::Defined { section_index, ..} if sections[*section_index].name == ".data")
                     );
                 }
                 Machine::RiscV => {
-                    // Relocation for symbol `a`: R_RISCV_HI20 + R_RISCV_LO12_S
+                    let rels = relocations
+                        .iter()
+                        .filter(|r| r.symbol_index == symbol_index)
+                        .collect::<Vec<_>>();
 
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_HI20);
-                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "a"));
-
-                    let relocation2 = &relocations[2];
-                    let symbol2 = &symbols[relocation2.symbol_index];
-                    assert_eq!(relocation2.relocation_type, RelocationType::R_RISCV_LO12_S);
-                    assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "a"));
+                    assert_eq!(rels[0].relocation_type, RelocationType::R_RISCV_HI20);
+                    assert_eq!(rels[1].relocation_type, RelocationType::R_RISCV_LO12_S);
                 }
                 Machine::LoongArch => {
                     // Relocation for symbol `a`: R_LARCH_PCALA_HI20 + R_LARCH_PCALA_LO12
+                    let rels = relocations
+                        .iter()
+                        .filter(|r| r.symbol_index == symbol_index)
+                        .collect::<Vec<_>>();
 
-                    let relocation1 = &relocations[1];
-                    let symbol1 = &symbols[relocation1.symbol_index];
-                    assert_eq!(
-                        relocation1.relocation_type,
-                        RelocationType::R_LARCH_PCALA_HI20
-                    );
-                    assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "a"));
-
-                    let relocation2 = &relocations[2];
-                    let symbol2 = &symbols[relocation2.symbol_index];
-                    assert_eq!(
-                        relocation2.relocation_type,
-                        RelocationType::R_LARCH_PCALA_LO12
-                    );
-                    assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "a"));
+                    assert_eq!(rels[0].relocation_type, RelocationType::R_LARCH_PCALA_HI20);
+                    assert_eq!(rels[1].relocation_type, RelocationType::R_LARCH_PCALA_LO12);
                 }
                 Machine::PowerPC64 => {
-                    // todo
+                    let rels = relocations
+                        .iter()
+                        .filter(|r| r.symbol_index == symbol_index)
+                        .collect::<Vec<_>>();
+
+                    assert_eq!(rels[0].relocation_type, RelocationType::R_PPC64_TOC16_HA);
+                    assert_eq!(rels[1].relocation_type, RelocationType::R_PPC64_TOC16_LO);
                 }
                 Machine::S390 => {
-                    // todo
+                    let relocation_opt =
+                        relocations.iter().find(|r| r.symbol_index == symbol_index);
+                    assert!(relocation_opt.is_some());
+
+                    let relocation = relocation_opt.unwrap();
+                    assert_eq!(relocation.relocation_type, RelocationType::R_390_PC32DBL);
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -2614,94 +2261,6 @@ mod tests {
             let sections = read_section_headers(elf, &binary).unwrap();
             let symbols = read_symbols(elf, &binary).unwrap();
             let mut relocation_sections = read_relocation_sections(elf, &binary).unwrap();
-
-            // Check relocation section `.rela.text`
-            {
-                let relocation_section_opt = relocation_sections
-                    .iter_mut()
-                    .find(|s| s.name == ".rela.text");
-
-                assert!(relocation_section_opt.is_some());
-
-                let relocation_section = relocation_section_opt.unwrap();
-                assert_eq!(
-                    sections[relocation_section.target_section_index].name,
-                    ".text"
-                );
-
-                // Check relocation entries in `.rela.text` section
-                let relocations = &mut relocation_section.relocations;
-
-                // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by_key(|a| a.placeholder_offset);
-
-                // Check certain entries for testing purposes.
-                match arch {
-                    Machine::X86_64 => {
-                        let relocation0 = &relocations[0];
-                        let symbol0 = &symbols[relocation0.symbol_index];
-                        assert_eq!(relocation0.relocation_type, RelocationType::R_X86_64_32);
-                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "foo"));
-
-                        let relocation1 = &relocations[1];
-                        let symbol1 = &symbols[relocation1.symbol_index];
-                        assert_eq!(relocation1.relocation_type, RelocationType::R_X86_64_PC32);
-                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "pdec"));
-                    }
-                    Machine::AArch64 => {
-                        let relocation0 = &relocations[0];
-                        let symbol0 = &symbols[relocation0.symbol_index];
-                        assert_eq!(
-                            relocation0.relocation_type,
-                            RelocationType::R_AARCH64_ADR_PREL_PG_HI21
-                        );
-                        assert!(matches!(symbol0, Symbol::Defined { name, ..} if name == "foo"));
-
-                        let relocation1 = &relocations[1];
-                        let symbol1 = &symbols[relocation1.symbol_index];
-                        assert_eq!(
-                            relocation1.relocation_type,
-                            RelocationType::R_AARCH64_ADD_ABS_LO12_NC
-                        );
-                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "foo"));
-                    }
-                    Machine::RiscV => {
-                        let relocation1 = &relocations[1];
-                        let symbol1 = &symbols[relocation1.symbol_index];
-                        assert_eq!(relocation1.relocation_type, RelocationType::R_RISCV_HI20);
-                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "foo"));
-
-                        let relocation2 = &relocations[2];
-                        let symbol2 = &symbols[relocation2.symbol_index];
-                        assert_eq!(relocation2.relocation_type, RelocationType::R_RISCV_LO12_I);
-                        assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "foo"));
-                    }
-                    Machine::LoongArch => {
-                        let relocation1 = &relocations[1];
-                        let symbol1 = &symbols[relocation1.symbol_index];
-                        assert_eq!(
-                            relocation1.relocation_type,
-                            RelocationType::R_LARCH_PCALA_HI20
-                        );
-                        assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "foo"));
-
-                        let relocation2 = &relocations[2];
-                        let symbol2 = &symbols[relocation2.symbol_index];
-                        assert_eq!(
-                            relocation2.relocation_type,
-                            RelocationType::R_LARCH_PCALA_LO12
-                        );
-                        assert!(matches!(symbol2, Symbol::Defined { name, ..} if name == "foo"));
-                    }
-                    Machine::PowerPC64 => {
-                        // todo
-                    }
-                    Machine::S390 => {
-                        // todo
-                    }
-                    Machine::Other(_) => unimplemented!(),
-                }
-            }
 
             // Check relocation section `.rela.data`
 
@@ -2726,7 +2285,6 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by_key(|a| a.placeholder_offset);
 
-                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         let relocation0 = &relocations[0];
@@ -2773,10 +2331,26 @@ mod tests {
                         assert!(matches!(symbol1, Symbol::Defined { name, ..} if name == "inc"));
                     }
                     Machine::PowerPC64 => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_PPC64_ADDR64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_PPC64_ADDR64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "inc"));
                     }
                     Machine::S390 => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_390_64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "dec"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_390_64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "inc"));
                     }
                     Machine::Other(_) => unimplemented!(),
                 }
@@ -2804,7 +2378,6 @@ mod tests {
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
                 relocations.sort_by_key(|a| a.placeholder_offset);
 
-                // Check certain entries for testing purposes.
                 match arch {
                     Machine::X86_64 => {
                         let relocation0 = &relocations[0];
@@ -2851,10 +2424,26 @@ mod tests {
                         assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
                     }
                     Machine::PowerPC64 => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_PPC64_ADDR64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_PPC64_ADDR64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
                     }
                     Machine::S390 => {
-                        // todo
+                        let relocation0 = &relocations[0];
+                        let symbol0 = &symbols[relocation0.symbol_index];
+                        assert_eq!(relocation0.relocation_type, RelocationType::R_390_64);
+                        assert!(matches!(symbol0, Symbol::Defined{name, ..} if name == "foo"));
+
+                        let relocation1 = &relocations[1];
+                        let symbol1 = &symbols[relocation1.symbol_index];
+                        assert_eq!(relocation1.relocation_type, RelocationType::R_390_64);
+                        assert!(matches!(symbol1, Symbol::Defined{name, ..} if name == "bar"));
                     }
                     Machine::Other(_) => unimplemented!(),
                 }

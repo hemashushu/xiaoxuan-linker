@@ -4,6 +4,8 @@
 
 .option norvc                   # disable compressed instructions for clarity
 .global _start
+.global print_hello
+.global print_world
 
 .section .rodata
     hello: .string "Hello"              # read-only global variable with a string value

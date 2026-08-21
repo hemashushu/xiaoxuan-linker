@@ -4,6 +4,8 @@
 
 .abiversion 2
 .globl _start
+.globl print_hello
+.globl print_world
 
 .section .rodata
 hello: .ascii "Hello"

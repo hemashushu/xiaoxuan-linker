@@ -4,9 +4,9 @@
 .intel_syntax noprefix
 
 .extern foo
-.extern bar
 
 .global _start
+.global bar
 
 .section .text
 

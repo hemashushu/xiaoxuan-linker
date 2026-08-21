@@ -4,6 +4,12 @@
 .intel_syntax noprefix
 
 .global _start
+.global foo
+.global bar
+.global a
+.global b
+.global x
+.global y
 
 # data types:
 # - .quad: data quadword (8 bytes)
