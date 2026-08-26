@@ -308,7 +308,7 @@ pub fn write_executable(
     });
 
     // Write read-only data segment header
-    if link_result.has_read_only_data {
+    if link_result.contains_read_only_data {
         let first_section_rodata =
             get_first_not_null_section(modules, &RelocatableSectionType::RoData).unwrap();
         writer.write_program_header(&ProgramHeader {
@@ -324,7 +324,7 @@ pub fn write_executable(
     }
 
     // Write writable data segment header
-    if link_result.has_writable_data {
+    if link_result.contains_writable_data {
         let first_writable_section =
             get_first_not_null_section(modules, &RelocatableSectionType::TData)
                 .or_else(|| get_first_not_null_section(modules, &RelocatableSectionType::TBss))
@@ -335,14 +335,14 @@ pub fn write_executable(
         let segment_writable_data_offset = first_writable_section.resolved_offset;
         let segment_writable_data_virtual_address = first_writable_section.resolved_virtual_address;
 
-        let segment_writable_data_file_size = if link_result.has_tls {
+        let segment_writable_data_file_size = if link_result.contains_tls_data {
             align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
                 + link_result.merged_section_size.data
         } else {
             link_result.merged_section_size.data
         };
 
-        let segment_writable_data_memory_size = if link_result.has_tls {
+        let segment_writable_data_memory_size = if link_result.contains_tls_data {
             align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
                 + align_up(link_result.merged_section_size.tbss, DATA_ALIGN)
                 + align_up(link_result.merged_section_size.data, DATA_ALIGN)
@@ -365,7 +365,7 @@ pub fn write_executable(
     }
 
     // Write TLS segment header if there is TLS data
-    if link_result.has_tls {
+    if link_result.contains_tls_data {
         let segment_tls_file_size = link_result.merged_section_size.tdata;
         let segment_tls_memory_size = align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
             + link_result.merged_section_size.tbss;

@@ -11,9 +11,12 @@ use object::{
 };
 
 use crate::{
-    elf::module::{
-        DataEncoding, FileClass, FileType, Machine, OSABI, Relocation, RelocationType, SectionType,
-        SegmentFlag, SegmentType, Symbol, SymbolBind, SymbolType,
+    elf::{
+        module::{
+            DataEncoding, FileClass, FileType, Machine, OSABI, RelocatableModule, Relocation,
+            RelocationType, SectionType, SegmentFlag, SegmentType, Symbol, SymbolBind, SymbolType,
+        },
+        relocatable,
     },
     error::LinkerError,
 };
@@ -544,6 +547,66 @@ pub fn read_program_headers(
     Ok(program_headers)
 }
 
+pub fn read_relocatable_module<'a>(binary: &'a [u8]) -> Result<RelocatableModule<'a>, LinkerError> {
+    let elf = read_file(binary)?;
+    let file_header = read_file_header(elf)?;
+
+    if file_header.file_type != FileType::Relocatable {
+        return Err(LinkerError::new(
+            "Unsupported ELF type, expected relocatable (ET_REL) file",
+        ));
+    }
+
+    // Check if the machine architecture, endianness, and file class are supported by the linker.
+    if file_header.file_class != FileClass::Elf64 {
+        return Err(LinkerError::new(&format!(
+            "Unsupported file class: {:?}, expected 64-bit ELF (ELFCLASS64)",
+            file_header.file_class
+        )));
+    }
+
+    match file_header.machine {
+        Machine::X86_64
+        | Machine::AArch64
+        | Machine::RiscV
+        | Machine::LoongArch
+        | Machine::PowerPC64 => {
+            if file_header.data_encoding != DataEncoding::LittleEndian {
+                return Err(LinkerError::new(&format!(
+                    "Unsupported data encoding: {:?} for machine architecture: {:?}, expected little-endian (ELFDATA2LSB)",
+                    file_header.data_encoding, file_header.machine
+                )));
+            }
+        }
+        Machine::S390 => {
+            if file_header.data_encoding != DataEncoding::BigEndian {
+                return Err(LinkerError::new(&format!(
+                    "Unsupported data encoding: {:?} for machine architecture: {:?}, expected big-endian (ELFDATA2MSB)",
+                    file_header.data_encoding, file_header.machine
+                )));
+            }
+        }
+        _ => {
+            return Err(LinkerError::new(&format!(
+                "Unsupported machine architecture: {:?}",
+                file_header.machine
+            )));
+        }
+    }
+
+    let sections = read_section_headers(elf, binary)?;
+    let relocation_sections = read_relocation_sections(elf, binary)?;
+    let symbols = read_symbols(elf, binary)?;
+
+    let relocatable_module = RelocatableModule {
+        sections,
+        symbols,
+        relocation_sections,
+    };
+
+    Ok(relocatable_module)
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -555,8 +618,8 @@ mod tests {
             SegmentFlag, SegmentType, Symbol, SymbolBind, SymbolType,
         },
         reader::{
-            read_file, read_file_header, read_program_headers, read_relocation_sections,
-            read_section_headers, read_symbols,
+            read_file, read_file_header, read_program_headers, read_relocatable_module,
+            read_relocation_sections, read_section_headers, read_symbols,
         },
     };
 
@@ -1634,6 +1697,15 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_read_relocatable_module_asm_minimal_o() {
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
+            let relocatable_module_result = read_relocatable_module(&binary);
+            assert!(relocatable_module_result.is_ok());
+        }
+    }
+
     // ===============================================
     // C programs compiled with `gcc` for testing purposes
     // ===============================================
@@ -2615,6 +2687,15 @@ mod tests {
                 }
                 Machine::Other(_) => unimplemented!(),
             }
+        }
+    }
+
+    #[test]
+    fn test_read_relocatable_module_gcc_minimal_o() {
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.o");
+            let relocatable_module_result = read_relocatable_module(&binary);
+            assert!(relocatable_module_result.is_ok());
         }
     }
 }

@@ -11,7 +11,7 @@ use crate::{
         module::{RelocationType, SymbolBind},
         relocatable::{
             RelocatableModule, RelocatableSectionType, RelocatableSymbol,
-            RelocationEntrySectionType, SectionBinary,
+            RelocationTargetSectionType, SectionBinary,
         },
     },
     error::LinkerError,
@@ -53,12 +53,12 @@ pub const SYMTAB_ALIGN: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinkResult {
-    pub has_read_only_data: bool,
+    pub contains_read_only_data: bool,
 
-    pub has_writable_data: bool,
+    pub contains_writable_data: bool,
 
     /// Indicates whether the final executable contains TLS segments.
-    pub has_tls: bool,
+    pub contains_tls_data: bool,
 
     /// The number of program headers in the final executable.
     ///
@@ -109,19 +109,19 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
 
     let mut program_header_count = BASE_PROGRAM_HEADER_COUNT;
 
-    let has_read_only_data = modules.iter().any(|m| m.has_read_only_data());
-    let has_writable_data = modules.iter().any(|m| m.has_writable_data());
-    let has_tls = modules.iter().any(|m| m.has_tls());
+    let contains_read_only_data = modules.iter().any(|m| m.contains_read_only_data());
+    let contains_writable_data = modules.iter().any(|m| m.contains_writable_data());
+    let contains_tls_data = modules.iter().any(|m| m.contains_tls_data());
 
-    if has_read_only_data {
+    if contains_read_only_data {
         program_header_count += 1;
     }
 
-    if has_writable_data {
+    if contains_writable_data {
         program_header_count += 1;
     }
 
-    if has_tls {
+    if contains_tls_data {
         program_header_count += 1;
     }
 
@@ -481,10 +481,10 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
     for patch_item in patch_items {
         let module = &mut modules[patch_item.module_index];
         let relocatable_section_type = match patch_item.patch_section_type {
-            RelocationEntrySectionType::Text => RelocatableSectionType::Text,
-            RelocationEntrySectionType::RoData => RelocatableSectionType::RoData,
-            RelocationEntrySectionType::TData => RelocatableSectionType::TData,
-            RelocationEntrySectionType::Data => RelocatableSectionType::Data,
+            RelocationTargetSectionType::Text => RelocatableSectionType::Text,
+            RelocationTargetSectionType::RoData => RelocatableSectionType::RoData,
+            RelocationTargetSectionType::TData => RelocatableSectionType::TData,
+            RelocationTargetSectionType::Data => RelocatableSectionType::Data,
         };
         if let Some(section) = module.sections.get_mut(&relocatable_section_type) {
             let patch_section_data = match section.binary {
@@ -545,9 +545,9 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
     };
 
     let link_result = LinkResult {
-        has_read_only_data,
-        has_writable_data,
-        has_tls,
+        contains_read_only_data,
+        contains_writable_data,
+        contains_tls_data,
         program_header_count,
         entry_point,
         merged_section_size,
@@ -562,7 +562,7 @@ struct PatchItem {
 
     /// The patch target section type, which is the section
     /// that contains the placeholder to be patched.
-    patch_section_type: RelocationEntrySectionType,
+    patch_section_type: RelocationTargetSectionType,
 
     /// The offset in the section where the relocation needs to be patched.
     /// Note that this offset is relative to the original section, not the merged section.

@@ -656,3 +656,18 @@ impl From<u32> for SegmentFlag {
         }
     }
 }
+
+/// A module represents essential elements of an object file,
+/// which contains code, data, symbols, and relocation.
+#[derive(Debug, PartialEq)]
+pub struct RelocatableModule<'a> {
+    /// The relevant sections of the module
+    pub sections: Vec<SectionHeader<'a>>,
+
+    /// The symbol table of the module, which contains the symbols defined in the module.
+    pub symbols: Vec<Symbol>,
+
+    /// The relocation entries of the module, which contain the information about
+    /// how to adjust the code and data when linking.
+    pub relocation_sections: Vec<RelocationSection>,
+}
