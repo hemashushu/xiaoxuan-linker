@@ -267,7 +267,6 @@ pub enum SymbolType {
     Func,
     /// A section symbol.
     Section,
-    // File,    // File
     /// Thread-local storage.
     TLS,
     /// A symbol type value not recognized by this linker.
@@ -661,6 +660,10 @@ impl From<u32> for SegmentFlag {
 /// which contains code, data, symbols, and relocation.
 #[derive(Debug, PartialEq)]
 pub struct RelocatableModule<'a> {
+
+    /// The identifier or name of the module, typically derived from the input file name.
+    pub name: String,
+
     /// The relevant sections of the module
     pub sections: Vec<SectionHeader<'a>>,
 

@@ -19,8 +19,8 @@ use object::{
 use crate::{
     elf::{
         linker::{
-            DATA_ALIGN, ELF_HEADER_SIZE, LOAD_ADDR_BASE, LinkResult, PAGE_SIZE, PHDR_SEGMENT_ALIGN,
-            PROGRAM_HEADER_ENTRY_SIZE, SYMTAB_ALIGN, TEXT_ALIGN, TLS_SEGMENT_ALIGN,
+            SECTION_ALIGN_DATA, ELF_HEADER_SIZE, LOAD_ADDR_BASE, LinkResult, SEGMENT_ALIGN_PAGE_SIZE, SEGMENT_ALIGN_PHDR,
+            PROGRAM_HEADER_ENTRY_SIZE, SECTION_ALIGN_SYMTAB, SECTION_ALIGN_TEXT, SEGMENT_ALIGN_TLS,
         },
         relocatable::{
             RelocatableModule, RelocatableSection, RelocatableSectionType, SectionBinary,
@@ -160,7 +160,7 @@ pub fn write_executable(
     // Reserve space for section `.text`
     {
         let actual_section_offset_text =
-            writer.reserve(link_result.merged_section_size.text, PAGE_SIZE);
+            writer.reserve(link_result.merged_section_size.text, SEGMENT_ALIGN_PAGE_SIZE);
 
         let first_section_text =
             get_first_not_null_section(modules, &RelocatableSectionType::Text).unwrap();
@@ -173,7 +173,7 @@ pub fn write_executable(
     // Reserve space for section `.rodata`
     if link_result.merged_section_size.rodata > 0 {
         let actual_section_offset_rodata =
-            writer.reserve(link_result.merged_section_size.rodata, PAGE_SIZE);
+            writer.reserve(link_result.merged_section_size.rodata, SEGMENT_ALIGN_PAGE_SIZE);
         let first_section_rodata =
             get_first_not_null_section(modules, &RelocatableSectionType::RoData).unwrap();
         debug_assert_eq!(
@@ -185,7 +185,7 @@ pub fn write_executable(
     // Reserve space for section `.tdata`
     if link_result.merged_section_size.tdata > 0 {
         let actual_section_offset_tdata =
-            writer.reserve(link_result.merged_section_size.tdata, PAGE_SIZE);
+            writer.reserve(link_result.merged_section_size.tdata, SEGMENT_ALIGN_PAGE_SIZE);
 
         let first_section_tdata =
             get_first_not_null_section(modules, &RelocatableSectionType::TData).unwrap();
@@ -200,9 +200,9 @@ pub fn write_executable(
         // If there is TLS data, the `.data` section must be aligned to `DATA_ALIGN` instead of `PAGE_SIZE`,
         // because it is merged into the writable data segment.
         let section_align_data = if link_result.merged_section_size.tdata > 0 {
-            DATA_ALIGN
+            SECTION_ALIGN_DATA
         } else {
-            PAGE_SIZE
+            SEGMENT_ALIGN_PAGE_SIZE
         };
 
         let actual_section_offset_data =
@@ -265,7 +265,7 @@ pub fn write_executable(
         p_paddr: segment_phdr_virtual_address as u64,
         p_filesz: segment_phdr_size as u64,
         p_memsz: segment_phdr_size as u64,
-        p_align: PHDR_SEGMENT_ALIGN as u64,
+        p_align: SEGMENT_ALIGN_PHDR as u64,
     });
 
     // Common segment type (p_type) includes:
@@ -290,7 +290,7 @@ pub fn write_executable(
         p_paddr: segment_metadata_virtual_address as u64,
         p_filesz: segment_metadata_size as u64,
         p_memsz: segment_metadata_size as u64,
-        p_align: PAGE_SIZE as u64,
+        p_align: SEGMENT_ALIGN_PAGE_SIZE as u64,
     });
 
     // Write code segment header
@@ -304,7 +304,7 @@ pub fn write_executable(
         p_paddr: first_section_text.resolved_virtual_address as u64,
         p_filesz: link_result.merged_section_size.text as u64,
         p_memsz: link_result.merged_section_size.text as u64,
-        p_align: PAGE_SIZE as u64,
+        p_align: SEGMENT_ALIGN_PAGE_SIZE as u64,
     });
 
     // Write read-only data segment header
@@ -319,7 +319,7 @@ pub fn write_executable(
             p_paddr: first_section_rodata.resolved_virtual_address as u64,
             p_filesz: link_result.merged_section_size.rodata as u64,
             p_memsz: link_result.merged_section_size.rodata as u64,
-            p_align: PAGE_SIZE as u64,
+            p_align: SEGMENT_ALIGN_PAGE_SIZE as u64,
         });
     }
 
@@ -336,19 +336,19 @@ pub fn write_executable(
         let segment_writable_data_virtual_address = first_writable_section.resolved_virtual_address;
 
         let segment_writable_data_file_size = if link_result.contains_tls_data {
-            align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
+            align_up(link_result.merged_section_size.tdata, SECTION_ALIGN_DATA)
                 + link_result.merged_section_size.data
         } else {
             link_result.merged_section_size.data
         };
 
         let segment_writable_data_memory_size = if link_result.contains_tls_data {
-            align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
-                + align_up(link_result.merged_section_size.tbss, DATA_ALIGN)
-                + align_up(link_result.merged_section_size.data, DATA_ALIGN)
+            align_up(link_result.merged_section_size.tdata, SECTION_ALIGN_DATA)
+                + align_up(link_result.merged_section_size.tbss, SECTION_ALIGN_DATA)
+                + align_up(link_result.merged_section_size.data, SECTION_ALIGN_DATA)
                 + link_result.merged_section_size.bss
         } else {
-            align_up(link_result.merged_section_size.data, DATA_ALIGN)
+            align_up(link_result.merged_section_size.data, SECTION_ALIGN_DATA)
                 + link_result.merged_section_size.bss
         };
 
@@ -360,14 +360,14 @@ pub fn write_executable(
             p_paddr: segment_writable_data_virtual_address as u64,
             p_filesz: segment_writable_data_file_size as u64,
             p_memsz: segment_writable_data_memory_size as u64,
-            p_align: PAGE_SIZE as u64,
+            p_align: SEGMENT_ALIGN_PAGE_SIZE as u64,
         });
     }
 
     // Write TLS segment header if there is TLS data
     if link_result.contains_tls_data {
         let segment_tls_file_size = link_result.merged_section_size.tdata;
-        let segment_tls_memory_size = align_up(link_result.merged_section_size.tdata, DATA_ALIGN)
+        let segment_tls_memory_size = align_up(link_result.merged_section_size.tdata, SECTION_ALIGN_DATA)
             + link_result.merged_section_size.tbss;
 
         let first_writable_section =
@@ -383,7 +383,7 @@ pub fn write_executable(
             p_paddr: first_writable_section.resolved_virtual_address as u64,
             p_filesz: segment_tls_file_size as u64,
             p_memsz: segment_tls_memory_size as u64,
-            p_align: TLS_SEGMENT_ALIGN as u64,
+            p_align: SEGMENT_ALIGN_TLS as u64,
         });
     }
 
@@ -392,12 +392,12 @@ pub fn write_executable(
     // -------------------------------------------------------------------------
 
     // Write .text section data
-    writer.write_align(PAGE_SIZE);
+    writer.write_align(SEGMENT_ALIGN_PAGE_SIZE);
     for module in modules.iter() {
         if let Some(section) = module.sections.get(&RelocatableSectionType::Text)
             && section.size > 0
         {
-            writer.write_align(TEXT_ALIGN);
+            writer.write_align(SECTION_ALIGN_TEXT);
             match section.binary {
                 SectionBinary::Reference(data) => {
                     writer.write(data);
@@ -414,12 +414,12 @@ pub fn write_executable(
 
     // Write .rodata section data
     if link_result.merged_section_size.rodata > 0 {
-        writer.write_align(PAGE_SIZE);
+        writer.write_align(SEGMENT_ALIGN_PAGE_SIZE);
         for module in modules.iter() {
             if let Some(section) = module.sections.get(&RelocatableSectionType::RoData)
                 && section.size > 0
             {
-                writer.write_align(DATA_ALIGN);
+                writer.write_align(SECTION_ALIGN_DATA);
                 match section.binary {
                     SectionBinary::Reference(data) => {
                         writer.write(data);
@@ -440,13 +440,13 @@ pub fn write_executable(
     // Note that there is no need to write .tbss and .bss section data,
     // because they are zero-initialized
     if link_result.merged_section_size.tdata > 0 || link_result.merged_section_size.data > 0 {
-        writer.write_align(PAGE_SIZE);
+        writer.write_align(SEGMENT_ALIGN_PAGE_SIZE);
 
         for module in modules.iter() {
             if let Some(section) = module.sections.get(&RelocatableSectionType::TData)
                 && section.size > 0
             {
-                writer.write_align(DATA_ALIGN);
+                writer.write_align(SECTION_ALIGN_DATA);
                 match section.binary {
                     SectionBinary::Reference(data) => {
                         writer.write(data);
@@ -465,7 +465,7 @@ pub fn write_executable(
             if let Some(section) = module.sections.get(&RelocatableSectionType::Data)
                 && section.size > 0
             {
-                writer.write_align(DATA_ALIGN);
+                writer.write_align(SECTION_ALIGN_DATA);
                 match section.binary {
                     SectionBinary::Reference(data) => {
                         writer.write(data);
@@ -486,7 +486,7 @@ pub fn write_executable(
     // -------------------------------------------------------------------------
 
     // Write symbol table
-    writer.write_align(SYMTAB_ALIGN);
+    writer.write_align(SECTION_ALIGN_SYMTAB);
 
     // Note that there is no symbol or relocation in our final executable,
 
@@ -564,7 +564,7 @@ pub fn write_executable(
             sh_info: 0,
 
             // code sections are usually aligned to 16 bytes
-            sh_addralign: TEXT_ALIGN as u64,
+            sh_addralign: SECTION_ALIGN_TEXT as u64,
             sh_entsize: 0,
         });
     }
@@ -583,7 +583,7 @@ pub fn write_executable(
             sh_link: 0,
             sh_info: 0,
             // read-only data sections are usually aligned to 8 or 4 bytes
-            sh_addralign: DATA_ALIGN as u64,
+            sh_addralign: SECTION_ALIGN_DATA as u64,
             sh_entsize: 0,
         });
     }
@@ -602,7 +602,7 @@ pub fn write_executable(
             sh_link: 0,
             sh_info: 0,
             // data sections are usually aligned to 8 or 4 bytes
-            sh_addralign: DATA_ALIGN as u64,
+            sh_addralign: SECTION_ALIGN_DATA as u64,
             sh_entsize: 0,
         });
     }
@@ -622,7 +622,7 @@ pub fn write_executable(
             sh_link: 0,
             sh_info: 0,
             // .bss sections are usually aligned to 8 or 4 bytes
-            sh_addralign: DATA_ALIGN as u64,
+            sh_addralign: SECTION_ALIGN_DATA as u64,
             sh_entsize: 0,
         });
     }
@@ -641,7 +641,7 @@ pub fn write_executable(
             sh_link: 0,
             sh_info: 0,
             // data sections are usually aligned to 8 or 4 bytes
-            sh_addralign: DATA_ALIGN as u64,
+            sh_addralign: SECTION_ALIGN_DATA as u64,
             sh_entsize: 0,
         });
     }
@@ -661,7 +661,7 @@ pub fn write_executable(
             sh_link: 0,
             sh_info: 0,
             // .bss sections are usually aligned to 8 or 4 bytes
-            sh_addralign: DATA_ALIGN as u64,
+            sh_addralign: SECTION_ALIGN_DATA as u64,
             sh_entsize: 0,
         });
     }

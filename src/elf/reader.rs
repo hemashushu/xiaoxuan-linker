@@ -11,12 +11,9 @@ use object::{
 };
 
 use crate::{
-    elf::{
-        module::{
-            DataEncoding, FileClass, FileType, Machine, OSABI, RelocatableModule, Relocation,
-            RelocationType, SectionType, SegmentFlag, SegmentType, Symbol, SymbolBind, SymbolType,
-        },
-        relocatable,
+    elf::module::{
+        DataEncoding, FileClass, FileType, Machine, OSABI, RelocatableModule, Relocation,
+        RelocationType, SectionType, SegmentFlag, SegmentType, Symbol, SymbolBind, SymbolType,
     },
     error::LinkerError,
 };
@@ -547,7 +544,10 @@ pub fn read_program_headers(
     Ok(program_headers)
 }
 
-pub fn read_relocatable_module<'a>(binary: &'a [u8]) -> Result<RelocatableModule<'a>, LinkerError> {
+pub fn read_relocatable_module<'a>(
+    name: &str,
+    binary: &'a [u8],
+) -> Result<RelocatableModule<'a>, LinkerError> {
     let elf = read_file(binary)?;
     let file_header = read_file_header(elf)?;
 
@@ -599,6 +599,7 @@ pub fn read_relocatable_module<'a>(binary: &'a [u8]) -> Result<RelocatableModule
     let symbols = read_symbols(elf, binary)?;
 
     let relocatable_module = RelocatableModule {
+        name: name.to_string(),
         sections,
         symbols,
         relocation_sections,
@@ -1558,11 +1559,11 @@ mod tests {
                     // may vary across different versions of the assembler and platforms.
                     // Check segment types and flags, but not check the other fields.
 
-                    // segment that covers file header and program headers
+                    // segment 0 covers file header and program headers
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
 
-                    // segment that covers .text
+                    // segment 1 covers .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
@@ -1570,7 +1571,7 @@ mod tests {
                     );
                 }
                 Machine::AArch64 => {
-                    // segment that covers .text
+                    // segment 0 covers file header, program headers and .text
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
@@ -1580,7 +1581,7 @@ mod tests {
                 Machine::RiscV => {
                     // segment 0 is RISCV_ATTRIBUTE
 
-                    // segment that covers file header, program headers and .text
+                    // segment 1 covers file header, program headers and .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
@@ -1588,6 +1589,7 @@ mod tests {
                     );
                 }
                 Machine::LoongArch => {
+                    // segment 0 covers file header, program headers and .text
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
@@ -1595,10 +1597,20 @@ mod tests {
                     );
                 }
                 Machine::PowerPC64 => {
-                    // TODO: Add architecture-specific program-header assertions.
+                    // segment 0 covers file header, program headers and .text
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
                 }
                 Machine::S390 => {
-                    // TODO: Add architecture-specific program-header assertions.
+                    // segment 0 covers file header, program headers and .text
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -1620,22 +1632,22 @@ mod tests {
                     // may vary across different versions of the assembler and platforms.
                     // Check segment types and flags, but not check the other fields.
 
-                    // segment that covers file header and program headers
+                    // segment 0 covers file header and program headers
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
 
-                    // segment that covers .text
+                    // segment 1 covers .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
 
-                    // segment that covers .rodata
+                    // segment 2 covers .rodata
                     assert_eq!(program_headers[2].segment_type, SegmentType::Load);
                     assert_eq!(program_headers[2].segment_flags, vec![SegmentFlag::Read]);
 
-                    // segment that covers .data and .bss
+                    // segment 3 covers .data and .bss
                     assert_eq!(program_headers[3].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[3].segment_flags,
@@ -1643,14 +1655,14 @@ mod tests {
                     );
                 }
                 Machine::AArch64 => {
-                    // segment that covers .text and .rodata
+                    // segment 0 covers file header, program headers, .text and .rodata
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
 
-                    // segment that covers .data and .bss
+                    // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
@@ -1660,14 +1672,14 @@ mod tests {
                 Machine::RiscV => {
                     // Segment 0 is RISCV_ATTRIBUTE
 
-                    // segment that covers .text and .rodata
+                    // segment 1 covers file header, program headers, .text and .rodata
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
 
-                    // segment that covers .data and .bss
+                    // segment 2 covers .data and .bss
                     assert_eq!(program_headers[2].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[2].segment_flags,
@@ -1675,11 +1687,14 @@ mod tests {
                     );
                 }
                 Machine::LoongArch => {
+                    // segment 0 covers file header, program headers, .text and .rodata
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
+
+                    // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
@@ -1687,10 +1702,34 @@ mod tests {
                     );
                 }
                 Machine::PowerPC64 => {
-                    // TODO: Add architecture-specific program-header assertions.
+                    // segment 0 covers file header, program headers, .text and .rodata
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment 1 covers .data and .bss
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
                 }
                 Machine::S390 => {
-                    // TODO: Add architecture-specific program-header assertions.
+                    // segment 0 covers file header, program headers, .text and .rodata
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment 1 covers .data and .bss
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -1701,7 +1740,7 @@ mod tests {
     fn test_read_relocatable_module_asm_minimal_o() {
         for arch in IMPLEMENTED_ARCHS {
             let binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
-            let relocatable_module_result = read_relocatable_module(&binary);
+            let relocatable_module_result = read_relocatable_module("minimal.o", &binary);
             assert!(relocatable_module_result.is_ok());
         }
     }
@@ -2551,11 +2590,11 @@ mod tests {
                     // may vary across different versions of the assembler and platforms.
                     // Check segment types and flags, but not check the other fields.
 
-                    // segment that covers file header and program headers
+                    // segment 0 covers file header and program headers
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
 
-                    // segment that covers .text
+                    // segment 1 covers .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
@@ -2563,7 +2602,7 @@ mod tests {
                     );
                 }
                 Machine::AArch64 => {
-                    // segment that covers .text
+                    // segment 0 covers file header, program headers and .text
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
@@ -2573,7 +2612,7 @@ mod tests {
                 Machine::RiscV => {
                     // segment 0 is RISCV_ATTRIBUTE
 
-                    // segment that covers file header, program headers and .text
+                    // segment 1 covers file header, program headers and .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
@@ -2581,6 +2620,7 @@ mod tests {
                     );
                 }
                 Machine::LoongArch => {
+                    // segment 0 covers file header, program headers and .text
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
@@ -2588,10 +2628,20 @@ mod tests {
                     );
                 }
                 Machine::PowerPC64 => {
-                    // todo
+                    // segment 0 covers file header, program headers and .text
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
                 }
                 Machine::S390 => {
-                    // todo
+                    // segment 0 covers file header, program headers and .text
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -2613,22 +2663,22 @@ mod tests {
                     // may vary across different versions of the assembler and platforms.
                     // Check segment types and flags, but not check the other fields.
 
-                    // segment that covers file header and program headers
+                    // segment 0 covers file header and program headers
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
 
-                    // segment that covers .text
+                    // segment 1 covers .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
 
-                    // segment that covers .rodata
+                    // segment 2 covers .rodata
                     assert_eq!(program_headers[2].segment_type, SegmentType::Load);
                     assert_eq!(program_headers[2].segment_flags, vec![SegmentFlag::Read]);
 
-                    // segment that covers .data and .bss
+                    // segment 3 covers .data and .bss
                     assert_eq!(program_headers[3].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[3].segment_flags,
@@ -2636,14 +2686,14 @@ mod tests {
                     );
                 }
                 Machine::AArch64 => {
-                    // segment that covers .text, .rodata
+                    // segment 0 covers file header, program headers, .text and .rodata
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
 
-                    // segment that covers .data and .bss
+                    // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
@@ -2653,14 +2703,14 @@ mod tests {
                 Machine::RiscV => {
                     // Segment 0 is RISCV_ATTRIBUTE
 
-                    // segment that covers .text and .rodata
+                    // segment 1 covers file header, program headers, .text and .rodata
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
 
-                    // segment that covers .data and .bss
+                    // segment 2 covers .data and .bss
                     assert_eq!(program_headers[2].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[2].segment_flags,
@@ -2668,11 +2718,14 @@ mod tests {
                     );
                 }
                 Machine::LoongArch => {
+                    // segment 0 covers file header, program headers, .text and .rodata
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
                         vec![SegmentFlag::Execute, SegmentFlag::Read]
                     );
+
+                    // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
@@ -2680,10 +2733,34 @@ mod tests {
                     );
                 }
                 Machine::PowerPC64 => {
-                    // todo
+                    // segment 0 covers file header, program headers, .text and .rodata
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment 1 covers .data and .bss
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
                 }
                 Machine::S390 => {
-                    // todo
+                    // segment 0 covers file header, program headers, .text and .rodata
+                    assert_eq!(program_headers[0].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[0].segment_flags,
+                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                    );
+
+                    // segment 1 covers .data and .bss
+                    assert_eq!(program_headers[1].segment_type, SegmentType::Load);
+                    assert_eq!(
+                        program_headers[1].segment_flags,
+                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                    );
                 }
                 Machine::Other(_) => unimplemented!(),
             }
@@ -2694,7 +2771,7 @@ mod tests {
     fn test_read_relocatable_module_gcc_minimal_o() {
         for arch in IMPLEMENTED_ARCHS {
             let binary = get_example_file_binary(SourceType::GCC, arch, "minimal.o");
-            let relocatable_module_result = read_relocatable_module(&binary);
+            let relocatable_module_result = read_relocatable_module("minimal.o", &binary);
             assert!(relocatable_module_result.is_ok());
         }
     }

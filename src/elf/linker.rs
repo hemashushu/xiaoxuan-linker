@@ -4,6 +4,49 @@
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
+/// ELF file layout
+/// ===============
+///
+/// Overall
+/// -------
+///
+/// | Size   | Content         |
+/// |--------|-----------------|
+/// | 64     | ELF header      |
+/// | m * 56 | program headers |
+/// | ...    | section data    |
+/// | n * 64 | section headers |
+///
+/// Sections (in file order)
+/// ------------------------
+///
+/// | Name           | Type         | Description                     | Align | Opt? |
+/// |----------------|--------------|---------------------------------|-------|------|
+/// | 00 NULL        | SHT_NULL     | Null section header             | 0     |      |
+/// | 01 `.text`     | SHT_PROGBITS | Executable code                 | 16    |      |
+/// | 02 `.rodata`   | SHT_PROGBITS | Read-only data (strings)        | 4/8   | Opt  |
+/// | 03 `.tdata`    | SHT_PROGBITS | Initialized thread-local data   | 4/8   | Opt  |
+/// | 04 `.tbss`     | SHT_NOBITS   | Uninitialized thread-local data | 4/8   | Opt  |
+/// | 05 `.data`     | SHT_PROGBITS | Initialized data                | 4/8   | Opt  |
+/// | 06 `.bss`      | SHT_NOBITS   | Uninitialized data              | 4/8   | Opt  |
+/// | 07 `.symtab`   | SHT_SYMTAB   | Symbol table                    | 8     |      |
+/// | 08 `.strtab`   | SHT_STRTAB   | Strings for symbol names        | 1     |      |
+/// | 09 `.shstrtab` | SHT_STRTAB   | Strings for section names       | 1     |      |
+///
+/// Note that sections such as `.rela.*` are consumed by the linker and would not appear in the final executable.
+///
+/// Program headers
+/// ---------------
+///
+/// | Segment           | Sections                        | Type    | Flags | Alignment | Opt? |
+/// |-------------------|---------------------------------|---------|-------|-----------|------|
+/// | 00 phdr           | program headers                 | PT_PHDR | R     | 0x8       |      |
+/// | 01 meta           | file header and program headers | PT_LOAD | R     | 0x1000    |      |
+/// | 02 text           | .text                           | PT_LOAD | R E   | 0x1000    |      |
+/// | 03 read-only data | .rodata                         | PT_LOAD | R     | 0x1000    | Opt  |
+/// | 04 writable data  | .tdata, .tbss, .data, .bss      | PT_LOAD | R W   | 0x1000    | Opt  |
+/// | 05 tls            | .tdata, .tbss                   | PT_TLS  | R     | 0x8       | Opt  |
+
 use std::collections::HashMap;
 
 use crate::{
@@ -23,8 +66,11 @@ pub const ELF_HEADER_SIZE: usize = 64;
 // ELF64 program header entry size is fixed at 56 bytes
 pub const PROGRAM_HEADER_ENTRY_SIZE: usize = 56;
 
-// All executable file has `PHDR`, `metadata`, and `code` segements,
-// and optionally `read-only data`, `writable data`, and `TLS` segments.
+// All executable file contains `PHDR`, `meta`, and `code` segements,
+// and the following are optional:
+// - `read-only data`: .rodata
+// - `writable data`: .tdata, .tbss, .data, .bss
+// - `TLS data`: .tdata, .tbss
 pub const BASE_PROGRAM_HEADER_COUNT: usize = 3;
 
 // typical base address for x86_64 executables (ET_EXEC),
@@ -35,21 +81,20 @@ pub const LOAD_ADDR_BASE: usize = 0x400000;
 // - code segment (includes .text and .init/.finit)
 // - read-only data segment (includes .rodata)
 // - writable data segment (includes .tdata, .tbss, .data and .bss)
-pub const PAGE_SIZE: usize = 0x1000;
-
-pub const PHDR_SEGMENT_ALIGN: usize = 0x8;
-pub const TLS_SEGMENT_ALIGN: usize = 0x8;
+pub const SEGMENT_ALIGN_PAGE_SIZE: usize = 0x1000;
+pub const SEGMENT_ALIGN_PHDR: usize = 0x8;
+pub const SEGMENT_ALIGN_TLS: usize = 0x8;
 
 // code sections are usually 16-byte aligned, it is also used for
 // merging .text sections from different modules
-pub const TEXT_ALIGN: usize = 16;
+pub const SECTION_ALIGN_TEXT: usize = 16;
 
 // .rodata, .data and .bss sections are 8-byte aligned. This is used for
 // merging data sections from different modules
-pub const DATA_ALIGN: usize = 8;
+pub const SECTION_ALIGN_DATA: usize = 8;
 
 // The symbol table section is 8-byte aligned
-pub const SYMTAB_ALIGN: usize = 8;
+pub const SECTION_ALIGN_SYMTAB: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinkResult {
@@ -98,14 +143,6 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
         )));
     }
 
-    // ELF file layout overall
-    //
-    // | Size   | Content         |
-    // |--------|-----------------|
-    // | 64     | ELF header      |
-    // | m * 56 | program headers |
-    // | ...    | section data    |
-    // | n * 64 | section headers |
 
     let mut program_header_count = BASE_PROGRAM_HEADER_COUNT;
 
@@ -129,90 +166,63 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
     let file_header_and_program_headers_size =
         ELF_HEADER_SIZE + program_header_count * PROGRAM_HEADER_ENTRY_SIZE;
 
-    // Sections (in file order)
-    //
-    // | Name                       | Type         | Description                     | Align |
-    // |----------------------------|--------------|---------------------------------|-------|
-    // | NULL                       | SHT_NULL     | Null section header             | 0     |
-    // | `.init`, `.text`, `.finit` | SHT_PROGBITS | Executable code                 | 16    |
-    // | `.rodata`                  | SHT_PROGBITS | Read-only data (strings)        | 4/8   |
-    // | `.tdata`                   | SHT_PROGBITS | Initialized thread-local data   | 4/8   |
-    // | `.tbss`                    | SHT_NOBITS   | Uninitialized thread-local data | 4/8   |
-    // | `.data`                    | SHT_PROGBITS | Initialized data                | 4/8   |
-    // | `.bss`                     | SHT_NOBITS   | Uninitialized data              | 4/8   |
-    // | `.symtab`                  | SHT_SYMTAB   | Symbol table                    | 8     |
-    // | `.strtab`                  | SHT_STRTAB   | Strings for symbol names        | 1     |
-    // | `.shstrtab`                | SHT_STRTAB   | Strings for section names       | 1     |
-    //
-    // Note that sections such as `.rela.*` are consumed by the linker and would not appear in the final executable.
-    //
-    // Program headers
-    //
-    // | Segment           | Sections                       | Type    | Flags | Alignment |
-    // |-------------------|--------------------------------|---------|-------|-----------|
-    // | 00 phdr           | program headers                | PT_PHDR | R     | 0x8       |
-    // | 01 metadata       | data before first code section | PT_LOAD | R     | 0x1000    |
-    // | 02 text           | .init, .text, .finit           | PT_LOAD | R E   | 0x1000    |
-    // | 03 read-only data | .rodata                        | PT_LOAD | R     | 0x1000    |
-    // | 04 writable data  | .tdata, .tbss, .data, .bss     | PT_LOAD | R W   | 0x1000    |
-    // | 05 tls            | .tdata, .tbss                  | PT_TLS  | R     | 0x8       |
 
     // merging `.text` sections
-    let mut offset = align_up(file_header_and_program_headers_size, PAGE_SIZE); // code segment must be page-aligned
-    let merged_section_offset_text = offset;
+    let mut file_offset = align_up(file_header_and_program_headers_size, SEGMENT_ALIGN_PAGE_SIZE); // code segment must be page-aligned
+    let merged_section_offset_text = file_offset;
     for module in modules.iter_mut() {
         if let Some(section) = module.sections.get_mut(&RelocatableSectionType::Text) {
-            offset = align_up(offset, TEXT_ALIGN);
-            section.resolved_offset = offset;
-            section.resolved_virtual_address = LOAD_ADDR_BASE + offset;
-            offset += section.size;
+            file_offset = align_up(file_offset, SECTION_ALIGN_TEXT);
+            section.resolved_offset = file_offset;
+            section.resolved_virtual_address = LOAD_ADDR_BASE + file_offset;
+            file_offset += section.size;
         }
     }
-    let merged_section_size_text = offset - merged_section_offset_text;
+    let merged_section_size_text = file_offset - merged_section_offset_text;
 
     // merging `.rodata` sections
-    offset = align_up(offset, PAGE_SIZE); // read-only segment must be page-aligned
-    let merged_section_offset_rodata = offset;
+    file_offset = align_up(file_offset, SEGMENT_ALIGN_PAGE_SIZE); // read-only segment must be page-aligned
+    let merged_section_offset_rodata = file_offset;
     for module in modules.iter_mut() {
         if let Some(section) = module.sections.get_mut(&RelocatableSectionType::RoData) {
-            offset = align_up(offset, DATA_ALIGN);
-            section.resolved_offset = offset;
-            section.resolved_virtual_address = LOAD_ADDR_BASE + offset;
-            offset += section.size;
+            file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+            section.resolved_offset = file_offset;
+            section.resolved_virtual_address = LOAD_ADDR_BASE + file_offset;
+            file_offset += section.size;
         }
     }
-    let merged_section_size_rodata = offset - merged_section_offset_rodata;
+    let merged_section_size_rodata = file_offset - merged_section_offset_rodata;
 
     // merging `.tdata` sections
     //
     // Note that the `.tdata`, `.tbss`, `.data`, and `.bss` sections will be merged into
     // the same writable segment, so we need to calculate their offsets and virtual addresses together.
-    offset = align_up(offset, PAGE_SIZE); // writable segment must be page-aligned
-    let merged_section_offset_tdata = offset;
+    file_offset = align_up(file_offset, SEGMENT_ALIGN_PAGE_SIZE); // writable segment must be page-aligned
+    let merged_section_offset_tdata = file_offset;
     for module in modules.iter_mut() {
         if let Some(section) = module.sections.get_mut(&RelocatableSectionType::TData) {
-            offset = align_up(offset, DATA_ALIGN);
-            section.resolved_offset = offset;
-            section.resolved_virtual_address = LOAD_ADDR_BASE + offset;
-            offset += section.size;
+            file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+            section.resolved_offset = file_offset;
+            section.resolved_virtual_address = LOAD_ADDR_BASE + file_offset;
+            file_offset += section.size;
         }
     }
-    let merged_section_size_tdata = offset - merged_section_offset_tdata;
+    let merged_section_size_tdata = file_offset - merged_section_offset_tdata;
 
     // merging `.tbss` sections
-    offset = align_up(offset, DATA_ALIGN);
+    file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
     // Introduce a new variable `virtual_address` to keep track of the virtual address for `.tbss` section,
     // because `.tbss` is a NOBITS section and does not occupy space in the file,
     // so we cannot simply use `offset` to calculate the virtual address for `.tbss`.
-    let mut virtual_address = LOAD_ADDR_BASE + offset;
+    let mut virtual_address = LOAD_ADDR_BASE + file_offset;
 
     let merged_section_virtual_address_tbss = virtual_address;
     for module in modules.iter_mut() {
         if let Some(section) = module.sections.get_mut(&RelocatableSectionType::TBss) {
             // Only the `virtual_address` needs to be aligned to `DATA_ALIGN` before merging the `.tbss` section,
-            virtual_address = align_up(virtual_address, DATA_ALIGN);
+            virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
-            section.resolved_offset = offset;
+            section.resolved_offset = file_offset;
             section.resolved_virtual_address = virtual_address;
 
             // Note that `.tbss` is a NOBITS section, so it does not occupy space in the file,
@@ -225,45 +235,45 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
     let merged_section_size_tbss = virtual_address - merged_section_virtual_address_tbss;
 
     // merging `.data` sections
-    offset = align_up(offset, DATA_ALIGN);
-    virtual_address = align_up(virtual_address, DATA_ALIGN);
+    file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+    virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
     let merged_section_virtual_address_data = virtual_address;
     for module in modules.iter_mut() {
         if let Some(section) = module.sections.get_mut(&RelocatableSectionType::Data) {
             // Both `offset` and `virtual_address` need to be aligned to `DATA_ALIGN` before merging the `.data` section.
-            offset = align_up(offset, DATA_ALIGN);
-            virtual_address = align_up(virtual_address, DATA_ALIGN);
+            file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+            virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
-            section.resolved_offset = offset;
+            section.resolved_offset = file_offset;
             section.resolved_virtual_address = virtual_address;
 
             // Both `offset` and `virtual_address` need to be increased by the size of the `.data` section,
-            offset += section.size;
+            file_offset += section.size;
             virtual_address += section.size;
         }
     }
     let merged_section_size_data = virtual_address - merged_section_virtual_address_data;
 
     // The linker-generated symbol `_edata` points to the end of the initialized data segment.
-    let symbol_edata_offset = offset;
+    let symbol_edata_offset = file_offset;
     let symbol_edata_virtual_address = virtual_address;
 
     // merging `.bss`
-    offset = align_up(offset, DATA_ALIGN);
-    virtual_address = align_up(virtual_address, DATA_ALIGN);
+    file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+    virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
     // The linker-generated symbol `__bss_start` points to the start of the uninitialized data segment.
-    let symbol_bss_start_offset = offset;
+    let symbol_bss_start_offset = file_offset;
     let symbol_bss_start_virtual_address = virtual_address;
 
     let merged_section_virtual_address_bss = virtual_address;
     for module in modules.iter_mut() {
         if let Some(section) = module.sections.get_mut(&RelocatableSectionType::Bss) {
             // Only the `virtual_address` needs to be aligned to `DATA_ALIGN` before merging the `.bss` section,
-            virtual_address = align_up(virtual_address, DATA_ALIGN);
+            virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
-            section.resolved_offset = offset;
+            section.resolved_offset = file_offset;
             section.resolved_virtual_address = virtual_address;
 
             // Note that `.bss` is a NOBITS section, so it does not occupy space in the file,
@@ -276,7 +286,7 @@ pub fn link(modules: &mut [RelocatableModule]) -> Result<LinkResult, LinkerError
     let merged_section_size_bss = virtual_address - merged_section_virtual_address_bss;
 
     // The linker-generated symbol `_end` points to the end of the uninitialized data segment.
-    let symbol_end_offset = offset;
+    let symbol_end_offset = file_offset;
     let symbol_end_virtual_address = virtual_address;
 
     // Generate linker-generated symbols for the final executable.
