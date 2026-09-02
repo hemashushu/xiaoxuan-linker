@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::{
     elf::{
-        merger::{MergedModule, SectionName},
+        merger::{MergedFileLayout, MergedModule, MergedSectionBinary, SectionName},
         module::Machine,
     },
     error::LinkerError,
@@ -16,10 +16,43 @@ use crate::{
 
 mod x86_64;
 
-pub fn relocate(merged_modules: &mut [MergedModule], arch: &Machine) -> Result<(), LinkerError> {
+#[derive(Debug, PartialEq)]
+pub struct LinkedModule<'a> {
+    pub sections: HashMap<SectionName, LinkedSection<'a>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct LinkedSection<'a> {
+    /// The size of the section.
+    /// For the `.bss` and `.tbss` sections, this is the memory size of the section,
+    /// which is not present in the file, but occupies space in memory.
+    pub size: usize,
+
+    /// The binary data of the section.
+    ///
+    /// Note: only `.text`, `.rodata`, `.tdata`, and `.data` sections
+    /// contain binary data in the object file,
+    /// while `.bss` and `.tbss` sections do not contain binary data in the object file.
+    pub binary: LinkedSectionBinary<'a>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum LinkedSectionBinary<'a> {
+    Owned(Vec<u8>),
+    Referenced(&'a [u8]),
+    None,
+}
+
+pub fn relocate<'a>(
+    merged_file_layout: &MergedFileLayout,
+    merged_modules: &[MergedModule<'a>],
+    arch: &Machine,
+) -> Result<Vec<LinkedModule<'a>>, LinkerError> {
     // Resolve relocations and generate patch modules
     let patch_modules = match arch {
-        Machine::X86_64 => x86_64::X86_64RelocationResolver::resolve(merged_modules)?,
+        Machine::X86_64 => {
+            x86_64::X86_64RelocationResolver::resolve(merged_file_layout, merged_modules)?
+        }
         _ => {
             unimplemented!(
                 "Relocation for architecture {:?} is not implemented yet",
@@ -29,21 +62,64 @@ pub fn relocate(merged_modules: &mut [MergedModule], arch: &Machine) -> Result<(
     };
 
     // Apply the patch modules to the merged modules
-    for (merged_module, patch_module) in merged_modules.iter_mut().zip(patch_modules) {
-        for (section_name, patch_items) in patch_module.patch_sections {
-            if let Some(section) = merged_module.sections.get_mut(&section_name) {
+    let mut linked_modules = Vec::new();
+    for (merged_module, patch_module) in merged_modules.iter().zip(patch_modules) {
+        let mut linked_sections: HashMap<SectionName, LinkedSection<'a>> = HashMap::new();
+
+        for (section_name, section) in &merged_module.sections {
+            if let Some(patch_items) = patch_module.patch_sections.get(section_name) {
+                let MergedSectionBinary::Referenced(source_data) = section.binary else {
+                    return Err(LinkerError::Message(format!(
+                        "Section {:?} does not have a referenced binary",
+                        section_name
+                    )));
+                };
+
+                let mut binary = source_data.to_vec();
                 for patch_item in patch_items {
-                    if let Some(binary) = &mut section.binary {
-                        binary.splice(
-                            patch_item.offset..patch_item.offset + patch_item.data.len(),
-                            patch_item.data,
+                    binary.splice(
+                        patch_item.offset..patch_item.offset + patch_item.data.len(),
+                        patch_item.data.clone(),
+                    );
+                }
+
+                linked_sections.insert(
+                    *section_name,
+                    LinkedSection {
+                        size: binary.len(),
+                        binary: LinkedSectionBinary::Owned(binary),
+                    },
+                );
+            } else {
+                match section.binary {
+                    MergedSectionBinary::Referenced(source_data) => {
+                        linked_sections.insert(
+                            *section_name,
+                            LinkedSection {
+                                size: section.size,
+                                binary: LinkedSectionBinary::Referenced(source_data),
+                            },
+                        );
+                    }
+                    MergedSectionBinary::None => {
+                        linked_sections.insert(
+                            *section_name,
+                            LinkedSection {
+                                size: section.size,
+                                binary: LinkedSectionBinary::None,
+                            },
                         );
                     }
                 }
             }
         }
+
+        linked_modules.push(LinkedModule {
+            sections: linked_sections,
+        });
     }
-    Ok(())
+
+    Ok(linked_modules)
 }
 
 pub struct PatchItem {
@@ -86,5 +162,8 @@ pub struct PatchModule {
 /// The linker does not support changing code size (e.g., the relaxation of the RISCV instruction set),
 /// so the relocation resolver only needs to resolve the relocation entries and generate the corresponding patch items.
 pub trait RelocationResolver {
-    fn resolve(merged_modules: &mut [MergedModule]) -> Result<Vec<PatchModule>, LinkerError>;
+    fn resolve(
+        merged_file_layout: &MergedFileLayout,
+        merged_modules: &[MergedModule],
+    ) -> Result<Vec<PatchModule>, LinkerError>;
 }

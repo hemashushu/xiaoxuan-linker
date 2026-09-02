@@ -8,7 +8,10 @@ use std::collections::HashMap;
 
 use crate::{
     elf::{
-        merger::{MergedModule, MergedRelocationSection, MergedSection, MergedSymbol, SectionName},
+        merger::{
+            MergedFileLayout, MergedModule, MergedRelocationSection, MergedSection, MergedSymbol,
+            SectionName,
+        },
         module::{Relocation, RelocationType},
         relocator::{PatchItem, PatchModule, RelocationResolver},
     },
@@ -18,10 +21,13 @@ use crate::{
 pub struct X86_64RelocationResolver;
 
 impl RelocationResolver for X86_64RelocationResolver {
-    fn resolve(merged_modules: &mut [MergedModule]) -> Result<Vec<PatchModule>, LinkerError> {
+    fn resolve(
+        merged_file_layout: &MergedFileLayout,
+        merged_modules: &[MergedModule],
+    ) -> Result<Vec<PatchModule>, LinkerError> {
         let mut patch_modules = Vec::new();
 
-        for merged_module in merged_modules.iter_mut() {
+        for merged_module in merged_modules {
             let symbols = &merged_module.symbols;
             let merged_sections = &merged_module.sections;
 
@@ -30,10 +36,15 @@ impl RelocationResolver for X86_64RelocationResolver {
             for MergedRelocationSection {
                 target_section_name,
                 relocations,
-            } in merged_module.relocation_sections.iter_mut()
+            } in &merged_module.relocation_sections
             {
-                let patch_items =
-                    resolve_section(merged_sections, target_section_name, relocations, symbols)?;
+                let patch_items = resolve_section(
+                    merged_file_layout,
+                    merged_sections,
+                    target_section_name,
+                    relocations,
+                    symbols,
+                )?;
 
                 patch_sections.insert(*target_section_name, patch_items);
             }
@@ -47,14 +58,15 @@ impl RelocationResolver for X86_64RelocationResolver {
 }
 
 fn resolve_section(
+    merged_file_layout: &MergedFileLayout,
     merged_sections: &HashMap<SectionName, MergedSection>,
     target_section_name: &SectionName,
-    relocations: &mut Vec<Relocation>,
+    relocations: &[Relocation],
     symbols: &[MergedSymbol],
 ) -> Result<Vec<PatchItem>, LinkerError> {
     let mut patch_items = Vec::new();
 
-    let mut iter = relocations.into_iter();
+    let mut iter = relocations.iter();
 
     while let Some(relocation) = iter.next() {
         // Process each relocation here
@@ -104,12 +116,15 @@ fn resolve_section(
                 // R_X86_64_TPOFF32: S + A - TP
                 // The formula for calculating the value to be written at the relocation site is:
                 // TPOFF(sym) = symbol_offset_in_tls_block − tls_block_size
-                let section_tdata = merged_sections.get(&SectionName::TData).unwrap();
-                let section_tbss = merged_sections.get(&SectionName::TBSS).unwrap();
+                let file_sections = &merged_file_layout.file_sections;
+                let file_section_tdata = file_sections.get(&SectionName::TData).unwrap();
+                let file_section_tbss = file_sections.get(&SectionName::TBSS).unwrap();
 
-                let tls_block_size = section_tbss.virtual_address - section_tdata.virtual_address
-                    + section_tbss.size;
-                let symbol_offset_in_tls_block = symbol_virtual_address - section_tdata.virtual_address;
+                let tls_block_size = file_section_tbss.virtual_address
+                    - file_section_tdata.virtual_address
+                    + file_section_tbss.size;
+                let symbol_offset_in_tls_block =
+                    symbol_virtual_address - file_section_tdata.virtual_address;
 
                 let relocated_value = symbol_offset_in_tls_block
                     .wrapping_add(addend as usize)
