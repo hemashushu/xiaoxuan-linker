@@ -4,7 +4,7 @@
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     elf::module::{Machine, RelocatableModule, Relocation, Symbol, SymbolBind},
@@ -117,7 +117,7 @@ pub struct MergedModule<'a> {
     pub sections: HashMap<SectionName, MergedSection<'a>>,
 
     /// The symbol table of the module, which contains the symbols defined in the module.
-    pub symbols: Vec<MergedSymbol>,
+    pub symbols: Vec<ResolvedSymbol>,
 
     /// The relocation entries of the module, which contain the information about
     /// how to adjust the code and data when linking.
@@ -196,7 +196,7 @@ pub enum MergedSectionBinary<'a> {
 
 /// Symbol represents a symbol in the merged module
 #[derive(Debug, PartialEq)]
-pub enum MergedSymbol {
+pub enum ResolvedSymbol {
     Effective {
         /// The virtual address of the symbol in the merged section in the final executable,
         virtual_address: usize,
@@ -217,6 +217,21 @@ impl From<&str> for SectionName {
             SECTION_NAME_BSS => SectionName::BSS,
             _ => SectionName::Other,
         }
+    }
+}
+
+impl Display for SectionName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            SectionName::Text => SECTION_NAME_TEXT,
+            SectionName::ROData => SECTION_NAME_RODATA,
+            SectionName::TData => SECTION_NAME_TDATA,
+            SectionName::TBSS => SECTION_NAME_TBSS,
+            SectionName::Data => SECTION_NAME_DATA,
+            SectionName::BSS => SECTION_NAME_BSS,
+            SectionName::Other => "other",
+        };
+        write!(f, "{}", name)
     }
 }
 
@@ -467,7 +482,7 @@ pub struct MergedFileLayout {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct MergeResult<'a> {
+pub struct MergeAsset<'a> {
     pub merged_modules: Vec<MergedModule<'a>>,
     pub global_symbol_map: HashMap<String, GlobalSymbolMapEntry>,
     pub merged_file_layout: MergedFileLayout,
@@ -476,7 +491,7 @@ pub struct MergeResult<'a> {
 pub fn merge<'a>(
     modules: Vec<RelocatableModule<'a>>,
     arch: &Machine,
-) -> Result<MergeResult<'a>, LinkerError> {
+) -> Result<MergeAsset<'a>, LinkerError> {
     // Create section name map for each module
     // This map is used to quickly find the section index of a given section name,
     // or to get the section name of a given section index.
@@ -751,7 +766,6 @@ pub fn merge<'a>(
     );
 
     // The linker-generated symbol `_edata` points to the end of the initialized data.
-    let symbol_edata_offset = file_offset;
     let symbol_edata_virtual_address = virtual_address;
 
     // data alignment
@@ -759,7 +773,6 @@ pub fn merge<'a>(
     virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
     // The linker-generated symbol `__bss_start` points to the start of the uninitialized data.
-    let symbol_bss_start_offset = file_offset;
     let symbol_bss_start_virtual_address = virtual_address;
 
     // merging `.bss`
@@ -801,7 +814,6 @@ pub fn merge<'a>(
     );
 
     // The linker-generated symbol `_end` points to the end of the uninitialized data.
-    let symbol_end_offset = file_offset;
     let symbol_end_virtual_address = virtual_address;
 
     // Create global symbol map for all modules
@@ -824,7 +836,8 @@ pub fn merge<'a>(
     // Resolve symbols file offset and virtual address
     // -----------------------------------------------
 
-    enum ResolvedSymbol {
+    #[derive(Debug, PartialEq, Clone)]
+    enum MergedSymbol {
         Defined {
             /// The name of the symbol
             /// This name may be empty for symbols that represent sections
@@ -834,9 +847,6 @@ pub fn merge<'a>(
             /// The binding of the symbol, which determines the linkage of the symbol.
             bind: SymbolBind,
 
-            /// The section that the symbol belongs to.
-            section_name: SectionName,
-
             /// The virtual address of the symbol in the merged section in the final executable,
             virtual_address: usize,
         },
@@ -844,13 +854,13 @@ pub fn merge<'a>(
         Other,
     }
 
-    let mut resolved_symbolss: Vec<Vec<ResolvedSymbol>> = vec![];
+    let mut merged_symbolss: Vec<Vec<MergedSymbol>> = vec![Vec::new(); modules.len()];
 
-    for (((module, section_name_map), merged_sections), resolved_symbols) in modules
+    for (((module, section_name_map), merged_sections), merged_symbols) in modules
         .iter()
         .zip(section_name_maps.iter())
         .zip(merged_sectionss.iter())
-        .zip(resolved_symbolss.iter_mut())
+        .zip(merged_symbolss.iter_mut())
     {
         for symbol in &module.symbols {
             match symbol {
@@ -873,49 +883,46 @@ pub fn merge<'a>(
                     let merged_section = merged_sections.get(&section_name);
                     match merged_section {
                         Some(merged_section) => {
-                            let resolved_symbol = ResolvedSymbol::Defined {
+                            let resolved_symbol = MergedSymbol::Defined {
                                 name: name.clone(),
                                 bind: *bind,
-                                section_name,
-                                // offset: *offset + merged_section.offset_in_file,
                                 virtual_address: *offset + merged_section.virtual_address,
                             };
-                            resolved_symbols.push(resolved_symbol);
+                            merged_symbols.push(resolved_symbol);
                         }
                         None => {
                             return Err(LinkerError::Message(format!(
-                                "Section {:?} not found in module {} for symbol {}",
+                                "Section \"{}\" not found in module \"{}\" for symbol \"{}\"",
                                 section_name, module.name, name
                             )));
                         }
                     }
                 }
                 Symbol::External(name) => {
-                    resolved_symbols.push(ResolvedSymbol::External(name.clone()));
+                    merged_symbols.push(MergedSymbol::External(name.clone()));
                 }
                 Symbol::Other => {
-                    resolved_symbols.push(ResolvedSymbol::Other);
+                    merged_symbols.push(MergedSymbol::Other);
                 }
             }
         }
     }
 
     // Extract global symbols from all modules
-    for (resolved_symbols, module) in resolved_symbolss.iter().zip(modules.iter()) {
-        for resolved_symbol in resolved_symbols {
-            if let ResolvedSymbol::Defined {
+    for (merged_symbols, module) in merged_symbolss.iter().zip(modules.iter()) {
+        for merged_symbol in merged_symbols {
+            if let MergedSymbol::Defined {
                 name,
                 bind,
-                // offset,
                 virtual_address,
                 ..
-            } = resolved_symbol
+            } = merged_symbol
             {
                 match bind {
                     SymbolBind::Global => {
                         if global_symbol_map.contains_key(name) {
                             return Err(LinkerError::Message(format!(
-                                "Duplicate global symbol: {} defined in module {}",
+                                "Duplicate global symbol \"{}\" defined in module \"{}\"",
                                 name, module.name
                             )));
                         }
@@ -940,45 +947,50 @@ pub fn merge<'a>(
         }
     }
 
-    // Translate ResolvedSymbol to MergedSymbol
-    let mut merged_symbolss: Vec<Vec<MergedSymbol>> = vec![];
-    for (resolved_symbols, module) in resolved_symbolss.iter().zip(modules.iter()) {
-        let mut merged_symbols = Vec::new();
-        for resolved_symbol in resolved_symbols {
-            match resolved_symbol {
-                ResolvedSymbol::Defined {
-                    // offset,
-                    virtual_address,
-                    ..
+    // Resolve the external symbol in MergedSymbol and generate ResolvedSymbol
+    let mut resolved_symbolss: Vec<Vec<ResolvedSymbol>> = vec![];
+    for (merged_symbols, module) in merged_symbolss.iter().zip(modules.iter()) {
+        let mut resolved_symbols = Vec::new();
+        for merged_symbol in merged_symbols {
+            match merged_symbol {
+                MergedSymbol::Defined {
+                    virtual_address, ..
                 } => {
-                    let merged_symbol = MergedSymbol::Effective {
-                        // offset_in_section: *offset,
+                    let resolved_symbol = ResolvedSymbol::Effective {
                         virtual_address: *virtual_address,
                     };
-                    merged_symbols.push(merged_symbol);
+                    resolved_symbols.push(resolved_symbol);
                 }
-                ResolvedSymbol::External(name) => {
+                MergedSymbol::External(name) => {
                     // Look up the symbol in the global symbol map
                     if let Some(global_symbol) = global_symbol_map.get(name) {
-                        let merged_symbol = MergedSymbol::Effective {
-                            // offset_in_section: global_symbol.offset_in_section,
+                        let resolved_symbol = ResolvedSymbol::Effective {
                             virtual_address: global_symbol.virtual_address,
                         };
-                        merged_symbols.push(merged_symbol);
+                        resolved_symbols.push(resolved_symbol);
                     } else {
                         return Err(LinkerError::Message(format!(
-                            "Unresolved external symbol: {} in module {}",
+                            "Unresolved external symbol \"{}\" in module \"{}\"",
                             name, module.name
                         )));
                     }
                 }
-                ResolvedSymbol::Other => {
-                    merged_symbols.push(MergedSymbol::Other);
+                MergedSymbol::Other => {
+                    resolved_symbols.push(ResolvedSymbol::Other);
                 }
             }
         }
-        merged_symbolss.push(merged_symbols);
+        resolved_symbolss.push(resolved_symbols);
     }
+
+    // Find the entry point symbol `_start` and get its virtual address.
+    let entry_point = if let Some(entry_symbol) = global_symbol_map.get("_start") {
+        entry_symbol.virtual_address
+    } else {
+        return Err(LinkerError::Message(
+            "Entry point symbol \"_start\" not found in the global symbols".to_string(),
+        ));
+    };
 
     // Translate relocation entries MergedRelocationSection
     let mut merged_relocation_sectionss: Vec<Vec<MergedRelocationSection>> = vec![];
@@ -992,7 +1004,7 @@ pub fn merge<'a>(
             let target_section_name = section_name_map[relocation_section.target_section_index];
             if target_section_name == SectionName::Other {
                 return Err(LinkerError::Message(format!(
-                    "Relocation section {:?} in module {} targets an unsupported section",
+                    "Relocation section \"{}\" in module \"{}\" targets an unsupported section",
                     relocation_section.target_section_index, module.name
                 )));
             }
@@ -1008,7 +1020,7 @@ pub fn merge<'a>(
                 }
                 None => {
                     return Err(LinkerError::Message(format!(
-                        "Section {:?} not found in module {} for relocation section",
+                        "Section \"{}\" not found in module \"{}\" for relocation section",
                         target_section_name, module.name
                     )));
                 }
@@ -1020,7 +1032,7 @@ pub fn merge<'a>(
     // Refactor the merged sections, symbols, and relocation sections into a single MergedModule(s)
     let merged_modules: Vec<MergedModule> = merged_sectionss
         .into_iter()
-        .zip(merged_symbolss.into_iter())
+        .zip(resolved_symbolss.into_iter())
         .zip(merged_relocation_sectionss.into_iter())
         .map(|((sections, symbols), relocation_sections)| MergedModule {
             sections,
@@ -1028,15 +1040,6 @@ pub fn merge<'a>(
             relocation_sections,
         })
         .collect();
-
-    // Find the entry point symbol `_start` and get its virtual address.
-    let entry_point = if let Some(entry_symbol) = global_symbol_map.get("_start") {
-        entry_symbol.virtual_address
-    } else {
-        return Err(LinkerError::Message(
-            "Entry point symbol `_start` not found in the global symbols".to_string(),
-        ));
-    };
 
     let merged_file_layout = MergedFileLayout {
         contains_read_only_data,
@@ -1047,13 +1050,13 @@ pub fn merge<'a>(
         file_sections,
     };
 
-    let merge_result = MergeResult {
+    let merge_asset = MergeAsset {
         merged_modules,
         global_symbol_map,
         merged_file_layout,
     };
 
-    Ok(merge_result)
+    Ok(merge_asset)
 }
 
 #[cfg(test)]
@@ -1063,7 +1066,7 @@ mod tests {
     use std::{fmt::Display, vec};
 
     use crate::elf::{
-        merger::filter,
+        merger::{SectionName, filter, merge},
         module::{Machine, RelocatableModule},
         reader::read_relocatable_module,
     };
@@ -1087,11 +1090,11 @@ mod tests {
 
     const IMPLEMENTED_ARCHS: &[Machine] = &[
         Machine::X86_64,
-        // Machine::AArch64,
-        // Machine::RiscV,
-        // Machine::LoongArch,
-        // Machine::PowerPC64,
-        // Machine::S390,
+        Machine::AArch64,
+        Machine::RiscV,
+        Machine::LoongArch,
+        Machine::PowerPC64,
+        Machine::S390,
     ];
 
     fn get_arch_dir_name(arch: &Machine) -> &'static str {
@@ -1147,67 +1150,209 @@ mod tests {
             .collect()
     }
 
+    fn assert_contains_all(strs: &[&str], expected: &[&str]) {
+        for &expected_str in expected {
+            assert!(
+                strs.contains(&expected_str),
+                "Expected string '{}' not found in the list: {:?}",
+                expected_str,
+                strs
+            );
+        }
+    }
+
     #[test]
     fn test_filter_single_module() {
-        for arch in IMPLEMENTED_ARCHS {
-            let file_binary = get_example_file_binary(SourceType::GCC, arch, "minimal.o");
-            let module = get_example_file_module("minimal.o", &file_binary);
-            let modules = vec![module];
+        // Test x86_64 architecture only since the other architectures
+        // may contain un-resolved external symbols in the example files,
+        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
+        // which will cause the filter function to fail.
+        let arch = &Machine::X86_64;
 
-            let filtered_modules = filter(modules).unwrap();
-            assert_eq!(filtered_modules.len(), 1);
-        }
+        let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
+        let module = get_example_file_module("minimal.o", &file_binary);
+        let modules = vec![module];
+
+        let filtered_modules_result = filter(modules);
+        assert!(filtered_modules_result.is_ok());
+
+        let filtered_modules = filtered_modules_result.unwrap();
+        assert_eq!(filtered_modules.len(), 1);
     }
 
     #[test]
     fn test_filter_reachable_modules() {
-        for arch in IMPLEMENTED_ARCHS {
-            let file_binaries = get_example_file_binaries(
-                SourceType::GCC,
-                arch,
-                &["symbol-import.o", "symbol-export.o"],
-            );
-            let file_binaries_ref: Vec<&[u8]> =
-                file_binaries.iter().map(|b| b.as_slice()).collect();
-            let modules = get_example_file_modules(
-                &["symbol-import.o", "symbol-export.o"],
-                &file_binaries_ref,
-            );
+        // Test x86_64 architecture only since the other architectures
+        // may contain un-resolved external symbols in the example files,
+        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
+        // which will cause the filter function to fail.
+        let arch = &Machine::X86_64;
 
-            let filtered_modules = filter(modules).unwrap();
-            assert_eq!(filtered_modules.len(), 2);
-            assert_eq!(filtered_modules[0].name, "symbol-import.o");
-            assert_eq!(filtered_modules[1].name, "symbol-export.o");
-        }
+        let file_binaries = get_example_file_binaries(
+            SourceType::Assembly,
+            arch,
+            &["symbol-import.o", "symbol-export.o"],
+        );
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let modules =
+            get_example_file_modules(&["symbol-import.o", "symbol-export.o"], &file_binaries_ref);
+
+        let filtered_modules_result = filter(modules);
+        assert!(filtered_modules_result.is_ok());
+
+        let filtered_modules = filtered_modules_result.unwrap();
+        assert_eq!(filtered_modules.len(), 2);
+        assert_eq!(filtered_modules[0].name, "symbol-import.o");
+        assert_eq!(filtered_modules[1].name, "symbol-export.o");
     }
 
     #[test]
     fn test_filter_unrelated_modules() {
-        for arch in IMPLEMENTED_ARCHS {
-            let file_binaries = get_example_file_binaries(
-                SourceType::GCC,
-                arch,
-                &["symbol-import.o", "symbol-export.o", "override-weak.o"],
-            );
-            let file_binaries_ref: Vec<&[u8]> =
-                file_binaries.iter().map(|b| b.as_slice()).collect();
-            let modules = get_example_file_modules(
-                &["symbol-import.o", "symbol-export.o", "override-weak.o"],
-                &file_binaries_ref,
-            );
+        // Test x86_64 architecture only since the other architectures
+        // may contain un-resolved external symbols in the example files,
+        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
+        // which will cause the filter function to fail.
+        let arch = &Machine::X86_64;
 
-            let filtered_modules = filter(modules).unwrap();
-            assert_eq!(filtered_modules.len(), 2);
-            assert_eq!(filtered_modules[0].name, "symbol-import.o");
-            assert_eq!(filtered_modules[1].name, "symbol-export.o");
-        }
+        let file_binaries = get_example_file_binaries(
+            SourceType::Assembly,
+            arch,
+            &["symbol-import.o", "symbol-export.o", "override-weak.o"],
+        );
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let modules = get_example_file_modules(
+            &["symbol-import.o", "symbol-export.o", "override-weak.o"],
+            &file_binaries_ref,
+        );
+
+        let filtered_modules_result = filter(modules);
+        assert!(filtered_modules_result.is_ok());
+
+        let filtered_modules = filtered_modules_result.unwrap();
+        assert_eq!(filtered_modules.len(), 2);
+        assert_eq!(filtered_modules[0].name, "symbol-import.o");
+        assert_eq!(filtered_modules[1].name, "symbol-export.o");
     }
 
-    fn test_merge_asm_symbol_export_and_import_o() {
-        // todo
+    #[test]
+    fn test_merge_single_module() {
+        // Test x86_64 architecture only since the other architectures
+        // may contain un-resolved external symbols in the example files,
+        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
+        // which will cause the filter function to fail.
+        let arch = &Machine::X86_64;
+
+        let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
+        let module = get_example_file_module("minimal.o", &file_binary);
+        let modules = vec![module];
+
+        let merge_asset_result = merge(modules, arch);
+        assert!(merge_asset_result.is_ok());
+
+        let merge_asset = merge_asset_result.unwrap();
+
+        // Check the merged modules
+        let merged_modules = merge_asset.merged_modules;
+        assert_eq!(merged_modules.len(), 1);
+
+        let first_merged_module = &merged_modules[0];
+        assert_eq!(first_merged_module.sections.len(), 3); // .text, .rodata, .data
+        assert_eq!(first_merged_module.symbols.len(), 2); // NULL, _start
+        assert_eq!(first_merged_module.relocation_sections.len(), 0); // no relocation sections
+
+        // Check the global symbol map
+        let global_symbol_map = merge_asset.global_symbol_map;
+        let keys = global_symbol_map
+            .keys()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>();
+        assert_contains_all(&keys, &["_start", "_edata", "__bss_start", "_end"]);
+
+        // Check the merged file layout
+        let merged_file_layout = merge_asset.merged_file_layout;
+        assert_eq!(merged_file_layout.contains_read_only_data, false);
+        assert_eq!(merged_file_layout.contains_writable_data, false);
+        assert_eq!(merged_file_layout.contains_tls_data, false);
+        assert_eq!(merged_file_layout.program_header_count, 3); // PHDR, metadata, code
+        assert_eq!(
+            merged_file_layout.entry_point,
+            global_symbol_map["_start"].virtual_address
+        );
+
+        assert!(
+            merged_file_layout
+                .file_sections
+                .contains_key(&SectionName::Text)
+        );
+
+        let file_section_text = merged_file_layout
+            .file_sections
+            .get(&SectionName::Text)
+            .unwrap();
+        assert!(file_section_text.size > 0);
     }
 
-    fn test_merge_gcc_symbol_export_and_import_o() {
-        // todo
+    #[test]
+    fn test_merge_symbol_import_and_export() {
+        let arch = &Machine::X86_64;
+
+        let file_binaries = get_example_file_binaries(
+            SourceType::Assembly,
+            arch,
+            &["symbol-import.o", "symbol-export.o"],
+        );
+
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let modules =
+            get_example_file_modules(&["symbol-import.o", "symbol-export.o"], &file_binaries_ref);
+
+        let merge_asset_result = merge(modules, arch);
+        assert!(merge_asset_result.is_ok());
+
+        let merge_asset = merge_asset_result.unwrap();
+
+        // Check the merged modules
+        let merged_modules = merge_asset.merged_modules;
+        assert_eq!(merged_modules.len(), 2);
+
+        // Check the global symbol map
+        let global_symbol_map = merge_asset.global_symbol_map;
+        let keys = global_symbol_map
+            .keys()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>();
+        assert_contains_all(&keys, &["a", "b", "x", "y", "foo", "bar", "inc", "dec"]);
+
+        // Check the merged file layout
+        let merged_file_layout = merge_asset.merged_file_layout;
+        assert_eq!(merged_file_layout.contains_read_only_data, true);
+        assert_eq!(merged_file_layout.contains_writable_data, true);
+        assert_eq!(merged_file_layout.contains_tls_data, false);
+
+        assert_eq!(merged_file_layout.program_header_count, 5); // PHDR, metadata, code, read-only data, writable data
+
+        let file_section_text = merged_file_layout
+            .file_sections
+            .get(&SectionName::Text)
+            .unwrap();
+        assert!(file_section_text.size > 0);
+
+        let file_section_rodata = merged_file_layout
+            .file_sections
+            .get(&SectionName::ROData)
+            .unwrap();
+        assert!(file_section_rodata.size > 0);
+
+        let file_section_data = merged_file_layout
+            .file_sections
+            .get(&SectionName::Data)
+            .unwrap();
+        assert!(file_section_data.size > 0);
+
+        let file_section_bss = merged_file_layout
+            .file_sections
+            .get(&SectionName::BSS)
+            .unwrap();
+        assert!(file_section_bss.size > 0);
     }
 }

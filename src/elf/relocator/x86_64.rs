@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::{
     elf::{
         merger::{
-            MergedFileLayout, MergedModule, MergedRelocationSection, MergedSection, MergedSymbol,
+            MergedFileLayout, MergedModule, MergedRelocationSection, MergedSection, ResolvedSymbol,
             SectionName,
         },
         module::{Relocation, RelocationType},
@@ -62,7 +62,7 @@ fn resolve_section(
     merged_sections: &HashMap<SectionName, MergedSection>,
     target_section_name: &SectionName,
     relocations: &[Relocation],
-    symbols: &[MergedSymbol],
+    symbols: &[ResolvedSymbol],
 ) -> Result<Vec<PatchItem>, LinkerError> {
     let mut patch_items = Vec::new();
 
@@ -77,7 +77,7 @@ fn resolve_section(
 
         let merged_symbol = &symbols[relocation.symbol_index];
 
-        let MergedSymbol::Effective {
+        let ResolvedSymbol::Effective {
             // offset_in_section: symbol_offset_in_section,
             virtual_address: symbol_virtual_address,
         } = merged_symbol

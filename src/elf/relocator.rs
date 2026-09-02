@@ -17,12 +17,12 @@ use crate::{
 mod x86_64;
 
 #[derive(Debug, PartialEq)]
-pub struct LinkedModule<'a> {
-    pub sections: HashMap<SectionName, LinkedSection<'a>>,
+pub struct LocatedModule<'a> {
+    pub sections: HashMap<SectionName, LocatedSection<'a>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct LinkedSection<'a> {
+pub struct LocatedSection<'a> {
     /// The size of the section.
     /// For the `.bss` and `.tbss` sections, this is the memory size of the section,
     /// which is not present in the file, but occupies space in memory.
@@ -33,11 +33,11 @@ pub struct LinkedSection<'a> {
     /// Note: only `.text`, `.rodata`, `.tdata`, and `.data` sections
     /// contain binary data in the object file,
     /// while `.bss` and `.tbss` sections do not contain binary data in the object file.
-    pub binary: LinkedSectionBinary<'a>,
+    pub binary: LocatedSectionBinary<'a>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum LinkedSectionBinary<'a> {
+pub enum LocatedSectionBinary<'a> {
     Owned(Vec<u8>),
     Referenced(&'a [u8]),
     None,
@@ -47,7 +47,7 @@ pub fn relocate<'a>(
     merged_file_layout: &MergedFileLayout,
     merged_modules: &[MergedModule<'a>],
     arch: &Machine,
-) -> Result<Vec<LinkedModule<'a>>, LinkerError> {
+) -> Result<Vec<LocatedModule<'a>>, LinkerError> {
     // Resolve relocations and generate patch modules
     let patch_modules = match arch {
         Machine::X86_64 => {
@@ -62,9 +62,9 @@ pub fn relocate<'a>(
     };
 
     // Apply the patch modules to the merged modules
-    let mut linked_modules = Vec::new();
+    let mut located_modules = Vec::new();
     for (merged_module, patch_module) in merged_modules.iter().zip(patch_modules) {
-        let mut linked_sections: HashMap<SectionName, LinkedSection<'a>> = HashMap::new();
+        let mut located_sections: HashMap<SectionName, LocatedSection<'a>> = HashMap::new();
 
         for (section_name, section) in &merged_module.sections {
             if let Some(patch_items) = patch_module.patch_sections.get(section_name) {
@@ -83,30 +83,30 @@ pub fn relocate<'a>(
                     );
                 }
 
-                linked_sections.insert(
+                located_sections.insert(
                     *section_name,
-                    LinkedSection {
+                    LocatedSection {
                         size: binary.len(),
-                        binary: LinkedSectionBinary::Owned(binary),
+                        binary: LocatedSectionBinary::Owned(binary),
                     },
                 );
             } else {
                 match section.binary {
                     MergedSectionBinary::Referenced(source_data) => {
-                        linked_sections.insert(
+                        located_sections.insert(
                             *section_name,
-                            LinkedSection {
+                            LocatedSection {
                                 size: section.size,
-                                binary: LinkedSectionBinary::Referenced(source_data),
+                                binary: LocatedSectionBinary::Referenced(source_data),
                             },
                         );
                     }
                     MergedSectionBinary::None => {
-                        linked_sections.insert(
+                        located_sections.insert(
                             *section_name,
-                            LinkedSection {
+                            LocatedSection {
                                 size: section.size,
-                                binary: LinkedSectionBinary::None,
+                                binary: LocatedSectionBinary::None,
                             },
                         );
                     }
@@ -114,14 +114,18 @@ pub fn relocate<'a>(
             }
         }
 
-        linked_modules.push(LinkedModule {
-            sections: linked_sections,
+        located_modules.push(LocatedModule {
+            sections: located_sections,
         });
     }
 
-    Ok(linked_modules)
+    Ok(located_modules)
 }
 
+/// A patch item represents a modification to be made to a section's binary data.
+///
+/// Note that this linker does not support changing code size (e.g., the relaxation of the RISCV instruction set),
+/// so a patch item only modifies the binary data of a section without changing its size.
 pub struct PatchItem {
     pub offset: usize,
     pub data: Vec<u8>,
@@ -159,7 +163,7 @@ pub struct PatchModule {
 
 /// A trait for resolving relocations in a merged module.
 ///
-/// The linker does not support changing code size (e.g., the relaxation of the RISCV instruction set),
+/// This linker does not support changing code size (e.g., the relaxation of the RISCV instruction set),
 /// so the relocation resolver only needs to resolve the relocation entries and generate the corresponding patch items.
 pub trait RelocationResolver {
     fn resolve(
