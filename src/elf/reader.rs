@@ -75,6 +75,7 @@ pub fn read_section_headers<'a>(
         let section_name =
             str::from_utf8(section_table.section_name(endian, section_header).unwrap()).unwrap();
 
+        let virtual_address = section_header.sh_addr(endian) as usize;
         let offset = section_header.sh_offset(endian) as usize;
         let size = section_header.sh_size(endian) as usize;
         let align = section_header.sh_addralign(endian) as usize;
@@ -93,6 +94,7 @@ pub fn read_section_headers<'a>(
 
         let section = super::module::SectionHeader {
             name: section_name.to_string(),
+            virtual_address,
             offset,
             size,
             align,
@@ -160,7 +162,7 @@ fn parse_symbol_table(
     //
     //  Local symbols (not visible outside the file):
     //
-    // | Index | Address          | Type   | Bind   | Section Index | Name        |
+    // | Index | Value            | Type   | Bind   | Section Index | Name        |
     // |-------|------------------|--------|--------|---------------|-------------|
     // | 0     | 0000000000000000 | NOTYPE | LOCAL  | UND           |             |
     // | 1     | 0000000000000000 | FILE   | LOCAL  | ABS           | hello.asm   |
@@ -169,7 +171,7 @@ fn parse_symbol_table(
     //
     // Global symbols (visible outside the file):
     //
-    // | Index | Address          | Type   | Bind   | Section Index | Name        |
+    // | Index | Value            | Type   | Bind   | Section Index | Name        |
     // |-------|------------------|--------|--------|---------------|-------------|
     // | 4     | 0000000000401000 | NOTYPE | GLOBAL | 1             | _start      |
     // | 5     | 000000000040300f | NOTYPE | GLOBAL | 2             | __bss_start |
@@ -194,15 +196,31 @@ fn parse_symbol_table(
         let symbol = match section_index {
             object::elf::SHN_UNDEF if symbol_index.0 == 0 => {
                 // The first symbol table entry (index 0) is reserved and must be undefined.
-                Symbol::Other
+                Symbol::Null
             }
             object::elf::SHN_UNDEF => {
                 // External symbol
                 Symbol::External(symbol_name.to_string())
             }
-            _ if section_index >= object::elf::SHN_LORESERVE => {
-                // Other section index, such as `SHN_ABS` (absolute symbol) and
-                // `SHN_COMMON` (common symbol), or an invalid section index.
+            object::elf::SHN_ABS if sym.st_type() == object::elf::STT_FILE => {
+                // File symbol
+                Symbol::File(symbol_name.to_string())
+            }
+            object::elf::SHN_ABS => {
+                // Absolute symbol
+                let bind = SymbolBind::from(sym.st_bind());
+                let value = sym.st_value(endian);
+
+                Symbol::Absolute {
+                    name: symbol_name.to_string(),
+                    bind,
+                    value,
+                }
+            }
+            _ if section_index >= object::elf::SHN_LORESERVE
+                && section_index <= object::elf::SHN_HIRESERVE =>
+            {
+                // Other section index, such as `SHN_COMMON` (common symbol)
                 Symbol::Other
             }
             _ => {
@@ -246,14 +264,14 @@ fn parse_symbol_table(
                 //
                 // This linker only supports STV_DEFAULT, which is the default visibility for symbols.
 
-                let offset = sym.st_value(endian) as usize;
+                let value = sym.st_value(endian);
 
                 Symbol::Defined {
                     name: symbol_name.to_string(),
                     section_index: section_index as usize,
                     bind,
                     symbol_type,
-                    offset,
+                    value,
                 }
             }
         };
@@ -346,7 +364,8 @@ fn parse_relocations(
             continue;
         }
 
-        let placeholder_offset = rela.r_offset(endian) as usize;
+        // the position of placeholder
+        let offset = rela.r_offset(endian) as usize;
         let addend = rela.r_addend(endian) as isize;
 
         // The `r_info` field encodes both the symbol index and the relocation type.
@@ -381,7 +400,7 @@ fn parse_relocations(
 
         let relocation = Relocation {
             relocation_type,
-            placeholder_offset,
+            offset,
             symbol_index: symbol_index as usize,
             addend,
         };
@@ -560,7 +579,7 @@ pub fn read_relocatable_module<'a>(
     // Check if the machine architecture, endianness, and file class are supported by the linker.
     if file_header.file_class != FileClass::Elf64 {
         return Err(LinkerError::new(&format!(
-            "Unsupported file class: {:?}, expected 64-bit ELF (ELFCLASS64)",
+            "Unsupported file class: {}, expected 64-bit ELF (ELFCLASS64)",
             file_header.file_class
         )));
     }
@@ -573,7 +592,7 @@ pub fn read_relocatable_module<'a>(
         | Machine::PowerPC64 => {
             if file_header.data_encoding != DataEncoding::LittleEndian {
                 return Err(LinkerError::new(&format!(
-                    "Unsupported data encoding: {:?} for machine architecture: {:?}, expected little-endian (ELFDATA2LSB)",
+                    "Unsupported data encoding: {} for machine architecture: {}, expected little-endian (ELFDATA2LSB)",
                     file_header.data_encoding, file_header.machine
                 )));
             }
@@ -581,14 +600,14 @@ pub fn read_relocatable_module<'a>(
         Machine::S390 => {
             if file_header.data_encoding != DataEncoding::BigEndian {
                 return Err(LinkerError::new(&format!(
-                    "Unsupported data encoding: {:?} for machine architecture: {:?}, expected big-endian (ELFDATA2MSB)",
+                    "Unsupported data encoding: {} for machine architecture: {}, expected big-endian (ELFDATA2MSB)",
                     file_header.data_encoding, file_header.machine
                 )));
             }
         }
         _ => {
             return Err(LinkerError::new(&format!(
-                "Unsupported machine architecture: {:?}",
+                "Unsupported machine architecture: {}",
                 file_header.machine
             )));
         }
@@ -849,7 +868,7 @@ mod tests {
             let symbols = read_symbols(elf, &binary).unwrap();
 
             // The first symbol table entry (index 0) is reserved and must be undefined.
-            assert_eq!(symbols[0], Symbol::Other);
+            assert_eq!(symbols[0], Symbol::Null);
 
             // Assembler generates `Notype` for function symbols.
             assert!(matches!(
@@ -1349,7 +1368,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by_key(|a| a.placeholder_offset);
+                relocations.sort_by_key(|a| a.offset);
 
                 match arch {
                     Machine::X86_64 => {
@@ -1440,7 +1459,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by_key(|a| a.placeholder_offset);
+                relocations.sort_by_key(|a| a.offset);
 
                 match arch {
                     Machine::X86_64 => {
@@ -1906,7 +1925,7 @@ mod tests {
             let symbols = read_symbols(elf, &binary).unwrap();
 
             // The first symbol table entry (index 0) is reserved and must be undefined.
-            assert_eq!(symbols[0], Symbol::Other);
+            assert_eq!(symbols[0], Symbol::Null);
 
             // GCC generates correct symbol type for function symbols,
             // while the assembler generates `Notype` for function symbols.
@@ -2394,7 +2413,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by_key(|a| a.placeholder_offset);
+                relocations.sort_by_key(|a| a.offset);
 
                 match arch {
                     Machine::X86_64 => {
@@ -2487,7 +2506,7 @@ mod tests {
                 let relocations = &mut relocation_section.relocations;
 
                 // Sort the relocations by placeholder_offset to ensure consistent order for testing.
-                relocations.sort_by_key(|a| a.placeholder_offset);
+                relocations.sort_by_key(|a| a.offset);
 
                 match arch {
                     Machine::X86_64 => {

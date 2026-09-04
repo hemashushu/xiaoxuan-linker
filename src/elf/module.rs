@@ -4,6 +4,8 @@
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
+use std::fmt::Display;
+
 use object::elf;
 
 /// The ELF file header information used by the linker.
@@ -156,6 +158,40 @@ impl From<u16> for FileType {
     }
 }
 
+impl Display for FileClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileClass::Elf32 => write!(f, "32-bit ELF"),
+            FileClass::Elf64 => write!(f, "64-bit ELF"),
+            FileClass::Other(value) => write!(f, "Unknown (value: {})", value),
+        }
+    }
+}
+
+impl Display for DataEncoding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataEncoding::LittleEndian => write!(f, "Little Endian"),
+            DataEncoding::BigEndian => write!(f, "Big Endian"),
+            DataEncoding::Other(value) => write!(f, "Unknown (value: {})", value),
+        }
+    }
+}
+
+impl Display for Machine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Machine::X86_64 => write!(f, "x86_64"),
+            Machine::AArch64 => write!(f, "aarch64"),
+            Machine::RiscV => write!(f, "riscv64"),
+            Machine::LoongArch => write!(f, "loongarch64"),
+            Machine::PowerPC64 => write!(f, "powerpc64le"),
+            Machine::S390 => write!(f, "s390x"),
+            Machine::Other(_) => write!(f, "unknown"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct SectionHeader<'data> {
     /// The section name.
@@ -163,6 +199,11 @@ pub struct SectionHeader<'data> {
 
     /// The section type, such as `Progbits`, `Nobits`, or `Symtab`.
     pub section_type: SectionType,
+
+    /// The address of the section in memory.
+    ///
+    /// For a relocatable file, this field is usually zero.
+    pub virtual_address: usize,
 
     /// The byte offset of the section data in the file.
     pub offset: usize,
@@ -217,6 +258,9 @@ impl From<u32> for SectionType {
 
 #[derive(Debug, PartialEq)]
 pub enum Symbol {
+    Null,
+
+    /// A symbol defined in a section of the ELF file.
     Defined {
         /// The symbol name.
         ///
@@ -233,9 +277,31 @@ pub enum Symbol {
         /// The index of the section that defines the symbol.
         section_index: usize,
 
-        /// The offset of the symbol within its original section.
-        offset: usize,
+        /// The value of the symbol.
+        ///
+        /// For relocatable files, the value is the offset of the symbol within its section.
+        /// For executable or shared object files, the value is the virtual address of the symbol.
+        value: u64,
     },
+
+    /// An absolute value.
+    ///
+    /// It is generally used for symbols defined in a linker script, such as `UART0_BASE = 0x4000C000;`,
+    /// and for absolute symbols defined in assembly code, such as `.equ ABS_SYMBOL, 0x1234`, `.set ABS_SYMBOL, 0x1234`.
+    Absolute {
+        /// The symbol name.
+        name: String,
+
+        /// The symbol binding, such as `Local`, `Global`, or `Weak`.
+        bind: SymbolBind,
+
+        /// The absolute value of the symbol.
+        value: u64,
+    },
+
+    /// A symbol representing a file name.
+    File(String),
+
     /// An undefined symbol that must be resolved by the linker.
     External(String),
 
@@ -259,16 +325,23 @@ pub enum SymbolBind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// The kind of entity represented by a symbol.
 pub enum SymbolType {
-    /// No specific type. Assemblers may use this for functions or data.
+    /// No specific type. Assemblers may use this for functions, data or a
+    /// absolute value specified in the linker script, e.g.
+    /// `linker.ld: UART0_BASE = 0x4000C000;`
     Notype,
+
     /// A data object, such as a global variable.
     Object,
+
     /// A function.
     Func,
+
     /// A section symbol.
     Section,
+
     /// Thread-local storage.
     TLS,
+
     /// A symbol type value not recognized by this linker.
     Other(u8),
 }
@@ -291,7 +364,6 @@ impl From<u8> for SymbolType {
             elf::STT_OBJECT => SymbolType::Object,
             elf::STT_FUNC => SymbolType::Func,
             elf::STT_SECTION => SymbolType::Section,
-            // elf::STT_FILE => SymbolType::File,
             elf::STT_TLS => SymbolType::TLS,
             other => SymbolType::Other(other),
         }
@@ -310,13 +382,13 @@ pub struct RelocationSection {
     pub relocations: Vec<Relocation>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Relocation {
     /// The architecture-specific relocation type.
     pub relocation_type: RelocationType,
 
-    /// The offset of the value or instruction field to be patched.
-    pub placeholder_offset: usize,
+    /// The position of the placeholder in the section that needs to be patched.
+    pub offset: usize,
 
     /// The index of the referenced symbol in the symbol table.
     pub symbol_index: usize,
@@ -382,9 +454,9 @@ pub enum RelocationType {
     /// The formula for calculating the value to be written at the relocation site is:
     /// `S + A - P`
     /// where:
-    /// - `S` is the value of the symbol (the address of the symbol in the final executable).
+    /// - `S` is the value of the symbol (the virtual address of the symbol when the executable is loaded into memory).
     /// - `A` is the addend specified in the relocation entry (the `addend` field in the `Relocation` struct).
-    /// - `P` is the address of the relocation site (the `placeholder_offset` field in the `Relocation` struct).
+    /// - `P` is the address of the relocation site (the placeholder `offset` field in the `Relocation` struct + the load address of the section).
     R_X86_64_PC32,
 
     /// A 32-bit PC-relative relocation for a function call associated with a PLT entry.
@@ -408,7 +480,7 @@ pub enum RelocationType {
     /// The formula for calculating the value to be written at the relocation site is:
     /// `S + A`
     /// where:
-    /// - `S` is the absolute address of the symbol in the final executable.
+    /// - `S` is the absolute virtual address of the symbol when the executable is loaded into memory.
     /// - `A` is the addend specified in the relocation entry.
     ///
     /// For a non-PIE static executable (ET_EXEC), this is resolved at link time by
@@ -446,19 +518,48 @@ pub enum RelocationType {
     /// Then the value to be written at the relocation site for `var1` would be `0 - 8 = -8`,
     /// and for `var2` would be `4 - 8 = -4`.
     ///
-    /// Note that the value is negative because the TLS block grows downwards from the thread pointer (TP).
+    /// Note that the value is negative because the TLS block grows downwards from the "thread pointer" (TP).
     ///
     /// A simplified TLS block layout is:
     ///
     /// Higher addresses
     /// +---------------------------+
-    /// | other TCB fields (if any) |
+    /// | other TCB fields (if any) | `TCB` stands for "Thread Control Block"
     /// | self pointer (TCB)        | [fs:0] = FS.base
     /// +---------------------------+
     /// | var2 (offset 4)           | [fs:-4] = FS.base - 4 (tpoff = -4)
     /// | var1 (offset 0)           | [fs:-8] = FS.base - 8 (tpoff = -8)
     /// +---------------------------+
     /// Lower addresses
+    ///
+    ///
+    /// Assuming there are variables as:
+    ///
+    /// ```c
+    /// /* thread-local variables: placed in .tdata (initialized) */
+    /// __thread long foo = 11;
+    /// __thread long bar = 13;
+    ///
+    /// /* thread-local variables: placed in .tbss (zero-init) */
+    /// __thread long x = 0;
+    /// __thread long y = 0;
+    /// ```
+    ///
+    /// The layout of the TLS block in memory would be:
+    ///
+    /// Higher addresses
+    /// +---------------------------+
+    /// | x                         | .tbss
+    /// | y                         |
+    /// +---------------------------+
+    /// | foo                       | .tdata
+    /// | bar                       |
+    /// +---------------------------+
+    /// Lower addresses
+    ///
+    /// Result = S + A - TLS_BLOCK_SIZE
+    ///
+    /// Where `S` is the symbol's offset in the TLS block (combined `.tdata` and `.tbss`)
     R_X86_64_TPOFF32,
 
     /// `R_AARCH64_ADR_PREL_PG_HI21` and `R_AARCH64_ADD_ABS_LO12_NC`/
@@ -660,7 +761,6 @@ impl From<u32> for SegmentFlag {
 /// which contains code, data, symbols, and relocation.
 #[derive(Debug, PartialEq)]
 pub struct RelocatableModule<'a> {
-
     /// The identifier or name of the module, typically derived from the input file name.
     pub name: String,
 

@@ -8,10 +8,8 @@ use std::collections::HashMap;
 
 use crate::{
     elf::{
-        merger::{
-            MergedFileLayout, MergedModule, MergedRelocationSection, MergedSection, ResolvedSymbol,
-            SectionName,
-        },
+        external_symbol_resolver::{ResolvedModule, ResolvedSymbol},
+        merger::{FragmentRelocationSection, FragmentSection, MergedFileLayout, SectionName},
         module::{Relocation, RelocationType},
         relocator::{PatchItem, PatchModule, RelocationResolver},
     },
@@ -23,27 +21,29 @@ pub struct X86_64RelocationResolver;
 impl RelocationResolver for X86_64RelocationResolver {
     fn resolve(
         merged_file_layout: &MergedFileLayout,
-        merged_modules: &[MergedModule],
+        resolved_modules: &[ResolvedModule],
     ) -> Result<Vec<PatchModule>, LinkerError> {
         let mut patch_modules = Vec::new();
 
-        for merged_module in merged_modules {
-            let symbols = &merged_module.symbols;
-            let merged_sections = &merged_module.sections;
+        for resolved_module in resolved_modules {
+            let module_name = &resolved_module.name;
+            let resolved_symbols = &resolved_module.symbols;
+            let fragment_sections = &resolved_module.sections;
 
             let mut patch_sections: HashMap<SectionName, Vec<PatchItem>> = HashMap::new();
 
-            for MergedRelocationSection {
+            for FragmentRelocationSection {
                 target_section_name,
                 relocations,
-            } in &merged_module.relocation_sections
+            } in &resolved_module.relocation_sections
             {
                 let patch_items = resolve_section(
+                    module_name,
                     merged_file_layout,
-                    merged_sections,
+                    fragment_sections,
                     target_section_name,
                     relocations,
-                    symbols,
+                    resolved_symbols,
                 )?;
 
                 patch_sections.insert(*target_section_name, patch_items);
@@ -58,8 +58,9 @@ impl RelocationResolver for X86_64RelocationResolver {
 }
 
 fn resolve_section(
+    module_name: &str,
     merged_file_layout: &MergedFileLayout,
-    merged_sections: &HashMap<SectionName, MergedSection>,
+    fragment_sections: &HashMap<SectionName, FragmentSection>,
     target_section_name: &SectionName,
     relocations: &[Relocation],
     symbols: &[ResolvedSymbol],
@@ -72,26 +73,25 @@ fn resolve_section(
         // Process each relocation here
 
         let relocation_type = relocation.relocation_type;
-        let placeholder_offset = relocation.placeholder_offset;
+        let placeholder_offset = relocation.offset;
         let addend = relocation.addend;
 
-        let merged_symbol = &symbols[relocation.symbol_index];
-
-        let ResolvedSymbol::Effective {
-            // offset_in_section: symbol_offset_in_section,
-            virtual_address: symbol_virtual_address,
-        } = merged_symbol
-        else {
-            return Err(LinkerError::Message(format!(
-                "Symbol at index {} can not be used for relocation",
-                relocation.symbol_index,
-            )));
+        let resolved_symbol = &symbols[relocation.symbol_index];
+        let symbol_value = match resolved_symbol {
+            ResolvedSymbol::VirtualAddress(v) => *v,
+            ResolvedSymbol::Absolute(v) => *v as usize,
+            _ => {
+                return Err(LinkerError::Message(format!(
+                    "Symbol at index {} in module {} can not be used for relocation",
+                    relocation.symbol_index, module_name
+                )));
+            }
         };
 
         let patch_item = match relocation_type {
             RelocationType::R_X86_64_64 => {
                 // R_X86_64_64: S + A
-                let relocated_value = symbol_virtual_address.wrapping_add(addend as usize);
+                let relocated_value = symbol_value.wrapping_add(addend as usize);
 
                 // Patch the relocated value into the code section at the placeholder offset.
                 // Note that the placeholder is usually 8 bytes (for 64-bit relocations), so we need to write 8 bytes.
@@ -99,32 +99,30 @@ fn resolve_section(
             }
             RelocationType::R_X86_64_32 => {
                 // R_X86_64_32: S + A
-                let relocated_value = symbol_virtual_address.wrapping_add(addend as usize);
+                let relocated_value = symbol_value.wrapping_add(addend as usize);
                 PatchItem::from_u32(placeholder_offset, relocated_value as u32)
             }
             RelocationType::R_X86_64_PC32 | RelocationType::R_X86_64_PLT32 => {
                 // R_X86_64_PC32: S + A - P
-                let merged_section = merged_sections.get(target_section_name).unwrap();
-                let p = merged_section.virtual_address + placeholder_offset;
-                let relocated_value = symbol_virtual_address
-                    .wrapping_add(addend as usize)
-                    .wrapping_sub(p);
+                let fragment_section = fragment_sections.get(target_section_name).unwrap();
+                let p = fragment_section.virtual_address + placeholder_offset;
+                let relocated_value = symbol_value.wrapping_add(addend as usize).wrapping_sub(p);
 
                 PatchItem::from_u32(placeholder_offset, relocated_value as u32)
             }
             RelocationType::R_X86_64_TPOFF32 => {
                 // R_X86_64_TPOFF32: S + A - TP
+                //
                 // The formula for calculating the value to be written at the relocation site is:
                 // TPOFF(sym) = symbol_offset_in_tls_block − tls_block_size
-                let file_sections = &merged_file_layout.file_sections;
+                let file_sections = &merged_file_layout.merged_section_infos;
                 let file_section_tdata = file_sections.get(&SectionName::TData).unwrap();
                 let file_section_tbss = file_sections.get(&SectionName::TBSS).unwrap();
 
                 let tls_block_size = file_section_tbss.virtual_address
                     - file_section_tdata.virtual_address
                     + file_section_tbss.size;
-                let symbol_offset_in_tls_block =
-                    symbol_virtual_address - file_section_tdata.virtual_address;
+                let symbol_offset_in_tls_block = symbol_value - file_section_tdata.virtual_address;
 
                 let relocated_value = symbol_offset_in_tls_block
                     .wrapping_add(addend as usize)
@@ -133,7 +131,10 @@ fn resolve_section(
                 PatchItem::from_u32(placeholder_offset, relocated_value as u32)
             }
             _ => {
-                unimplemented!()
+                unreachable!(
+                    "Relocation type {:?} is not supported for x86_64 architecture",
+                    relocation_type
+                );
             }
         };
 

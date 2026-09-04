@@ -1,0 +1,296 @@
+// Copyright (c) 2026 Hemashushu <hippospark@gmail.com>, All rights reserved.
+//
+// This Source Code Form is subject to the terms of
+// the Mozilla Public License version 2.0 and additional exceptions.
+// For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
+
+use std::collections::HashMap;
+
+use crate::{
+    elf::module::{RelocatableModule, Symbol, SymbolBind},
+    error::LinkerError,
+};
+
+/// Filter out the modules that do not contain any relevant symbols
+/// for the final executable.
+///
+/// The first module is the main module, which contains the entry point of the executable.
+/// This function traverses from the main module to find all the modules that are reachable
+/// through the imported and exported symbols.
+pub fn filter<'a>(
+    modules: Vec<RelocatableModule<'a>>,
+) -> Result<Vec<RelocatableModule<'a>>, LinkerError> {
+    let add_symbol_to_map = |map: &mut HashMap<
+        String,
+        (/* module_index */ usize, /* is_weak */ bool),
+    >,
+                             name: &str,
+                             bind: &SymbolBind,
+                             module_index: usize,
+                             module_name: &str|
+     -> Result<(), LinkerError> {
+        match bind {
+            SymbolBind::Global => {
+                let existing_entry = map.get(name);
+                if let Some((existing_module_index, existing_is_weak)) = existing_entry {
+                    if !*existing_is_weak {
+                        // Duplicate strong symbol, which is an error
+                        return Err(LinkerError::Message(format!(
+                            "Duplicate strong symbol \"{}\" defined in module \"{}\" and module \"{}\"",
+                            name, modules[*existing_module_index].name, module_name
+                        )));
+                    }
+                }
+                map.insert(name.to_string(), (module_index, false));
+            }
+            SymbolBind::Weak => {
+                if !map.contains_key(name) {
+                    // we should ignore the weak symbol no matter whether the existing symbol is weak or strong
+                    map.insert(name.to_string(), (module_index, true));
+                }
+            }
+            _ => {
+                // Local symbols are not exported
+            }
+        }
+        Ok(())
+    };
+
+    // Extract the exported symbols from all modules
+    let mut exported_symbols: HashMap<String, (/* module_index */ usize, /* is_weak */ bool)> =
+        HashMap::new();
+
+    for (
+        module_index,
+        RelocatableModule {
+            name: module_name,
+            symbols,
+            ..
+        },
+    ) in modules.iter().enumerate()
+    {
+        for symbol in symbols {
+            match symbol {
+                Symbol::Defined { name, bind, .. } => {
+                    add_symbol_to_map(
+                        &mut exported_symbols,
+                        name,
+                        bind,
+                        module_index,
+                        module_name,
+                    )?;
+                }
+                Symbol::Absolute { name, bind, .. } => {
+                    add_symbol_to_map(
+                        &mut exported_symbols,
+                        name,
+                        bind,
+                        module_index,
+                        module_name,
+                    )?;
+                }
+                _ => {
+                    // Ignore other symbols
+                }
+            }
+        }
+    }
+
+    // Check reachability of modules starting from the main module (index 0)
+
+    let mut reachable_module_indices: Vec<usize> = vec![];
+    reachable_module_indices.push(0); // The first module is the main module
+
+    let mut pending_module_indices: Vec<usize> = vec![];
+    pending_module_indices.push(0); // The first module is the main module
+
+    while let Some(module_index) = pending_module_indices.pop() {
+        let module = &modules[module_index];
+        for symbol in &module.symbols {
+            if let Symbol::External(name) = symbol {
+                if let Some((target_module_index, _)) = exported_symbols.get(name) {
+                    if !reachable_module_indices.contains(target_module_index) {
+                        reachable_module_indices.push(*target_module_index);
+                        pending_module_indices.push(*target_module_index);
+                    }
+                } else {
+                    return Err(LinkerError::Message(format!(
+                        "Unresolved external symbol \"{}\" in module \"{}\"",
+                        name, module.name
+                    )));
+                }
+            }
+        }
+    }
+
+    let reachable_modules = modules
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, module)| {
+            if reachable_module_indices.contains(&index) {
+                Some(module)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    Ok(reachable_modules)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use pretty_assertions::assert_eq;
+    use std::{fmt::Display, vec};
+
+    use crate::elf::{
+        filter::filter,
+        module::{Machine, RelocatableModule},
+        reader::read_relocatable_module,
+    };
+
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    enum SourceType {
+        Assembly,
+
+        #[allow(dead_code)]
+        #[allow(clippy::upper_case_acronyms)]
+        GCC,
+    }
+
+    impl Display for SourceType {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SourceType::Assembly => f.write_str("asm"),
+                SourceType::GCC => f.write_str("gcc"),
+            }
+        }
+    }
+
+    fn get_arch_dir_name(arch: &Machine) -> &'static str {
+        match arch {
+            Machine::X86_64 => "x86_64",
+            Machine::AArch64 => "aarch64",
+            Machine::RiscV => "riscv64",
+            Machine::LoongArch => "loongarch64",
+            Machine::PowerPC64 => "powerpc64le",
+            Machine::S390 => "s390x",
+            Machine::Other(_) => unimplemented!(),
+        }
+    }
+
+    fn get_example_file_binary(
+        source_type: SourceType,
+        arch: &Machine,
+        file_name: &str,
+    ) -> Vec<u8> {
+        let file_path = std::env::current_dir()
+            .unwrap()
+            .join("resources/examples/elf")
+            .join(source_type.to_string())
+            .join(get_arch_dir_name(arch))
+            .join(file_name);
+
+        std::fs::read(file_path).unwrap()
+    }
+
+    fn get_example_file_binaries(
+        source_type: SourceType,
+        arch: &Machine,
+        file_names: &[&str],
+    ) -> Vec<Vec<u8>> {
+        file_names
+            .iter()
+            .map(|file_name| get_example_file_binary(source_type, arch, file_name))
+            .collect()
+    }
+
+    fn get_example_file_module<'a>(name: &str, file_binary: &'a [u8]) -> RelocatableModule<'a> {
+        read_relocatable_module(name, file_binary).unwrap()
+    }
+
+    fn get_example_file_modules<'a>(
+        names: &[&str],
+        file_binaries: &[&'a [u8]],
+    ) -> Vec<RelocatableModule<'a>> {
+        names
+            .iter()
+            .zip(file_binaries.iter())
+            .map(|(name, file_binary)| get_example_file_module(name, file_binary))
+            .collect()
+    }
+
+    #[test]
+    fn test_filter_single_module() {
+        // Test x86_64 architecture only since the other architectures
+        // may contain un-resolved external symbols in the example files,
+        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
+        // which will cause the filter function to fail.
+        let arch = &Machine::X86_64;
+
+        let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
+        let module = get_example_file_module("minimal.o", &file_binary);
+        let modules = vec![module];
+
+        let filtered_modules_result = filter(modules);
+        assert!(filtered_modules_result.is_ok());
+
+        let filtered_modules = filtered_modules_result.unwrap();
+        assert_eq!(filtered_modules.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_reachable_modules() {
+        // Test x86_64 architecture only since the other architectures
+        // may contain un-resolved external symbols in the example files,
+        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
+        // which will cause the filter function to fail.
+        let arch = &Machine::X86_64;
+
+        let file_binaries = get_example_file_binaries(
+            SourceType::Assembly,
+            arch,
+            &["symbol-import.o", "symbol-export.o"],
+        );
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let modules =
+            get_example_file_modules(&["symbol-import.o", "symbol-export.o"], &file_binaries_ref);
+
+        let filtered_modules_result = filter(modules);
+        assert!(filtered_modules_result.is_ok());
+
+        let filtered_modules = filtered_modules_result.unwrap();
+        assert_eq!(filtered_modules.len(), 2);
+        assert_eq!(filtered_modules[0].name, "symbol-import.o");
+        assert_eq!(filtered_modules[1].name, "symbol-export.o");
+    }
+
+    #[test]
+    fn test_filter_unrelated_modules() {
+        // Test x86_64 architecture only since the other architectures
+        // may contain un-resolved external symbols in the example files,
+        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
+        // which will cause the filter function to fail.
+        let arch = &Machine::X86_64;
+
+        let file_binaries = get_example_file_binaries(
+            SourceType::Assembly,
+            arch,
+            &["symbol-import.o", "symbol-export.o", "override-weak.o"],
+        );
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let modules = get_example_file_modules(
+            &["symbol-import.o", "symbol-export.o", "override-weak.o"],
+            &file_binaries_ref,
+        );
+
+        let filtered_modules_result = filter(modules);
+        assert!(filtered_modules_result.is_ok());
+
+        let filtered_modules = filtered_modules_result.unwrap();
+        assert_eq!(filtered_modules.len(), 2);
+        assert_eq!(filtered_modules[0].name, "symbol-import.o");
+        assert_eq!(filtered_modules[1].name, "symbol-export.o");
+    }
+}

@@ -62,11 +62,11 @@ pub const SECTION_NAME_TBSS: &str = ".tbss";
 pub const SECTION_NAME_DATA: &str = ".data";
 pub const SECTION_NAME_BSS: &str = ".bss";
 
-// The names of the supported relocation sections
-pub const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
-pub const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
-pub const SECTION_NAME_RELA_DATA: &str = ".rela.data";
-pub const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
+// // The names of the supported relocation sections
+// pub const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
+// pub const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
+// pub const SECTION_NAME_RELA_DATA: &str = ".rela.data";
+// pub const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
 
 // ELF64 header size is fixed at 64 bytes
 pub const ELF_HEADER_SIZE: usize = 64;
@@ -112,16 +112,19 @@ pub const BASE_PROGRAM_HEADER_COUNT: usize = 3;
 /// instead of the `.rodata` and `.rela.rodata` sections.
 /// However, the current implementation of the linker does not support PIE, so we need to use a non-PIE object file for testing.
 #[derive(Debug, PartialEq)]
-pub struct MergedModule<'a> {
+pub struct FragmentModule<'a> {
+    /// The identifier or name of the module, typically derived from the input file name.
+    pub name: String,
+
     /// The relevant sections of the module
-    pub sections: HashMap<SectionName, MergedSection<'a>>,
+    pub sections: HashMap<SectionName, FragmentSection<'a>>,
 
     /// The symbol table of the module, which contains the symbols defined in the module.
-    pub symbols: Vec<ResolvedSymbol>,
+    pub symbols: Vec<MergedSymbol>,
 
     /// The relocation entries of the module, which contain the information about
     /// how to adjust the code and data when linking.
-    pub relocation_sections: Vec<MergedRelocationSection>,
+    pub relocation_sections: Vec<FragmentRelocationSection>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -138,7 +141,7 @@ pub enum SectionName {
 
 /// Section represents a section in the merged module
 #[derive(Debug, PartialEq, Clone)]
-pub struct MergedSection<'a> {
+pub struct FragmentSection<'a> {
     /// The size of the section.
     /// For the `.bss` and `.tbss` sections, this is the memory size of the section,
     /// which is not present in the file, but occupies space in memory.
@@ -149,13 +152,19 @@ pub struct MergedSection<'a> {
     /// Note: only `.text`, `.rodata`, `.tdata`, and `.data` sections
     /// contain binary data in the object file,
     /// while `.bss` and `.tbss` sections do not contain binary data in the object file.
-    pub binary: MergedSectionBinary<'a>,
+    pub binary: FragmentSectionBinary<'a>,
 
-    /// The section offset in the final executable, which are calculated during the linking process.
-    pub offset_in_file: usize,
+    // The offset of the fragment sections in the merged section in the runtime memory of the final executable file
+    //
+    // Note that the offset in the merged section is different from the offset in the merged file,
+    // because the `.bss` and `.tbss` sections are NOBITS sections, which do not occupy space in the file,
+    // but occupy space in memory, so the offset in the merged section is affected by the size of `.bss` and `.tbss`.
+    pub offset_in_merged_section: usize,
 
-    /// The virtual addresses of the sections in the final executable,
-    /// which are calculated during the linking process based on the section offsets and the load address.
+    /// The section offset in the final executable
+    pub offset_in_merged_file: usize,
+
+    /// The virtual address of the section in the runtime memory of the final executable file.
     ///
     /// For most sections, `virtual address = load address + section offset`,
     /// but start from the `.data` section, the virtual address is also affected by the
@@ -163,47 +172,113 @@ pub struct MergedSection<'a> {
     pub virtual_address: usize,
 }
 
-impl<'a> MergedSection<'a> {
+impl<'a> FragmentSection<'a> {
     pub fn new(
         size: usize,
         binary: &'a [u8],
-        offset_in_file: usize,
+        offset_in_merged_section: usize,
+        offset_in_merged_file: usize,
         virtual_address: usize,
     ) -> Self {
-        MergedSection {
+        FragmentSection {
             size,
-            binary: MergedSectionBinary::Referenced(binary),
-            offset_in_file,
+            binary: FragmentSectionBinary::Referenced(binary),
+            offset_in_merged_section,
+            offset_in_merged_file,
             virtual_address,
         }
     }
 
-    pub fn new_bss(size: usize, offset_in_file: usize, virtual_address: usize) -> Self {
-        MergedSection {
+    pub fn new_bss(
+        size: usize,
+        offset_in_merged_section: usize,
+        offset_in_merged_file: usize,
+        virtual_address: usize,
+    ) -> Self {
+        FragmentSection {
             size,
-            binary: MergedSectionBinary::None,
-            offset_in_file,
+            binary: FragmentSectionBinary::None,
+            offset_in_merged_section,
+            offset_in_merged_file,
             virtual_address,
         }
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum MergedSectionBinary<'a> {
+pub enum FragmentSectionBinary<'a> {
     Referenced(&'a [u8]),
     None,
 }
 
-/// Symbol represents a symbol in the merged module
-#[derive(Debug, PartialEq)]
-pub enum ResolvedSymbol {
-    Effective {
+#[derive(Debug, PartialEq, Clone)]
+pub enum MergedSymbol {
+    Defined {
+        /// The name of the symbol
+        /// This name may be empty for symbols that represent sections
+        /// (e.g. the symbol which represents a section).
+        name: String,
+
+        /// The binding of the symbol, which determines the linkage of the symbol.
+        bind: SymbolBind,
+
+        /// The section where the symbol is located in the final executable.
+        section_name: SectionName,
+
+        /// The offset of the symbol in the merged section in the final executable,
+        offset_in_merged_section: usize,
+
         /// The virtual address of the symbol in the merged section in the final executable,
         virtual_address: usize,
     },
+    Absolute {
+        /// The name of the symbol
+        name: String,
+
+        /// The binding of the symbol, which determines the linkage of the symbol.
+        bind: SymbolBind,
+
+        /// The absolute value
+        value: u64,
+    },
+    External(/* name */ String),
 
     /// Symbols that the linker does not care about.
     Other,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct GlobalSymbolMapEntry {
+    pub value: GlobalSymbolValue,
+    pub is_weak: bool,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum GlobalSymbolValue {
+    Defined {
+        section_name: SectionName,
+        virtual_address: usize,
+    },
+    Absolute(u64),
+}
+
+impl GlobalSymbolMapEntry {
+    pub fn new(value: GlobalSymbolValue, is_weak: bool) -> Self {
+        GlobalSymbolMapEntry { value, is_weak }
+    }
+}
+
+impl GlobalSymbolValue {
+    pub fn from_defined(section_name: SectionName, virtual_address: usize) -> Self {
+        GlobalSymbolValue::Defined {
+            section_name,
+            virtual_address,
+        }
+    }
+
+    pub fn from_absolute(value: u64) -> Self {
+        GlobalSymbolValue::Absolute(value)
+    }
 }
 
 impl From<&str> for SectionName {
@@ -235,8 +310,8 @@ impl Display for SectionName {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct MergedRelocationSection {
+#[derive(Debug, PartialEq, Clone)]
+pub struct FragmentRelocationSection {
     /// The section which these relocations apply to.
     ///
     /// Currently, only the following sections are supported:
@@ -250,24 +325,6 @@ pub struct MergedRelocationSection {
     pub relocations: Vec<Relocation>,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct GlobalSymbolMapEntry {
-    /// The virtual address of the symbol in the final executable,
-    pub virtual_address: usize,
-
-    /// Whether the symbol is weakly bound
-    pub is_weak: bool,
-}
-
-impl GlobalSymbolMapEntry {
-    pub fn new(virtual_address: usize, is_weak: bool) -> Self {
-        GlobalSymbolMapEntry {
-            virtual_address,
-            is_weak,
-        }
-    }
-}
-
 fn get_load_address_base(arch: &Machine) -> usize {
     match arch {
         // typical base address for x86_64 executables (ET_EXEC),
@@ -278,7 +335,7 @@ fn get_load_address_base(arch: &Machine) -> usize {
         Machine::LoongArch => 0x120000000,
         Machine::PowerPC64 => 0x10000000,
         Machine::S390 => 0x1000000,
-        _ => unimplemented!("Unsupported architecture: {:?}", arch),
+        _ => unimplemented!("Unsupported architecture: {}", arch),
     }
 }
 
@@ -293,7 +350,7 @@ fn get_segment_align_page_size(arch: &Machine) -> usize {
         Machine::LoongArch => 0x10000,
         Machine::PowerPC64 => 0x10000,
         Machine::S390 => 0x1000,
-        _ => unimplemented!("Unsupported architecture: {:?}", arch),
+        _ => unimplemented!("Unsupported architecture: {}", arch),
     }
 }
 
@@ -312,7 +369,7 @@ fn get_section_align_text(arch: &Machine) -> usize {
         Machine::LoongArch => 32,
         Machine::PowerPC64 => 32,
         Machine::S390 => 8,
-        _ => unimplemented!("Unsupported architecture: {:?}", arch),
+        _ => unimplemented!("Unsupported architecture: {}", arch),
     }
 }
 
@@ -355,93 +412,12 @@ fn align_up(val: usize, align: usize) -> usize {
     (val + align - 1) & !(align - 1)
 }
 
-/// Filter out the modules that do not contain any relevant symbols
-/// for the final executable.
-///
-/// The first module is the main module, which contains the entry point of the executable.
-/// This function traverses from the main module to find all the modules that are reachable
-/// through the imported and exported symbols.
-pub fn filter<'a>(
-    modules: Vec<RelocatableModule<'a>>,
-) -> Result<Vec<RelocatableModule<'a>>, LinkerError> {
-    // build the exported symbol map for all modules
-    let mut exported_symbol_map: HashMap<String, (/* module_index */ usize, /* is_weak */ bool)> =
-        HashMap::new();
-
-    for (module_index, module) in modules.iter().enumerate() {
-        for symbol in &module.symbols {
-            if let Symbol::Defined { name, bind, .. } = symbol {
-                match bind {
-                    SymbolBind::Global => {
-                        let existing_entry = exported_symbol_map.get(name);
-                        if let Some((existing_module_index, existing_is_weak)) = existing_entry {
-                            if !*existing_is_weak {
-                                // Duplicate strong symbol, which is an error
-                                return Err(LinkerError::Message(format!(
-                                    "Duplicate strong symbol \"{}\" defined in module \"{}\" and module \"{}\"",
-                                    name, modules[*existing_module_index].name, module.name
-                                )));
-                            }
-                        }
-                        exported_symbol_map.insert(name.clone(), (module_index, false));
-                    }
-                    SymbolBind::Weak => {
-                        if !exported_symbol_map.contains_key(name) {
-                            // we should ignore the weak symbol no matter whether the existing symbol is weak or strong
-                            exported_symbol_map.insert(name.clone(), (module_index, true));
-                        }
-                    }
-                    _ => {
-                        // Local symbols are not exported
-                    }
-                }
-            }
-        }
-    }
-
-    let mut reachable_module_indices: Vec<usize> = vec![];
-    reachable_module_indices.push(0); // The first module is the main module
-
-    let mut pending_module_indices: Vec<usize> = vec![];
-    pending_module_indices.push(0); // The first module is the main module
-
-    while let Some(module_index) = pending_module_indices.pop() {
-        let module = &modules[module_index];
-        for symbol in &module.symbols {
-            if let Symbol::External(name) = symbol {
-                if let Some((target_module_index, _)) = exported_symbol_map.get(name) {
-                    if !reachable_module_indices.contains(target_module_index) {
-                        reachable_module_indices.push(*target_module_index);
-                        pending_module_indices.push(*target_module_index);
-                    }
-                } else {
-                    return Err(LinkerError::Message(format!(
-                        "Unresolved external symbol \"{}\" in module \"{}\"",
-                        name, module.name
-                    )));
-                }
-            }
-        }
-    }
-
-    let reachable_modules = modules
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, module)| {
-            if reachable_module_indices.contains(&index) {
-                Some(module)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-
-    Ok(reachable_modules)
-}
-
 #[derive(Debug, PartialEq)]
-pub struct MergedFileSection {
-    pub offset_in_file: usize,
+pub struct MergedSectionInfo {
+    /// The offset of the section in the final executable file.
+    pub offset_in_merged_file: usize,
+
+    /// The virtual address of the section in the runtime memory of the final executable file.
     pub virtual_address: usize,
 
     /// The size of the section in the final executable file.
@@ -450,10 +426,10 @@ pub struct MergedFileSection {
     pub size: usize,
 }
 
-impl MergedFileSection {
-    pub fn new(offset_in_file: usize, virtual_address: usize, size: usize) -> Self {
-        MergedFileSection {
-            offset_in_file,
+impl MergedSectionInfo {
+    pub fn new(offset_in_merged_file: usize, virtual_address: usize, size: usize) -> Self {
+        MergedSectionInfo {
+            offset_in_merged_file,
             virtual_address,
             size,
         }
@@ -475,23 +451,25 @@ pub struct MergedFileLayout {
     /// and an additional TLS segment if there is TLS.
     pub program_header_count: usize,
 
-    /// The virtual address of the entry point (the `_start` symbol) in the final executable.
-    pub entry_point: usize,
-
-    pub file_sections: HashMap<SectionName, MergedFileSection>,
+    pub merged_section_infos: HashMap<SectionName, MergedSectionInfo>,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct MergeAsset<'a> {
-    pub merged_modules: Vec<MergedModule<'a>>,
-    pub global_symbol_map: HashMap<String, GlobalSymbolMapEntry>,
+pub struct MergedAsset<'a> {
+    pub fragment_modules: Vec<FragmentModule<'a>>,
+
+    pub linker_generated_symbols: HashMap<String, GlobalSymbolMapEntry>,
+
     pub merged_file_layout: MergedFileLayout,
 }
 
 pub fn merge<'a>(
     modules: Vec<RelocatableModule<'a>>,
     arch: &Machine,
-) -> Result<MergeAsset<'a>, LinkerError> {
+) -> Result<MergedAsset<'a>, LinkerError> {
+    // Store the module names for later use
+    let module_names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
+
     // Create section name map for each module
     // This map is used to quickly find the section index of a given section name,
     // or to get the section name of a given section index.
@@ -533,8 +511,15 @@ pub fn merge<'a>(
     let segment_align_page_size = get_segment_align_page_size(arch);
     let section_align_text = get_section_align_text(arch);
 
-    // The overall offset of the merged sections in the final executable file
-    let mut file_offset: usize;
+    // The offset of the fragment sections in the final executable file
+    let mut offset_in_merged_file: usize;
+
+    // The offset of the fragment sections in the merged section in the runtime memory of the final executable file
+    //
+    // Note that the offset in the merged section is different from the offset in the merged file,
+    // because the `.bss` and `.tbss` sections are NOBITS sections, which do not occupy space in the file,
+    // but occupy space in memory, so the offset in the merged section is affected by the size of `.bss` and `.tbss`.
+    let mut offset_in_merged_section: usize;
 
     // The overall virtual address of the merged sections in the final executable file
     // By default, the virtual address is calculated as `load_address_base + file_offset`,
@@ -543,53 +528,58 @@ pub fn merge<'a>(
     // we need to calculate the virtual address separately.
     let mut virtual_address: usize;
 
-    let mut merged_sectionss: Vec<HashMap<SectionName, MergedSection<'a>>> =
+    let mut fragment_sectionss: Vec<HashMap<SectionName, FragmentSection<'a>>> =
         vec![HashMap::new(); modules.len()];
 
-    let mut file_sections: HashMap<SectionName, MergedFileSection> = HashMap::new();
+    let mut merged_section_infos: HashMap<SectionName, MergedSectionInfo> = HashMap::new();
 
     // merging code sections
     // ------------------------
 
     // `code` segment is page-aligned
-    file_offset = align_up(
+    offset_in_merged_file = align_up(
         file_header_and_program_headers_size,
         segment_align_page_size,
     );
 
+    // reset the offset in the merged section to 0, since we are starting a new merged section for `.text`
+    offset_in_merged_section = 0;
+
     // merge `.text` sections
-    let file_section_offset_text = file_offset;
-    for ((section_name_map, module), merged_sections) in section_name_maps
+    let merged_section_offset_text = offset_in_merged_file;
+    for ((section_name_map, module), fragment_sections) in section_name_maps
         .iter()
         .zip(modules.iter())
-        .zip(merged_sectionss.iter_mut())
+        .zip(fragment_sectionss.iter_mut())
     {
         if let Some(section_idx) = section_name_map
             .iter()
             .position(|&name| name == SectionName::Text)
         {
             let section = &module.sections[section_idx];
-            file_offset = align_up(file_offset, section_align_text);
+            offset_in_merged_file = align_up(offset_in_merged_file, section_align_text);
 
-            let merged_section = MergedSection::new(
+            let fragment_section = FragmentSection::new(
                 section.size,
                 &section.binary,
-                file_offset,
-                load_address_base + file_offset,
+                offset_in_merged_section,
+                offset_in_merged_file,
+                load_address_base + offset_in_merged_file,
             );
-            merged_sections.insert(SectionName::Text, merged_section);
+            fragment_sections.insert(SectionName::Text, fragment_section);
 
-            file_offset += section.size;
+            offset_in_merged_file += section.size;
+            offset_in_merged_section += section.size;
         }
     }
 
-    let file_section_size_text = file_offset - file_section_offset_text;
-    file_sections.insert(
+    let merged_section_size_text = offset_in_merged_file - merged_section_offset_text;
+    merged_section_infos.insert(
         SectionName::Text,
-        MergedFileSection::new(
-            file_section_offset_text,
-            load_address_base + file_section_offset_text,
-            file_section_size_text,
+        MergedSectionInfo::new(
+            merged_section_offset_text,
+            load_address_base + merged_section_offset_text,
+            merged_section_size_text,
         ),
     );
 
@@ -597,41 +587,44 @@ pub fn merge<'a>(
     // -------------------------------
 
     // `read-only data` segment is page-aligned
-    file_offset = align_up(file_offset, segment_align_page_size);
+    offset_in_merged_file = align_up(offset_in_merged_file, segment_align_page_size);
+    offset_in_merged_section = 0; // reset
 
     // merge `.rodata` sections
-    let file_section_offset_rodata = file_offset;
-    for ((section_name_map, module), merged_sections) in section_name_maps
+    let merged_section_offset_rodata = offset_in_merged_file;
+    for ((section_name_map, module), fragment_sections) in section_name_maps
         .iter()
         .zip(modules.iter())
-        .zip(merged_sectionss.iter_mut())
+        .zip(fragment_sectionss.iter_mut())
     {
         if let Some(section_idx) = section_name_map
             .iter()
             .position(|&name| name == SectionName::ROData)
         {
             let section = &module.sections[section_idx];
-            file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+            offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
 
-            let merged_section = MergedSection::new(
+            let fragment_section = FragmentSection::new(
                 section.size,
                 &section.binary,
-                file_offset,
-                load_address_base + file_offset,
+                offset_in_merged_section,
+                offset_in_merged_file,
+                load_address_base + offset_in_merged_file,
             );
-            merged_sections.insert(SectionName::ROData, merged_section);
+            fragment_sections.insert(SectionName::ROData, fragment_section);
 
-            file_offset += section.size;
+            offset_in_merged_file += section.size;
+            offset_in_merged_section += section.size;
         }
     }
 
-    let file_section_size_rodata = file_offset - file_section_offset_rodata;
-    file_sections.insert(
+    let merged_section_size_rodata = offset_in_merged_file - merged_section_offset_rodata;
+    merged_section_infos.insert(
         SectionName::ROData,
-        MergedFileSection::new(
-            file_section_offset_rodata,
-            load_address_base + file_section_offset_rodata,
-            file_section_size_rodata,
+        MergedSectionInfo::new(
+            merged_section_offset_rodata,
+            load_address_base + merged_section_offset_rodata,
+            merged_section_size_rodata,
         ),
     );
 
@@ -642,56 +635,60 @@ pub fn merge<'a>(
     // one `writable data` segment, so we need to calculate their offsets and virtual addresses together.
 
     // `writable` segment is page-aligned
-    file_offset = align_up(file_offset, segment_align_page_size);
+    offset_in_merged_file = align_up(offset_in_merged_file, segment_align_page_size);
+    offset_in_merged_section = 0; // reset
 
     // merging `.tdata` sections
-    let file_section_offset_tdata = file_offset;
-    for ((section_name_map, module), merged_sections) in section_name_maps
+    let merged_section_offset_tdata = offset_in_merged_file;
+    for ((section_name_map, module), fragment_sections) in section_name_maps
         .iter()
         .zip(modules.iter())
-        .zip(merged_sectionss.iter_mut())
+        .zip(fragment_sectionss.iter_mut())
     {
         if let Some(section_idx) = section_name_map
             .iter()
             .position(|&name| name == SectionName::TData)
         {
             let section = &module.sections[section_idx];
-            file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+            offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
 
-            let merged_section = MergedSection::new(
+            let fragment_section = FragmentSection::new(
                 section.size,
                 &section.binary,
-                file_offset,
-                load_address_base + file_offset,
+                offset_in_merged_section,
+                offset_in_merged_file,
+                load_address_base + offset_in_merged_file,
             );
-            merged_sections.insert(SectionName::TData, merged_section);
+            fragment_sections.insert(SectionName::TData, fragment_section);
 
-            file_offset += section.size;
+            offset_in_merged_file += section.size;
+            offset_in_merged_section += section.size;
         }
     }
 
-    let file_section_size_tdata = file_offset - file_section_offset_tdata;
-    file_sections.insert(
+    let merged_section_size_tdata = offset_in_merged_file - merged_section_offset_tdata;
+    merged_section_infos.insert(
         SectionName::TData,
-        MergedFileSection::new(
-            file_section_offset_tdata,
-            load_address_base + file_section_offset_tdata,
-            file_section_size_tdata,
+        MergedSectionInfo::new(
+            merged_section_offset_tdata,
+            load_address_base + merged_section_offset_tdata,
+            merged_section_size_tdata,
         ),
     );
 
     // data alignment
-    file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
-    virtual_address = load_address_base + file_offset;
+    offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
+    offset_in_merged_section = 0; // reset
+    virtual_address = load_address_base + offset_in_merged_file;
 
     // merging `.tbss` sections
-    let file_section_offset_tbss = file_offset;
-    let file_section_virtual_address_tbss = virtual_address;
+    let merged_section_offset_tbss = offset_in_merged_file;
+    let merged_section_virtual_address_tbss = virtual_address;
 
-    for ((section_name_map, module), merged_sections) in section_name_maps
+    for ((section_name_map, module), fragment_sections) in section_name_maps
         .iter()
         .zip(modules.iter())
-        .zip(merged_sectionss.iter_mut())
+        .zip(fragment_sectionss.iter_mut())
     {
         if let Some(section_idx) = section_name_map
             .iter()
@@ -705,35 +702,42 @@ pub fn merge<'a>(
             // the size of the `.tbss` section, but we do not increase the `file_offset`.
             virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
-            let merged_section = MergedSection::new_bss(section.size, file_offset, virtual_address);
-            merged_sections.insert(SectionName::TBSS, merged_section);
+            let fragment_section = FragmentSection::new_bss(
+                section.size,
+                offset_in_merged_section,
+                offset_in_merged_file,
+                virtual_address,
+            );
+            fragment_sections.insert(SectionName::TBSS, fragment_section);
 
             virtual_address += section.size;
+            offset_in_merged_section += section.size;
         }
     }
 
-    let file_section_size_tbss = virtual_address - file_section_virtual_address_tbss;
-    file_sections.insert(
+    let merged_section_size_tbss = virtual_address - merged_section_virtual_address_tbss;
+    merged_section_infos.insert(
         SectionName::TBSS,
-        MergedFileSection::new(
-            file_section_offset_tbss,
-            file_section_virtual_address_tbss,
-            file_section_size_tbss,
+        MergedSectionInfo::new(
+            merged_section_offset_tbss,
+            merged_section_virtual_address_tbss,
+            merged_section_size_tbss,
         ),
     );
 
     // data alignment
-    file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+    offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
+    offset_in_merged_section = 0; // reset
     virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
     // merging `.data` sections
-    let file_section_offset_data = file_offset;
-    let file_section_virtual_address_data = virtual_address;
+    let merged_section_offset_data = offset_in_merged_file;
+    let merged_section_virtual_address_data = virtual_address;
 
-    for ((section_name_map, module), merged_sections) in section_name_maps
+    for ((section_name_map, module), fragment_sections) in section_name_maps
         .iter()
         .zip(modules.iter())
-        .zip(merged_sectionss.iter_mut())
+        .zip(fragment_sectionss.iter_mut())
     {
         if let Some(section_idx) = section_name_map
             .iter()
@@ -742,26 +746,32 @@ pub fn merge<'a>(
             let section = &module.sections[section_idx];
 
             // Both `file_offset` and `virtual_address` need to be accumulated.
-            file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+            offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
             virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
-            let merged_section =
-                MergedSection::new(section.size, &section.binary, file_offset, virtual_address);
-            merged_sections.insert(SectionName::Data, merged_section);
+            let fragment_section = FragmentSection::new(
+                section.size,
+                &section.binary,
+                offset_in_merged_section,
+                offset_in_merged_file,
+                virtual_address,
+            );
+            fragment_sections.insert(SectionName::Data, fragment_section);
 
             // Both `file_offset` and `virtual_address` need to be accumulated.
-            file_offset += section.size;
+            offset_in_merged_file += section.size;
+            offset_in_merged_section += section.size;
             virtual_address += section.size;
         }
     }
 
-    let file_section_size_data = virtual_address - file_section_virtual_address_data;
-    file_sections.insert(
+    let merged_section_size_data = virtual_address - merged_section_virtual_address_data;
+    merged_section_infos.insert(
         SectionName::Data,
-        MergedFileSection::new(
-            file_section_offset_data,
-            file_section_virtual_address_data,
-            file_section_size_data,
+        MergedSectionInfo::new(
+            merged_section_offset_data,
+            merged_section_virtual_address_data,
+            merged_section_size_data,
         ),
     );
 
@@ -769,20 +779,21 @@ pub fn merge<'a>(
     let symbol_edata_virtual_address = virtual_address;
 
     // data alignment
-    file_offset = align_up(file_offset, SECTION_ALIGN_DATA);
+    offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
+    offset_in_merged_section = 0; // reset
     virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
     // The linker-generated symbol `__bss_start` points to the start of the uninitialized data.
     let symbol_bss_start_virtual_address = virtual_address;
 
     // merging `.bss`
-    let file_section_offset_bss = file_offset;
-    let file_section_virtual_address_bss = virtual_address;
+    let merged_section_offset_bss = offset_in_merged_file;
+    let merged_section_virtual_address_bss = virtual_address;
 
-    for ((section_name_map, module), merged_sections) in section_name_maps
+    for ((section_name_map, module), fragment_sections) in section_name_maps
         .iter()
         .zip(modules.iter())
-        .zip(merged_sectionss.iter_mut())
+        .zip(fragment_sectionss.iter_mut())
     {
         if let Some(section_idx) = section_name_map
             .iter()
@@ -796,20 +807,26 @@ pub fn merge<'a>(
             // the size of the `.bss` section, but we do not increase the `file_offset`.
             virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
-            let merged_section = MergedSection::new_bss(section.size, file_offset, virtual_address);
-            merged_sections.insert(SectionName::BSS, merged_section);
+            let fragment_section = FragmentSection::new_bss(
+                section.size,
+                offset_in_merged_section,
+                offset_in_merged_file,
+                virtual_address,
+            );
+            fragment_sections.insert(SectionName::BSS, fragment_section);
 
             virtual_address += section.size;
+            offset_in_merged_section += section.size;
         }
     }
 
-    let file_section_size_bss = virtual_address - file_section_virtual_address_bss;
-    file_sections.insert(
+    let merged_section_size_bss = virtual_address - merged_section_virtual_address_bss;
+    merged_section_infos.insert(
         SectionName::BSS,
-        MergedFileSection::new(
-            file_section_offset_bss,
-            file_section_virtual_address_bss,
-            file_section_size_bss,
+        MergedSectionInfo::new(
+            merged_section_offset_bss,
+            merged_section_virtual_address_bss,
+            merged_section_size_bss,
         ),
     );
 
@@ -817,49 +834,40 @@ pub fn merge<'a>(
     let symbol_end_virtual_address = virtual_address;
 
     // Create global symbol map for all modules
-    let mut global_symbol_map: HashMap<String, GlobalSymbolMapEntry> = HashMap::new();
+    let mut linker_generated_symbols: HashMap<String, GlobalSymbolMapEntry> = HashMap::new();
 
     // Add linker-generated symbols to the global symbol map
-    global_symbol_map.insert(
+    linker_generated_symbols.insert(
         "_edata".to_string(),
-        GlobalSymbolMapEntry::new(symbol_edata_virtual_address, false),
+        GlobalSymbolMapEntry::new(
+            GlobalSymbolValue::from_defined(SectionName::Data, symbol_edata_virtual_address),
+            false,
+        ),
     );
-    global_symbol_map.insert(
+    linker_generated_symbols.insert(
         "__bss_start".to_string(),
-        GlobalSymbolMapEntry::new(symbol_bss_start_virtual_address, false),
+        GlobalSymbolMapEntry::new(
+            GlobalSymbolValue::from_defined(SectionName::BSS, symbol_bss_start_virtual_address),
+            false,
+        ),
     );
-    global_symbol_map.insert(
+    linker_generated_symbols.insert(
         "_end".to_string(),
-        GlobalSymbolMapEntry::new(symbol_end_virtual_address, false),
+        GlobalSymbolMapEntry::new(
+            GlobalSymbolValue::from_defined(SectionName::BSS, symbol_end_virtual_address),
+            false,
+        ),
     );
 
     // Resolve symbols file offset and virtual address
     // -----------------------------------------------
 
-    #[derive(Debug, PartialEq, Clone)]
-    enum MergedSymbol {
-        Defined {
-            /// The name of the symbol
-            /// This name may be empty for symbols that represent sections
-            /// (e.g. the symbol which represents a section).
-            name: String,
-
-            /// The binding of the symbol, which determines the linkage of the symbol.
-            bind: SymbolBind,
-
-            /// The virtual address of the symbol in the merged section in the final executable,
-            virtual_address: usize,
-        },
-        External(/* name */ String),
-        Other,
-    }
-
     let mut merged_symbolss: Vec<Vec<MergedSymbol>> = vec![Vec::new(); modules.len()];
 
-    for (((module, section_name_map), merged_sections), merged_symbols) in modules
+    for (((module, section_name_map), fragment_sections), merged_symbols) in modules
         .iter()
         .zip(section_name_maps.iter())
-        .zip(merged_sectionss.iter())
+        .zip(fragment_sectionss.iter())
         .zip(merged_symbolss.iter_mut())
     {
         for symbol in &module.symbols {
@@ -868,7 +876,7 @@ pub fn merge<'a>(
                     name,
                     bind,
                     section_index,
-                    offset,
+                    value,
                     ..
                 } => {
                     let section_name = section_name_map[*section_index];
@@ -880,126 +888,54 @@ pub fn merge<'a>(
                         )));
                     }
 
-                    let merged_section = merged_sections.get(&section_name);
-                    match merged_section {
-                        Some(merged_section) => {
-                            let resolved_symbol = MergedSymbol::Defined {
-                                name: name.clone(),
-                                bind: *bind,
-                                virtual_address: *offset + merged_section.virtual_address,
-                            };
-                            merged_symbols.push(resolved_symbol);
-                        }
-                        None => {
-                            return Err(LinkerError::Message(format!(
-                                "Section \"{}\" not found in module \"{}\" for symbol \"{}\"",
-                                section_name, module.name, name
-                            )));
-                        }
+                    if let Some(fragment_section) = fragment_sections.get(&section_name) {
+                        let original_value = *value as usize;
+                        let merged_symbol = MergedSymbol::Defined {
+                            name: name.clone(),
+                            bind: *bind,
+                            section_name,
+                            offset_in_merged_section: original_value
+                                + fragment_section.offset_in_merged_section,
+                            virtual_address: original_value + fragment_section.virtual_address,
+                        };
+                        merged_symbols.push(merged_symbol);
+                    } else {
+                        return Err(LinkerError::Message(format!(
+                            "Section \"{}\" not found in module \"{}\" for symbol \"{}\"",
+                            section_name, module.name, name
+                        )));
                     }
+                }
+                Symbol::Absolute {
+                    name, bind, value, ..
+                } => {
+                    let merged_symbol = MergedSymbol::Absolute {
+                        name: name.clone(),
+                        bind: *bind,
+                        value: *value,
+                    };
+                    merged_symbols.push(merged_symbol);
                 }
                 Symbol::External(name) => {
                     merged_symbols.push(MergedSymbol::External(name.clone()));
                 }
-                Symbol::Other => {
+                _ => {
                     merged_symbols.push(MergedSymbol::Other);
                 }
             }
         }
     }
 
-    // Extract global symbols from all modules
-    for (merged_symbols, module) in merged_symbolss.iter().zip(modules.iter()) {
-        for merged_symbol in merged_symbols {
-            if let MergedSymbol::Defined {
-                name,
-                bind,
-                virtual_address,
-                ..
-            } = merged_symbol
-            {
-                match bind {
-                    SymbolBind::Global => {
-                        if global_symbol_map.contains_key(name) {
-                            return Err(LinkerError::Message(format!(
-                                "Duplicate global symbol \"{}\" defined in module \"{}\"",
-                                name, module.name
-                            )));
-                        }
-                        global_symbol_map.insert(
-                            name.clone(),
-                            GlobalSymbolMapEntry::new(*virtual_address, false),
-                        );
-                    }
-                    SymbolBind::Weak => {
-                        if !global_symbol_map.contains_key(name) {
-                            global_symbol_map.insert(
-                                name.clone(),
-                                GlobalSymbolMapEntry::new(*virtual_address, true),
-                            );
-                        }
-                    }
-                    _ => {
-                        // Local symbols are not added to the global symbol map
-                    }
-                }
-            }
-        }
-    }
+    // Move relocation entries FragmentRelocationSection
+    let mut fragment_relocation_sectionss: Vec<Vec<FragmentRelocationSection>> =
+        vec![vec![]; modules.len()];
 
-    // Resolve the external symbol in MergedSymbol and generate ResolvedSymbol
-    let mut resolved_symbolss: Vec<Vec<ResolvedSymbol>> = vec![];
-    for (merged_symbols, module) in merged_symbolss.iter().zip(modules.iter()) {
-        let mut resolved_symbols = Vec::new();
-        for merged_symbol in merged_symbols {
-            match merged_symbol {
-                MergedSymbol::Defined {
-                    virtual_address, ..
-                } => {
-                    let resolved_symbol = ResolvedSymbol::Effective {
-                        virtual_address: *virtual_address,
-                    };
-                    resolved_symbols.push(resolved_symbol);
-                }
-                MergedSymbol::External(name) => {
-                    // Look up the symbol in the global symbol map
-                    if let Some(global_symbol) = global_symbol_map.get(name) {
-                        let resolved_symbol = ResolvedSymbol::Effective {
-                            virtual_address: global_symbol.virtual_address,
-                        };
-                        resolved_symbols.push(resolved_symbol);
-                    } else {
-                        return Err(LinkerError::Message(format!(
-                            "Unresolved external symbol \"{}\" in module \"{}\"",
-                            name, module.name
-                        )));
-                    }
-                }
-                MergedSymbol::Other => {
-                    resolved_symbols.push(ResolvedSymbol::Other);
-                }
-            }
-        }
-        resolved_symbolss.push(resolved_symbols);
-    }
-
-    // Find the entry point symbol `_start` and get its virtual address.
-    let entry_point = if let Some(entry_symbol) = global_symbol_map.get("_start") {
-        entry_symbol.virtual_address
-    } else {
-        return Err(LinkerError::Message(
-            "Entry point symbol \"_start\" not found in the global symbols".to_string(),
-        ));
-    };
-
-    // Translate relocation entries MergedRelocationSection
-    let mut merged_relocation_sectionss: Vec<Vec<MergedRelocationSection>> = vec![];
-    for ((module, section_name_map), merged_sections) in modules
+    for (((module, section_name_map), fragment_sections), fragment_relocation_sections) in modules
         .into_iter()
         .zip(section_name_maps.iter())
-        .zip(merged_sectionss.iter())
+        .zip(fragment_sectionss.iter())
+        .zip(fragment_relocation_sectionss.iter_mut())
     {
-        let mut merged_relocation_sections = Vec::new();
         for relocation_section in module.relocation_sections {
             let target_section_name = section_name_map[relocation_section.target_section_index];
             if target_section_name == SectionName::Other {
@@ -1009,36 +945,35 @@ pub fn merge<'a>(
                 )));
             }
 
-            let merged_section = merged_sections.get(&target_section_name);
-            match merged_section {
-                Some(_) => {
-                    let merged_relocation_section = MergedRelocationSection {
-                        target_section_name,
-                        relocations: relocation_section.relocations,
-                    };
-                    merged_relocation_sections.push(merged_relocation_section);
-                }
-                None => {
-                    return Err(LinkerError::Message(format!(
-                        "Section \"{}\" not found in module \"{}\" for relocation section",
-                        target_section_name, module.name
-                    )));
-                }
+            if let Some(_) = fragment_sections.get(&target_section_name) {
+                let fragment_relocation_section = FragmentRelocationSection {
+                    target_section_name,
+                    relocations: relocation_section.relocations,
+                };
+                fragment_relocation_sections.push(fragment_relocation_section);
+            } else {
+                return Err(LinkerError::Message(format!(
+                    "Section \"{}\" not found in module \"{}\" for relocation section",
+                    target_section_name, module.name
+                )));
             }
         }
-        merged_relocation_sectionss.push(merged_relocation_sections);
     }
 
     // Refactor the merged sections, symbols, and relocation sections into a single MergedModule(s)
-    let merged_modules: Vec<MergedModule> = merged_sectionss
+    let fragment_modules: Vec<FragmentModule> = module_names
         .into_iter()
-        .zip(resolved_symbolss.into_iter())
-        .zip(merged_relocation_sectionss.into_iter())
-        .map(|((sections, symbols), relocation_sections)| MergedModule {
-            sections,
-            symbols,
-            relocation_sections,
-        })
+        .zip(fragment_sectionss.into_iter())
+        .zip(merged_symbolss.into_iter())
+        .zip(fragment_relocation_sectionss.into_iter())
+        .map(
+            |(((name, sections), symbols), relocation_sections)| FragmentModule {
+                name,
+                sections,
+                symbols,
+                relocation_sections,
+            },
+        )
         .collect();
 
     let merged_file_layout = MergedFileLayout {
@@ -1046,17 +981,16 @@ pub fn merge<'a>(
         contains_writable_data,
         contains_tls_data,
         program_header_count,
-        entry_point,
-        file_sections,
+        merged_section_infos,
     };
 
-    let merge_asset = MergeAsset {
-        merged_modules,
-        global_symbol_map,
+    let merged_asset = MergedAsset {
+        fragment_modules,
+        linker_generated_symbols,
         merged_file_layout,
     };
 
-    Ok(merge_asset)
+    Ok(merged_asset)
 }
 
 #[cfg(test)]
@@ -1066,7 +1000,7 @@ mod tests {
     use std::{fmt::Display, vec};
 
     use crate::elf::{
-        merger::{SectionName, filter, merge},
+        merger::{SectionName, merge},
         module::{Machine, RelocatableModule},
         reader::read_relocatable_module,
     };
@@ -1075,6 +1009,7 @@ mod tests {
     enum SourceType {
         Assembly,
 
+        #[allow(dead_code)]
         #[allow(clippy::upper_case_acronyms)]
         GCC,
     }
@@ -1087,15 +1022,6 @@ mod tests {
             }
         }
     }
-
-    const IMPLEMENTED_ARCHS: &[Machine] = &[
-        Machine::X86_64,
-        Machine::AArch64,
-        Machine::RiscV,
-        Machine::LoongArch,
-        Machine::PowerPC64,
-        Machine::S390,
-    ];
 
     fn get_arch_dir_name(arch: &Machine) -> &'static str {
         match arch {
@@ -1162,79 +1088,6 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_single_module() {
-        // Test x86_64 architecture only since the other architectures
-        // may contain un-resolved external symbols in the example files,
-        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
-        // which will cause the filter function to fail.
-        let arch = &Machine::X86_64;
-
-        let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
-        let module = get_example_file_module("minimal.o", &file_binary);
-        let modules = vec![module];
-
-        let filtered_modules_result = filter(modules);
-        assert!(filtered_modules_result.is_ok());
-
-        let filtered_modules = filtered_modules_result.unwrap();
-        assert_eq!(filtered_modules.len(), 1);
-    }
-
-    #[test]
-    fn test_filter_reachable_modules() {
-        // Test x86_64 architecture only since the other architectures
-        // may contain un-resolved external symbols in the example files,
-        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
-        // which will cause the filter function to fail.
-        let arch = &Machine::X86_64;
-
-        let file_binaries = get_example_file_binaries(
-            SourceType::Assembly,
-            arch,
-            &["symbol-import.o", "symbol-export.o"],
-        );
-        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
-        let modules =
-            get_example_file_modules(&["symbol-import.o", "symbol-export.o"], &file_binaries_ref);
-
-        let filtered_modules_result = filter(modules);
-        assert!(filtered_modules_result.is_ok());
-
-        let filtered_modules = filtered_modules_result.unwrap();
-        assert_eq!(filtered_modules.len(), 2);
-        assert_eq!(filtered_modules[0].name, "symbol-import.o");
-        assert_eq!(filtered_modules[1].name, "symbol-export.o");
-    }
-
-    #[test]
-    fn test_filter_unrelated_modules() {
-        // Test x86_64 architecture only since the other architectures
-        // may contain un-resolved external symbols in the example files,
-        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
-        // which will cause the filter function to fail.
-        let arch = &Machine::X86_64;
-
-        let file_binaries = get_example_file_binaries(
-            SourceType::Assembly,
-            arch,
-            &["symbol-import.o", "symbol-export.o", "override-weak.o"],
-        );
-        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
-        let modules = get_example_file_modules(
-            &["symbol-import.o", "symbol-export.o", "override-weak.o"],
-            &file_binaries_ref,
-        );
-
-        let filtered_modules_result = filter(modules);
-        assert!(filtered_modules_result.is_ok());
-
-        let filtered_modules = filtered_modules_result.unwrap();
-        assert_eq!(filtered_modules.len(), 2);
-        assert_eq!(filtered_modules[0].name, "symbol-import.o");
-        assert_eq!(filtered_modules[1].name, "symbol-export.o");
-    }
-
-    #[test]
     fn test_merge_single_module() {
         // Test x86_64 architecture only since the other architectures
         // may contain un-resolved external symbols in the example files,
@@ -1246,47 +1099,38 @@ mod tests {
         let module = get_example_file_module("minimal.o", &file_binary);
         let modules = vec![module];
 
-        let merge_asset_result = merge(modules, arch);
-        assert!(merge_asset_result.is_ok());
+        let merged_asset_result = merge(modules, arch);
+        assert!(merged_asset_result.is_ok());
 
-        let merge_asset = merge_asset_result.unwrap();
+        let merged_asset = merged_asset_result.unwrap();
 
         // Check the merged modules
-        let merged_modules = merge_asset.merged_modules;
+        let merged_modules = merged_asset.fragment_modules;
         assert_eq!(merged_modules.len(), 1);
 
-        let first_merged_module = &merged_modules[0];
-        assert_eq!(first_merged_module.sections.len(), 3); // .text, .rodata, .data
-        assert_eq!(first_merged_module.symbols.len(), 2); // NULL, _start
-        assert_eq!(first_merged_module.relocation_sections.len(), 0); // no relocation sections
-
-        // Check the global symbol map
-        let global_symbol_map = merge_asset.global_symbol_map;
+        // Check the linker-generated symbols
+        let global_symbol_map = merged_asset.linker_generated_symbols;
         let keys = global_symbol_map
             .keys()
             .map(|s| s.as_str())
             .collect::<Vec<_>>();
-        assert_contains_all(&keys, &["_start", "_edata", "__bss_start", "_end"]);
+        assert_contains_all(&keys, &["_edata", "__bss_start", "_end"]);
 
         // Check the merged file layout
-        let merged_file_layout = merge_asset.merged_file_layout;
+        let merged_file_layout = merged_asset.merged_file_layout;
         assert_eq!(merged_file_layout.contains_read_only_data, false);
         assert_eq!(merged_file_layout.contains_writable_data, false);
         assert_eq!(merged_file_layout.contains_tls_data, false);
         assert_eq!(merged_file_layout.program_header_count, 3); // PHDR, metadata, code
-        assert_eq!(
-            merged_file_layout.entry_point,
-            global_symbol_map["_start"].virtual_address
-        );
 
         assert!(
             merged_file_layout
-                .file_sections
+                .merged_section_infos
                 .contains_key(&SectionName::Text)
         );
 
         let file_section_text = merged_file_layout
-            .file_sections
+            .merged_section_infos
             .get(&SectionName::Text)
             .unwrap();
         assert!(file_section_text.size > 0);
@@ -1294,6 +1138,10 @@ mod tests {
 
     #[test]
     fn test_merge_symbol_import_and_export() {
+        // Test x86_64 architecture only since the other architectures
+        // may contain un-resolved external symbols in the example files,
+        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
+        // which will cause the filter function to fail.
         let arch = &Machine::X86_64;
 
         let file_binaries = get_example_file_binaries(
@@ -1306,25 +1154,25 @@ mod tests {
         let modules =
             get_example_file_modules(&["symbol-import.o", "symbol-export.o"], &file_binaries_ref);
 
-        let merge_asset_result = merge(modules, arch);
-        assert!(merge_asset_result.is_ok());
+        let merged_asset_result = merge(modules, arch);
+        assert!(merged_asset_result.is_ok());
 
-        let merge_asset = merge_asset_result.unwrap();
+        let merged_asset = merged_asset_result.unwrap();
 
         // Check the merged modules
-        let merged_modules = merge_asset.merged_modules;
+        let merged_modules = merged_asset.fragment_modules;
         assert_eq!(merged_modules.len(), 2);
 
-        // Check the global symbol map
-        let global_symbol_map = merge_asset.global_symbol_map;
+        // Check the linker-generated symbols
+        let global_symbol_map = merged_asset.linker_generated_symbols;
         let keys = global_symbol_map
             .keys()
             .map(|s| s.as_str())
             .collect::<Vec<_>>();
-        assert_contains_all(&keys, &["a", "b", "x", "y", "foo", "bar", "inc", "dec"]);
+        assert_contains_all(&keys, &["_edata", "__bss_start", "_end"]);
 
         // Check the merged file layout
-        let merged_file_layout = merge_asset.merged_file_layout;
+        let merged_file_layout = merged_asset.merged_file_layout;
         assert_eq!(merged_file_layout.contains_read_only_data, true);
         assert_eq!(merged_file_layout.contains_writable_data, true);
         assert_eq!(merged_file_layout.contains_tls_data, false);
@@ -1332,25 +1180,25 @@ mod tests {
         assert_eq!(merged_file_layout.program_header_count, 5); // PHDR, metadata, code, read-only data, writable data
 
         let file_section_text = merged_file_layout
-            .file_sections
+            .merged_section_infos
             .get(&SectionName::Text)
             .unwrap();
         assert!(file_section_text.size > 0);
 
         let file_section_rodata = merged_file_layout
-            .file_sections
+            .merged_section_infos
             .get(&SectionName::ROData)
             .unwrap();
         assert!(file_section_rodata.size > 0);
 
         let file_section_data = merged_file_layout
-            .file_sections
+            .merged_section_infos
             .get(&SectionName::Data)
             .unwrap();
         assert!(file_section_data.size > 0);
 
         let file_section_bss = merged_file_layout
-            .file_sections
+            .merged_section_infos
             .get(&SectionName::BSS)
             .unwrap();
         assert!(file_section_bss.size > 0);

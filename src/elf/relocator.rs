@@ -8,7 +8,8 @@ use std::collections::HashMap;
 
 use crate::{
     elf::{
-        merger::{MergedFileLayout, MergedModule, MergedSectionBinary, SectionName},
+        external_symbol_resolver::ResolvedModule,
+        merger::{FragmentModule, FragmentSectionBinary, MergedFileLayout, SectionName},
         module::Machine,
     },
     error::LinkerError,
@@ -45,17 +46,17 @@ pub enum LocatedSectionBinary<'a> {
 
 pub fn relocate<'a>(
     merged_file_layout: &MergedFileLayout,
-    merged_modules: &[MergedModule<'a>],
+    resolved_modules: &[ResolvedModule<'a>],
     arch: &Machine,
 ) -> Result<Vec<LocatedModule<'a>>, LinkerError> {
     // Resolve relocations and generate patch modules
     let patch_modules = match arch {
         Machine::X86_64 => {
-            x86_64::X86_64RelocationResolver::resolve(merged_file_layout, merged_modules)?
+            x86_64::X86_64RelocationResolver::resolve(merged_file_layout, resolved_modules)?
         }
         _ => {
             unimplemented!(
-                "Relocation for architecture {:?} is not implemented yet",
+                "Relocation for architecture {} is not implemented yet",
                 arch
             )
         }
@@ -63,14 +64,14 @@ pub fn relocate<'a>(
 
     // Apply the patch modules to the merged modules
     let mut located_modules = Vec::new();
-    for (merged_module, patch_module) in merged_modules.iter().zip(patch_modules) {
+    for (resolved_module, patch_module) in resolved_modules.iter().zip(patch_modules) {
         let mut located_sections: HashMap<SectionName, LocatedSection<'a>> = HashMap::new();
 
-        for (section_name, section) in &merged_module.sections {
+        for (section_name, section) in &resolved_module.sections {
             if let Some(patch_items) = patch_module.patch_sections.get(section_name) {
-                let MergedSectionBinary::Referenced(source_data) = section.binary else {
+                let FragmentSectionBinary::Referenced(source_data) = section.binary else {
                     return Err(LinkerError::Message(format!(
-                        "Section {:?} does not have a referenced binary",
+                        "Section {} does not have a referenced binary",
                         section_name
                     )));
                 };
@@ -92,7 +93,7 @@ pub fn relocate<'a>(
                 );
             } else {
                 match section.binary {
-                    MergedSectionBinary::Referenced(source_data) => {
+                    FragmentSectionBinary::Referenced(source_data) => {
                         located_sections.insert(
                             *section_name,
                             LocatedSection {
@@ -101,7 +102,7 @@ pub fn relocate<'a>(
                             },
                         );
                     }
-                    MergedSectionBinary::None => {
+                    FragmentSectionBinary::None => {
                         located_sections.insert(
                             *section_name,
                             LocatedSection {
@@ -168,6 +169,11 @@ pub struct PatchModule {
 pub trait RelocationResolver {
     fn resolve(
         merged_file_layout: &MergedFileLayout,
-        merged_modules: &[MergedModule],
+        resolved_modules: &[ResolvedModule],
     ) -> Result<Vec<PatchModule>, LinkerError>;
+}
+
+#[cfg(test)]
+mod tests {
+    // todo
 }
