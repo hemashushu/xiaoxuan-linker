@@ -19,6 +19,8 @@ use crate::{
 pub struct X86_64RelocationResolver;
 
 impl RelocationResolver for X86_64RelocationResolver {
+    /// This linker does not support changing code size (e.g., the relaxation of the RISCV instruction set),
+    /// so a relocation resolver only needs to resolve the relocation entries and generate the corresponding patch items.
     fn resolve(
         merged_file_layout: &MergedFileLayout,
         resolved_modules: &[ResolvedModule],

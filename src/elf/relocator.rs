@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::{
     elf::{
         external_symbol_resolver::ResolvedModule,
-        merger::{FragmentModule, FragmentSectionBinary, MergedFileLayout, SectionName},
+        merger::{FragmentSectionBinary, MergedFileLayout, SectionName},
         module::Machine,
     },
     error::LinkerError,
@@ -18,12 +18,12 @@ use crate::{
 mod x86_64;
 
 #[derive(Debug, PartialEq)]
-pub struct LocatedModule<'a> {
-    pub sections: HashMap<SectionName, LocatedSection<'a>>,
+pub struct RelocatedModule<'a> {
+    pub sections: HashMap<SectionName, RelocatedSection<'a>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct LocatedSection<'a> {
+pub struct RelocatedSection<'a> {
     /// The size of the section.
     /// For the `.bss` and `.tbss` sections, this is the memory size of the section,
     /// which is not present in the file, but occupies space in memory.
@@ -34,11 +34,11 @@ pub struct LocatedSection<'a> {
     /// Note: only `.text`, `.rodata`, `.tdata`, and `.data` sections
     /// contain binary data in the object file,
     /// while `.bss` and `.tbss` sections do not contain binary data in the object file.
-    pub binary: LocatedSectionBinary<'a>,
+    pub binary: RelocatedSectionBinary<'a>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum LocatedSectionBinary<'a> {
+pub enum RelocatedSectionBinary<'a> {
     Owned(Vec<u8>),
     Referenced(&'a [u8]),
     None,
@@ -47,8 +47,8 @@ pub enum LocatedSectionBinary<'a> {
 pub fn relocate<'a>(
     merged_file_layout: &MergedFileLayout,
     resolved_modules: &[ResolvedModule<'a>],
-    arch: &Machine,
-) -> Result<Vec<LocatedModule<'a>>, LinkerError> {
+    arch: Machine,
+) -> Result<Vec<RelocatedModule<'a>>, LinkerError> {
     // Resolve relocations and generate patch modules
     let patch_modules = match arch {
         Machine::X86_64 => {
@@ -63,12 +63,14 @@ pub fn relocate<'a>(
     };
 
     // Apply the patch modules to the merged modules
-    let mut located_modules = Vec::new();
+    let mut relocated_modules = Vec::new();
+
     for (resolved_module, patch_module) in resolved_modules.iter().zip(patch_modules) {
-        let mut located_sections: HashMap<SectionName, LocatedSection<'a>> = HashMap::new();
+        let mut relocated_sections: HashMap<SectionName, RelocatedSection<'a>> = HashMap::new();
 
         for (section_name, section) in &resolved_module.sections {
             if let Some(patch_items) = patch_module.patch_sections.get(section_name) {
+                // If there are patch items for this section, we need to apply them to the binary data
                 let FragmentSectionBinary::Referenced(source_data) = section.binary else {
                     return Err(LinkerError::Message(format!(
                         "Section {} does not have a referenced binary",
@@ -84,30 +86,31 @@ pub fn relocate<'a>(
                     );
                 }
 
-                located_sections.insert(
+                relocated_sections.insert(
                     *section_name,
-                    LocatedSection {
+                    RelocatedSection {
                         size: binary.len(),
-                        binary: LocatedSectionBinary::Owned(binary),
+                        binary: RelocatedSectionBinary::Owned(binary),
                     },
                 );
             } else {
+                // If there are no patch items for this section, we can directly use the original binary data
                 match section.binary {
                     FragmentSectionBinary::Referenced(source_data) => {
-                        located_sections.insert(
+                        relocated_sections.insert(
                             *section_name,
-                            LocatedSection {
+                            RelocatedSection {
                                 size: section.size,
-                                binary: LocatedSectionBinary::Referenced(source_data),
+                                binary: RelocatedSectionBinary::Referenced(source_data),
                             },
                         );
                     }
                     FragmentSectionBinary::None => {
-                        located_sections.insert(
+                        relocated_sections.insert(
                             *section_name,
-                            LocatedSection {
+                            RelocatedSection {
                                 size: section.size,
-                                binary: LocatedSectionBinary::None,
+                                binary: RelocatedSectionBinary::None,
                             },
                         );
                     }
@@ -115,12 +118,12 @@ pub fn relocate<'a>(
             }
         }
 
-        located_modules.push(LocatedModule {
-            sections: located_sections,
+        relocated_modules.push(RelocatedModule {
+            sections: relocated_sections,
         });
     }
 
-    Ok(located_modules)
+    Ok(relocated_modules)
 }
 
 /// A patch item represents a modification to be made to a section's binary data.
@@ -175,5 +178,156 @@ pub trait RelocationResolver {
 
 #[cfg(test)]
 mod tests {
-    // todo
+
+    use std::fmt::Display;
+
+    use crate::elf::{
+        external_symbol_resolver::{ResolvedAsset, resolve},
+        filter::filter,
+        merger::{MergedAsset, merge},
+        module::{Machine, RelocatableModule},
+        reader::read_relocatable_module,
+        relocator::relocate,
+    };
+
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    enum SourceType {
+        Assembly,
+
+        #[allow(dead_code)]
+        #[allow(clippy::upper_case_acronyms)]
+        GCC,
+    }
+
+    impl Display for SourceType {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SourceType::Assembly => f.write_str("asm"),
+                SourceType::GCC => f.write_str("gcc"),
+            }
+        }
+    }
+
+    fn get_arch_dir_name(arch: Machine) -> &'static str {
+        match arch {
+            Machine::X86_64 => "x86_64",
+            Machine::AArch64 => "aarch64",
+            Machine::RiscV => "riscv64",
+            Machine::LoongArch => "loongarch64",
+            Machine::PowerPC64 => "powerpc64le",
+            Machine::S390 => "s390x",
+            Machine::Other(_) => unimplemented!(),
+        }
+    }
+
+    fn get_example_file_binary(source_type: SourceType, arch: Machine, file_name: &str) -> Vec<u8> {
+        let file_path = std::env::current_dir()
+            .unwrap()
+            .join("resources/examples/elf")
+            .join(source_type.to_string())
+            .join(get_arch_dir_name(arch))
+            .join(file_name);
+
+        std::fs::read(file_path).unwrap()
+    }
+
+    fn get_example_file_binaries(
+        source_type: SourceType,
+        arch: Machine,
+        file_names: &[&str],
+    ) -> Vec<Vec<u8>> {
+        file_names
+            .iter()
+            .map(|file_name| get_example_file_binary(source_type, arch, file_name))
+            .collect()
+    }
+
+    fn get_example_file_module<'a>(name: &str, file_binary: &'a [u8]) -> RelocatableModule<'a> {
+        read_relocatable_module(name, file_binary).unwrap()
+    }
+
+    fn get_example_file_modules<'a>(
+        names: &[&str],
+        file_binaries: &[&'a [u8]],
+    ) -> Vec<RelocatableModule<'a>> {
+        names
+            .iter()
+            .zip(file_binaries.iter())
+            .map(|(name, file_binary)| get_example_file_module(name, file_binary))
+            .collect()
+    }
+
+    #[test]
+    fn test_relocate_minimal() {
+        let arch = Machine::X86_64;
+
+        let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
+        let module = get_example_file_module("minimal.o", &file_binary);
+        let modules = vec![module];
+
+        let filtered_modules = filter(modules).unwrap();
+        let MergedAsset {
+            fragment_modules,
+            linker_generated_symbols,
+            merged_file_layout,
+        } = merge(filtered_modules, arch).unwrap();
+        let ResolvedAsset {
+            resolved_modules,
+            global_symbols: _,
+        } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
+        let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+
+        assert!(relocate_result.is_ok());
+    }
+
+    #[test]
+    fn test_relocate_data() {
+        let arch = Machine::X86_64;
+
+        let file_binary = get_example_file_binary(SourceType::Assembly, arch, "data.o");
+        let module = get_example_file_module("data.o", &file_binary);
+        let modules = vec![module];
+
+        let filtered_modules = filter(modules).unwrap();
+        let MergedAsset {
+            fragment_modules,
+            linker_generated_symbols,
+            merged_file_layout,
+        } = merge(filtered_modules, arch).unwrap();
+        let ResolvedAsset {
+            resolved_modules,
+            global_symbols: _,
+        } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
+        let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+
+        assert!(relocate_result.is_ok());
+    }
+
+    #[test]
+    fn test_relocate_symbol_export_and_import() {
+        let arch = Machine::X86_64;
+
+        let file_binaries = get_example_file_binaries(
+            SourceType::Assembly,
+            arch,
+            &["symbol-import.o", "symbol-export.o"],
+        );
+        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
+        let modules =
+            get_example_file_modules(&["symbol-import.o", "symbol-export.o"], &file_binaries_ref);
+
+        let filtered_modules = filter(modules).unwrap();
+        let MergedAsset {
+            fragment_modules,
+            linker_generated_symbols,
+            merged_file_layout,
+        } = merge(filtered_modules, arch).unwrap();
+        let ResolvedAsset {
+            resolved_modules,
+            global_symbols: _,
+        } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
+        let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+
+        assert!(relocate_result.is_ok());
+    }
 }

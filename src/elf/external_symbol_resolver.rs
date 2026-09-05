@@ -57,9 +57,7 @@ pub fn resolve<'a>(
     // which are required to successfully link the final executable.
     predefined_global_symbols: &HashMap<String, GlobalSymbolMapEntry>,
 ) -> Result<ResolvedAsset<'a>, LinkerError> {
-    // Create a global symbol map
-    let mut global_symbols: HashMap<String, GlobalSymbolMapEntry> =
-        predefined_global_symbols.clone();
+    let mut global_symbols = predefined_global_symbols.clone();
 
     // Extract global symbols from all modules
     for fragment_module in &fragment_modules {
@@ -214,7 +212,7 @@ mod tests {
         }
     }
 
-    fn get_arch_dir_name(arch: &Machine) -> &'static str {
+    fn get_arch_dir_name(arch: Machine) -> &'static str {
         match arch {
             Machine::X86_64 => "x86_64",
             Machine::AArch64 => "aarch64",
@@ -226,11 +224,7 @@ mod tests {
         }
     }
 
-    fn get_example_file_binary(
-        source_type: SourceType,
-        arch: &Machine,
-        file_name: &str,
-    ) -> Vec<u8> {
+    fn get_example_file_binary(source_type: SourceType, arch: Machine, file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
             .join("resources/examples/elf")
@@ -243,7 +237,7 @@ mod tests {
 
     fn get_example_file_binaries(
         source_type: SourceType,
-        arch: &Machine,
+        arch: Machine,
         file_names: &[&str],
     ) -> Vec<Vec<u8>> {
         file_names
@@ -284,7 +278,7 @@ mod tests {
         // may contain un-resolved external symbols in the example files,
         // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
         // which will cause the filter function to fail.
-        let arch = &Machine::X86_64;
+        let arch = Machine::X86_64;
 
         let file_binaries = get_example_file_binaries(
             SourceType::Assembly,

@@ -8,6 +8,90 @@ use std::fmt::Display;
 
 use object::elf;
 
+/// ELF file layout
+/// ===============
+///
+/// Overall
+/// -------
+///
+/// | Size   | Content         |
+/// |--------|-----------------|
+/// | 64     | ELF header      |
+/// | m * 56 | program headers |
+/// | ...    | section data    |
+/// | n * 64 | section headers |
+///
+/// Sections (in file order)
+/// ------------------------
+///
+/// | Name           | Type         | Description                     | Align | Opt? |
+/// |----------------|--------------|---------------------------------|-------|------|
+/// | 00 NULL        | SHT_NULL     | Null section header             | 0     |      |
+/// | 01 `.text`     | SHT_PROGBITS | Executable code                 | 16    |      |
+/// | 02 `.rodata`   | SHT_PROGBITS | Read-only data (strings)        | 4/8   | Opt  |
+/// | 03 `.tdata`    | SHT_PROGBITS | Initialized thread-local data   | 4/8   | Opt  |
+/// | 04 `.tbss`     | SHT_NOBITS   | Uninitialized thread-local data | 4/8   | Opt  |
+/// | 05 `.data`     | SHT_PROGBITS | Initialized data                | 4/8   | Opt  |
+/// | 06 `.bss`      | SHT_NOBITS   | Uninitialized data              | 4/8   | Opt  |
+/// | 07 `.symtab`   | SHT_SYMTAB   | Symbol table                    | 8     |      |
+/// | 08 `.strtab`   | SHT_STRTAB   | Strings for symbol names        | 1     |      |
+/// | 09 `.shstrtab` | SHT_STRTAB   | Strings for section names       | 1     |      |
+///
+/// Note that sections such as `.rela.*` are consumed by the linker and would not appear in the final executable.
+///
+/// Program headers
+/// ---------------
+///
+/// | Segment           | Sections                        | Type    | Flags | Alignment | Opt? |
+/// |-------------------|---------------------------------|---------|-------|-----------|------|
+/// | 00 phdr           | program headers                 | PT_PHDR | R     | 0x8       |      |
+/// | 01 meta           | file header and program headers | PT_LOAD | R     | 0x1000    |      |
+/// | 02 text           | .text                           | PT_LOAD | R E   | 0x1000    |      |
+/// | 03 read-only data | .rodata                         | PT_LOAD | R     | 0x1000    | Opt  |
+/// | 04 writable data  | .tdata, .tbss, .data, .bss      | PT_LOAD | R W   | 0x1000    | Opt  |
+/// | 05 tls            | .tdata, .tbss                   | PT_TLS  | R     | 0x8       | Opt  |
+
+// The names of the supported sections
+pub const SECTION_NAME_TEXT: &str = ".text";
+pub const SECTION_NAME_RODATA: &str = ".rodata";
+pub const SECTION_NAME_TDATA: &str = ".tdata";
+pub const SECTION_NAME_TBSS: &str = ".tbss";
+pub const SECTION_NAME_DATA: &str = ".data";
+pub const SECTION_NAME_BSS: &str = ".bss";
+
+pub const SECTION_NAME_SYMTAB: &str = ".symtab";
+pub const SECTION_NAME_STRTAB: &str = ".strtab";
+pub const SECTION_NAME_SHSTRTAB: &str = ".shstrtab";
+
+// The names of the supported relocation sections
+pub const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
+pub const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
+pub const SECTION_NAME_RELA_DATA: &str = ".rela.data";
+pub const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
+
+// ELF64 header size is fixed at 64 bytes
+pub const ELF_HEADER_SIZE: usize = 64;
+
+// ELF64 program header entry size is fixed at 56 bytes
+pub const PROGRAM_HEADER_ENTRY_SIZE: usize = 56;
+
+// All executable file contains `PHDR`, `meta`, and `code` segements,
+// and the following are optional:
+// - `read-only data`: .rodata
+// - `writable data`: .tdata, .tbss, .data, .bss
+// - `TLS data`: .tdata, .tbss
+pub const BASE_PROGRAM_HEADER_COUNT: usize = 3;
+
+pub const SEGMENT_ALIGN_PHDR: usize = 0x8;
+pub const SEGMENT_ALIGN_TLS: usize = 0x8;
+
+// .rodata, .data and .tdata sections are 8-byte aligned. This is used for
+// merging data sections from different modules
+pub const SECTION_ALIGN_DATA: usize = 8;
+
+// The symbol table section is 8-byte aligned
+pub const SECTION_ALIGN_SYMTAB: usize = 8;
+
 /// The ELF file header information used by the linker.
 // https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
 #[derive(Debug, PartialEq)]
@@ -143,6 +227,20 @@ impl From<u16> for Machine {
             elf::EM_PPC64 => Machine::PowerPC64,
             elf::EM_S390 => Machine::S390,
             other => Machine::Other(other),
+        }
+    }
+}
+
+impl From<Machine> for u16 {
+    fn from(value: Machine) -> Self {
+        match value {
+            Machine::X86_64 => elf::EM_X86_64,
+            Machine::AArch64 => elf::EM_AARCH64,
+            Machine::RiscV => elf::EM_RISCV,
+            Machine::LoongArch => elf::EM_LOONGARCH,
+            Machine::PowerPC64 => elf::EM_PPC64,
+            Machine::S390 => elf::EM_S390,
+            Machine::Other(value) => value,
         }
     }
 }
@@ -773,4 +871,42 @@ pub struct RelocatableModule<'a> {
     /// The relocation entries of the module, which contain the information about
     /// how to adjust the code and data when linking.
     pub relocation_sections: Vec<RelocationSection>,
+}
+
+pub fn get_load_address_base(arch: Machine) -> usize {
+    match arch {
+        // typical base address for x86_64 executables (ET_EXEC),
+        // by a contrast, PIE/DSO (ET_DYN) usually has a base address of 0.
+        Machine::X86_64 => 0x400000,
+        Machine::AArch64 => 0x400000,
+        Machine::RiscV => 0x10000,
+        Machine::LoongArch => 0x120000000,
+        Machine::PowerPC64 => 0x10000000,
+        Machine::S390 => 0x1000000,
+        _ => unimplemented!("Unsupported architecture: {}", arch),
+    }
+}
+
+pub fn get_segment_align_page_size(arch: Machine) -> usize {
+    match arch {
+        Machine::X86_64 => 0x1000,
+        Machine::AArch64 => 0x10000,
+        Machine::RiscV => 0x1000,
+        Machine::LoongArch => 0x10000,
+        Machine::PowerPC64 => 0x10000,
+        Machine::S390 => 0x1000,
+        _ => unimplemented!("Unsupported architecture: {}", arch),
+    }
+}
+
+pub fn get_section_align_text(arch: Machine) -> usize {
+    match arch {
+        Machine::X86_64 => 16,
+        Machine::AArch64 => 64,
+        Machine::RiscV => 4,
+        Machine::LoongArch => 32,
+        Machine::PowerPC64 => 32,
+        Machine::S390 => 8,
+        _ => unimplemented!("Unsupported architecture: {}", arch),
+    }
 }

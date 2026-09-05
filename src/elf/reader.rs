@@ -660,7 +660,7 @@ mod tests {
         }
     }
 
-    const IMPLEMENTED_ARCHS: &[Machine] = &[
+    const IMPLEMENTED_ARCHS: [Machine; 6] = [
         Machine::X86_64,
         Machine::AArch64,
         Machine::RiscV,
@@ -669,7 +669,7 @@ mod tests {
         Machine::S390,
     ];
 
-    fn get_arch_dir_name(arch: &Machine) -> &'static str {
+    fn get_arch_dir_name(arch: Machine) -> &'static str {
         match arch {
             Machine::X86_64 => "x86_64",
             Machine::AArch64 => "aarch64",
@@ -683,7 +683,7 @@ mod tests {
 
     fn get_example_file_binary(
         source_type: SourceType,
-        arch: &Machine,
+        arch: Machine,
         file_name: &str,
     ) -> Vec<u8> {
         let file_path = std::env::current_dir()

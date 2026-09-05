@@ -7,79 +7,14 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    elf::module::{Machine, RelocatableModule, Relocation, Symbol, SymbolBind},
+    elf::module::{
+        BASE_PROGRAM_HEADER_COUNT, ELF_HEADER_SIZE, Machine, PROGRAM_HEADER_ENTRY_SIZE,
+        RelocatableModule, Relocation, SECTION_ALIGN_DATA, SECTION_NAME_BSS, SECTION_NAME_DATA,
+        SECTION_NAME_RODATA, SECTION_NAME_TBSS, SECTION_NAME_TDATA, SECTION_NAME_TEXT, Symbol,
+        SymbolBind, get_load_address_base, get_section_align_text, get_segment_align_page_size,
+    },
     error::LinkerError,
 };
-
-/// ELF file layout
-/// ===============
-///
-/// Overall
-/// -------
-///
-/// | Size   | Content         |
-/// |--------|-----------------|
-/// | 64     | ELF header      |
-/// | m * 56 | program headers |
-/// | ...    | section data    |
-/// | n * 64 | section headers |
-///
-/// Sections (in file order)
-/// ------------------------
-///
-/// | Name           | Type         | Description                     | Align | Opt? |
-/// |----------------|--------------|---------------------------------|-------|------|
-/// | 00 NULL        | SHT_NULL     | Null section header             | 0     |      |
-/// | 01 `.text`     | SHT_PROGBITS | Executable code                 | 16    |      |
-/// | 02 `.rodata`   | SHT_PROGBITS | Read-only data (strings)        | 4/8   | Opt  |
-/// | 03 `.tdata`    | SHT_PROGBITS | Initialized thread-local data   | 4/8   | Opt  |
-/// | 04 `.tbss`     | SHT_NOBITS   | Uninitialized thread-local data | 4/8   | Opt  |
-/// | 05 `.data`     | SHT_PROGBITS | Initialized data                | 4/8   | Opt  |
-/// | 06 `.bss`      | SHT_NOBITS   | Uninitialized data              | 4/8   | Opt  |
-/// | 07 `.symtab`   | SHT_SYMTAB   | Symbol table                    | 8     |      |
-/// | 08 `.strtab`   | SHT_STRTAB   | Strings for symbol names        | 1     |      |
-/// | 09 `.shstrtab` | SHT_STRTAB   | Strings for section names       | 1     |      |
-///
-/// Note that sections such as `.rela.*` are consumed by the linker and would not appear in the final executable.
-///
-/// Program headers
-/// ---------------
-///
-/// | Segment           | Sections                        | Type    | Flags | Alignment | Opt? |
-/// |-------------------|---------------------------------|---------|-------|-----------|------|
-/// | 00 phdr           | program headers                 | PT_PHDR | R     | 0x8       |      |
-/// | 01 meta           | file header and program headers | PT_LOAD | R     | 0x1000    |      |
-/// | 02 text           | .text                           | PT_LOAD | R E   | 0x1000    |      |
-/// | 03 read-only data | .rodata                         | PT_LOAD | R     | 0x1000    | Opt  |
-/// | 04 writable data  | .tdata, .tbss, .data, .bss      | PT_LOAD | R W   | 0x1000    | Opt  |
-/// | 05 tls            | .tdata, .tbss                   | PT_TLS  | R     | 0x8       | Opt  |
-
-// The names of the supported sections
-pub const SECTION_NAME_TEXT: &str = ".text";
-pub const SECTION_NAME_RODATA: &str = ".rodata";
-pub const SECTION_NAME_TDATA: &str = ".tdata";
-pub const SECTION_NAME_TBSS: &str = ".tbss";
-pub const SECTION_NAME_DATA: &str = ".data";
-pub const SECTION_NAME_BSS: &str = ".bss";
-
-// // The names of the supported relocation sections
-// pub const SECTION_NAME_RELA_TEXT: &str = ".rela.text";
-// pub const SECTION_NAME_RELA_RODATA: &str = ".rela.rodata";
-// pub const SECTION_NAME_RELA_DATA: &str = ".rela.data";
-// pub const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
-
-// ELF64 header size is fixed at 64 bytes
-pub const ELF_HEADER_SIZE: usize = 64;
-
-// ELF64 program header entry size is fixed at 56 bytes
-pub const PROGRAM_HEADER_ENTRY_SIZE: usize = 56;
-
-// All executable file contains `PHDR`, `meta`, and `code` segements,
-// and the following are optional:
-// - `read-only data`: .rodata
-// - `writable data`: .tdata, .tbss, .data, .bss
-// - `TLS data`: .tdata, .tbss
-pub const BASE_PROGRAM_HEADER_COUNT: usize = 3;
 
 /// A merged module represents essential elements of an object file,
 /// which are intended to be merged into a single executable file.
@@ -325,64 +260,16 @@ pub struct FragmentRelocationSection {
     pub relocations: Vec<Relocation>,
 }
 
-fn get_load_address_base(arch: &Machine) -> usize {
-    match arch {
-        // typical base address for x86_64 executables (ET_EXEC),
-        // by a contrast, PIE/DSO (ET_DYN) usually has a base address of 0.
-        Machine::X86_64 => 0x400000,
-        Machine::AArch64 => 0x400000,
-        Machine::RiscV => 0x10000,
-        Machine::LoongArch => 0x120000000,
-        Machine::PowerPC64 => 0x10000000,
-        Machine::S390 => 0x1000000,
-        _ => unimplemented!("Unsupported architecture: {}", arch),
-    }
-}
-
-pub const SEGMENT_ALIGN_PHDR: usize = 0x8;
-pub const SEGMENT_ALIGN_TLS: usize = 0x8;
-
-fn get_segment_align_page_size(arch: &Machine) -> usize {
-    match arch {
-        Machine::X86_64 => 0x1000,
-        Machine::AArch64 => 0x10000,
-        Machine::RiscV => 0x1000,
-        Machine::LoongArch => 0x10000,
-        Machine::PowerPC64 => 0x10000,
-        Machine::S390 => 0x1000,
-        _ => unimplemented!("Unsupported architecture: {}", arch),
-    }
-}
-
-// .rodata, .data and .tdata sections are 8-byte aligned. This is used for
-// merging data sections from different modules
-pub const SECTION_ALIGN_DATA: usize = 8;
-
-// The symbol table section is 8-byte aligned
-pub const SECTION_ALIGN_SYMTAB: usize = 8;
-
-fn get_section_align_text(arch: &Machine) -> usize {
-    match arch {
-        Machine::X86_64 => 16,
-        Machine::AArch64 => 64,
-        Machine::RiscV => 4,
-        Machine::LoongArch => 32,
-        Machine::PowerPC64 => 32,
-        Machine::S390 => 8,
-        _ => unimplemented!("Unsupported architecture: {}", arch),
-    }
-}
-
-fn contains_read_only_data_section(modules: &[crate::elf::module::RelocatableModule]) -> bool {
+fn contains_read_only_data_section(modules: &[RelocatableModule]) -> bool {
     modules.iter().any(|module| {
         module
             .sections
             .iter()
-            .any(|s| s.name == SECTION_NAME_RODATA)
+            .any(|s| s.name == SECTION_NAME_RODATA && s.size > 0)
     })
 }
 
-fn contains_writable_data_section(modules: &[crate::elf::module::RelocatableModule]) -> bool {
+fn contains_writable_data_section(modules: &[RelocatableModule]) -> bool {
     modules.iter().any(|module| {
         let existing_data = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_DATA),
         Some(section) if section.size > 0);
@@ -396,7 +283,7 @@ fn contains_writable_data_section(modules: &[crate::elf::module::RelocatableModu
     })
 }
 
-fn contains_tls_data_section(modules: &[crate::elf::module::RelocatableModule]) -> bool {
+fn contains_tls_data_section(modules: &[RelocatableModule]) -> bool {
     modules.iter().any(|module| {
         let existing_tdata = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_TDATA),
         Some(section) if section.size > 0);
@@ -454,6 +341,26 @@ pub struct MergedFileLayout {
     pub merged_section_infos: HashMap<SectionName, MergedSectionInfo>,
 }
 
+impl MergedFileLayout {
+    /// Checks if the merged file layout contains a section with non-empty size for the given section name.
+    pub fn contains_non_empty_section(&self, section_name: SectionName) -> bool {
+        if let Some(section) = self.merged_section_infos.get(&section_name) {
+            section.size > 0
+        } else {
+            false
+        }
+    }
+
+    pub fn get_non_empty_section_info(
+        &self,
+        section_name: SectionName,
+    ) -> Option<&MergedSectionInfo> {
+        self.merged_section_infos
+            .get(&section_name)
+            .filter(|s| s.size > 0)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct MergedAsset<'a> {
     pub fragment_modules: Vec<FragmentModule<'a>>,
@@ -465,8 +372,18 @@ pub struct MergedAsset<'a> {
 
 pub fn merge<'a>(
     modules: Vec<RelocatableModule<'a>>,
-    arch: &Machine,
+    arch: Machine,
 ) -> Result<MergedAsset<'a>, LinkerError> {
+    // Load architecture-specific parameters
+    #[allow(non_snake_case)]
+    let LOAD_ADDR_BASE = get_load_address_base(arch);
+
+    #[allow(non_snake_case)]
+    let SEGMENT_ALIGN_PAGE_SIZE = get_segment_align_page_size(arch);
+
+    #[allow(non_snake_case)]
+    let SECTION_ALIGN_TEXT = get_section_align_text(arch);
+
     // Store the module names for later use
     let module_names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
 
@@ -506,11 +423,6 @@ pub fn merge<'a>(
     let file_header_and_program_headers_size =
         ELF_HEADER_SIZE + program_header_count * PROGRAM_HEADER_ENTRY_SIZE;
 
-    // Load architecture-specific parameters
-    let load_address_base = get_load_address_base(arch);
-    let segment_align_page_size = get_segment_align_page_size(arch);
-    let section_align_text = get_section_align_text(arch);
-
     // The offset of the fragment sections in the final executable file
     let mut offset_in_merged_file: usize;
 
@@ -539,7 +451,7 @@ pub fn merge<'a>(
     // `code` segment is page-aligned
     offset_in_merged_file = align_up(
         file_header_and_program_headers_size,
-        segment_align_page_size,
+        SEGMENT_ALIGN_PAGE_SIZE,
     );
 
     // reset the offset in the merged section to 0, since we are starting a new merged section for `.text`
@@ -557,14 +469,14 @@ pub fn merge<'a>(
             .position(|&name| name == SectionName::Text)
         {
             let section = &module.sections[section_idx];
-            offset_in_merged_file = align_up(offset_in_merged_file, section_align_text);
+            offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_TEXT);
 
             let fragment_section = FragmentSection::new(
                 section.size,
                 &section.binary,
                 offset_in_merged_section,
                 offset_in_merged_file,
-                load_address_base + offset_in_merged_file,
+                LOAD_ADDR_BASE + offset_in_merged_file,
             );
             fragment_sections.insert(SectionName::Text, fragment_section);
 
@@ -578,7 +490,7 @@ pub fn merge<'a>(
         SectionName::Text,
         MergedSectionInfo::new(
             merged_section_offset_text,
-            load_address_base + merged_section_offset_text,
+            LOAD_ADDR_BASE + merged_section_offset_text,
             merged_section_size_text,
         ),
     );
@@ -587,7 +499,7 @@ pub fn merge<'a>(
     // -------------------------------
 
     // `read-only data` segment is page-aligned
-    offset_in_merged_file = align_up(offset_in_merged_file, segment_align_page_size);
+    offset_in_merged_file = align_up(offset_in_merged_file, SEGMENT_ALIGN_PAGE_SIZE);
     offset_in_merged_section = 0; // reset
 
     // merge `.rodata` sections
@@ -609,7 +521,7 @@ pub fn merge<'a>(
                 &section.binary,
                 offset_in_merged_section,
                 offset_in_merged_file,
-                load_address_base + offset_in_merged_file,
+                LOAD_ADDR_BASE + offset_in_merged_file,
             );
             fragment_sections.insert(SectionName::ROData, fragment_section);
 
@@ -623,7 +535,7 @@ pub fn merge<'a>(
         SectionName::ROData,
         MergedSectionInfo::new(
             merged_section_offset_rodata,
-            load_address_base + merged_section_offset_rodata,
+            LOAD_ADDR_BASE + merged_section_offset_rodata,
             merged_section_size_rodata,
         ),
     );
@@ -635,7 +547,7 @@ pub fn merge<'a>(
     // one `writable data` segment, so we need to calculate their offsets and virtual addresses together.
 
     // `writable` segment is page-aligned
-    offset_in_merged_file = align_up(offset_in_merged_file, segment_align_page_size);
+    offset_in_merged_file = align_up(offset_in_merged_file, SEGMENT_ALIGN_PAGE_SIZE);
     offset_in_merged_section = 0; // reset
 
     // merging `.tdata` sections
@@ -657,7 +569,7 @@ pub fn merge<'a>(
                 &section.binary,
                 offset_in_merged_section,
                 offset_in_merged_file,
-                load_address_base + offset_in_merged_file,
+                LOAD_ADDR_BASE + offset_in_merged_file,
             );
             fragment_sections.insert(SectionName::TData, fragment_section);
 
@@ -671,7 +583,7 @@ pub fn merge<'a>(
         SectionName::TData,
         MergedSectionInfo::new(
             merged_section_offset_tdata,
-            load_address_base + merged_section_offset_tdata,
+            LOAD_ADDR_BASE + merged_section_offset_tdata,
             merged_section_size_tdata,
         ),
     );
@@ -679,7 +591,7 @@ pub fn merge<'a>(
     // data alignment
     offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
     offset_in_merged_section = 0; // reset
-    virtual_address = load_address_base + offset_in_merged_file;
+    virtual_address = LOAD_ADDR_BASE + offset_in_merged_file;
 
     // merging `.tbss` sections
     let merged_section_offset_tbss = offset_in_merged_file;
@@ -1023,7 +935,7 @@ mod tests {
         }
     }
 
-    fn get_arch_dir_name(arch: &Machine) -> &'static str {
+    fn get_arch_dir_name(arch: Machine) -> &'static str {
         match arch {
             Machine::X86_64 => "x86_64",
             Machine::AArch64 => "aarch64",
@@ -1037,7 +949,7 @@ mod tests {
 
     fn get_example_file_binary(
         source_type: SourceType,
-        arch: &Machine,
+        arch: Machine,
         file_name: &str,
     ) -> Vec<u8> {
         let file_path = std::env::current_dir()
@@ -1052,7 +964,7 @@ mod tests {
 
     fn get_example_file_binaries(
         source_type: SourceType,
-        arch: &Machine,
+        arch: Machine,
         file_names: &[&str],
     ) -> Vec<Vec<u8>> {
         file_names
@@ -1093,7 +1005,7 @@ mod tests {
         // may contain un-resolved external symbols in the example files,
         // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
         // which will cause the filter function to fail.
-        let arch = &Machine::X86_64;
+        let arch = Machine::X86_64;
 
         let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
         let module = get_example_file_module("minimal.o", &file_binary);
@@ -1142,7 +1054,7 @@ mod tests {
         // may contain un-resolved external symbols in the example files,
         // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
         // which will cause the filter function to fail.
-        let arch = &Machine::X86_64;
+        let arch = Machine::X86_64;
 
         let file_binaries = get_example_file_binaries(
             SourceType::Assembly,
