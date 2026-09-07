@@ -762,9 +762,11 @@ fn align_up(val: usize, align: usize) -> usize {
 mod tests {
 
     use std::{
+        collections::HashMap,
         fmt::Display,
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
+        process::Command,
         time::Duration,
     };
 
@@ -774,9 +776,8 @@ mod tests {
     };
 
     use crate::elf::{
-        external_symbol_resolver::{ResolvedAsset, resolve},
-        filter::filter,
-        merger::{GlobalSymbolValue, MergedAsset, merge},
+        external_symbol_resolver::{ResolvedAsset, find_entry_point, resolve},
+        merger::{GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, SectionName, merge},
         module::{Machine, RelocatableModule},
         reader::read_relocatable_module,
         relocator::relocate,
@@ -800,6 +801,15 @@ mod tests {
             }
         }
     }
+
+    const IMPLEMENTED_ARCHS: [Machine; 2] = [
+        Machine::X86_64,
+        Machine::AArch64,
+        // Machine::RiscV,
+        // Machine::LoongArch,
+        // Machine::PowerPC64,
+        // Machine::S390,
+    ];
 
     fn get_arch_dir_name(arch: Machine) -> &'static str {
         match arch {
@@ -850,6 +860,26 @@ mod tests {
             .collect()
     }
 
+    fn add_additional_linker_generated_symbols(
+        arch: Machine,
+        linker_generated_symbols: &mut HashMap<String, GlobalSymbolMapEntry>,
+    ) {
+        match arch {
+            Machine::RiscV => {
+                linker_generated_symbols.insert(
+                    "__global_pointer$".to_string(),
+                    GlobalSymbolMapEntry::new(
+                        GlobalSymbolValue::from_defined(SectionName::Text, 0x1000),
+                        false,
+                    ),
+                );
+            }
+            _ => {
+                // No additional linker-generated symbols for other architectures
+            }
+        }
+    }
+
     fn link_example_files(
         file_names: &[&str],
         source_type: SourceType,
@@ -862,28 +892,22 @@ mod tests {
         let modules: Vec<RelocatableModule> =
             get_example_file_modules(file_names, &file_binaries_ref);
 
-        let filtered_modules = filter(modules).unwrap();
         let MergedAsset {
             fragment_modules,
-            linker_generated_symbols,
+            mut linker_generated_symbols,
             merged_file_layout,
-        } = merge(filtered_modules, arch).unwrap();
+        } = merge(modules, arch).unwrap();
+
+        add_additional_linker_generated_symbols(arch, &mut linker_generated_symbols);
+
         let ResolvedAsset {
             resolved_modules,
             global_symbols,
         } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
-        let relocated_modules = relocate(&merged_file_layout, &resolved_modules, arch).unwrap();
 
-        let GlobalSymbolValue::Defined {
-            virtual_address: entry_point,
-            ..
-        } = global_symbols
-            .get("_start")
-            .expect("entry point symbol `_start` not found")
-            .value
-        else {
-            panic!("entry point symbol `_start` is not defined properly");
-        };
+        let entry_point = find_entry_point(&global_symbols).unwrap();
+
+        let relocated_modules = relocate(&merged_file_layout, &resolved_modules, arch).unwrap();
 
         write_executable(
             &relocated_modules,
@@ -900,7 +924,6 @@ mod tests {
         file_names: &[&str],
         source_type: SourceType,
         arch: Machine,
-        endian: Endianness,
         output_base_name: &str,
     ) -> PathBuf {
         let output_file_name = format!(
@@ -909,6 +932,11 @@ mod tests {
             get_arch_dir_name(arch),
             output_base_name
         );
+
+        let endian = match arch {
+            Machine::S390 => Endianness::Big,
+            _ => Endianness::Little,
+        };
 
         let tmp_dir = std::env::temp_dir();
         let path = tmp_dir.join(output_file_name);
@@ -920,22 +948,54 @@ mod tests {
         path
     }
 
-    fn execute_and_assert(file_path: &PathBuf, expected_exit_code: i32, expected_output: &str) {
+    fn execute_and_assert(
+        arch: Machine,
+        file_path: &PathBuf,
+        expected_exit_code: i32,
+        expected_output: &str,
+    ) {
         // Sleep 5ms to avoid `Os { code: 26, kind: ExecutableFileBusy, message: "Text file busy" }` error.
         const RETRY_INTERVAL: Duration = Duration::from_millis(5);
         std::thread::sleep(RETRY_INTERVAL);
 
-        // TODO::
-        // Use QEMU to run the executable on non-native architectures
-        // (e.g., aarch64, riscv64, loongarch64, powerpc64le, s390x)
+        // Use QEMU to run the executable on non-native architectures.
         //
         // For example, to run the aarch64 executable on x86_64, you can use:
         //
         // qemu-aarch64 -L $(aarch64-linux-gnu-gcc -print-sysroot) ./executable_file
 
-        let output = std::process::Command::new(file_path)
-            .output()
-            .expect("failed to execute process");
+        let current_arch = std::env::consts::ARCH;
+        let output_result = match arch {
+            Machine::X86_64 => {
+                if current_arch == "x86_64" {
+                    Command::new(file_path).output()
+                } else {
+                    Command::new("qemu-x86_64")
+                        .arg("-L")
+                        .arg("$(x86_64-linux-gnu-gcc -print-sysroot)")
+                        .arg(file_path)
+                        .output()
+                }
+            }
+            Machine::AArch64 => {
+                if current_arch == "aarch64" {
+                    Command::new(file_path).output()
+                } else {
+                    Command::new("qemu-aarch64")
+                        .arg("-L")
+                        .arg("$(aarch64-linux-gnu-gcc -print-sysroot)")
+                        .arg(file_path)
+                        .output()
+                }
+            }
+            Machine::RiscV => todo!(),
+            Machine::LoongArch => todo!(),
+            Machine::PowerPC64 => todo!(),
+            Machine::S390 => todo!(),
+            Machine::Other(_) => todo!(),
+        };
+
+        let output = output_result.expect("failed to execute process");
 
         let exit_code = output.status.code().unwrap();
 
@@ -962,157 +1022,147 @@ mod tests {
 
     #[test]
     fn test_write_asm_minimal() {
-        let file = generate_example_executable(
-            &["minimal.o"],
-            SourceType::Assembly,
-            Machine::X86_64,
-            Endianness::Little,
-            "minimal",
-        );
-        execute_and_assert(&file, 42, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file =
+                generate_example_executable(&["minimal.o"], SourceType::Assembly, arch, "minimal");
+            execute_and_assert(arch, &file, 42, "");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_asm_function() {
-        let file = generate_example_executable(
-            &["function.o"],
-            SourceType::Assembly,
-            Machine::X86_64,
-            Endianness::Little,
-            "function",
-        );
-        execute_and_assert(&file, 0, "Hello, world!\n");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["function.o"],
+                SourceType::Assembly,
+                arch,
+                "function",
+            );
+            execute_and_assert(arch, &file, 0, "Hello, world!\n");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_asm_data() {
-        let file = generate_example_executable(
-            &["data.o"],
-            SourceType::Assembly,
-            Machine::X86_64,
-            Endianness::Little,
-            "data",
-        );
-        execute_and_assert(&file, 24, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(&["data.o"], SourceType::Assembly, arch, "data");
+            execute_and_assert(arch, &file, 24, "");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_asm_relocate_within_data() {
-        let file = generate_example_executable(
-            &["relocate-within-data.o"],
-            SourceType::Assembly,
-            Machine::X86_64,
-            Endianness::Little,
-            "relocate-within-data",
-        );
-        execute_and_assert(&file, 24, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["relocate-within-data.o"],
+                SourceType::Assembly,
+                arch,
+                "relocate-within-data",
+            );
+            execute_and_assert(arch, &file, 24, "");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_asm_symbol() {
-        let file = generate_example_executable(
-            &["symbol-import.o", "symbol-export.o"],
-            SourceType::Assembly,
-            Machine::X86_64,
-            Endianness::Little,
-            "symbol",
-        );
-        execute_and_assert(&file, 24, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["symbol-import.o", "symbol-export.o"],
+                SourceType::Assembly,
+                arch,
+                "symbol",
+            );
+            execute_and_assert(arch, &file, 24, "");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_asm_override() {
-        let file = generate_example_executable(
-            &["override-strong.o", "override-weak.o"],
-            SourceType::Assembly,
-            Machine::X86_64,
-            Endianness::Little,
-            "override",
-        );
-        execute_and_assert(&file, 53, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["override-strong.o", "override-weak.o"],
+                SourceType::Assembly,
+                arch,
+                "override",
+            );
+            execute_and_assert(arch, &file, 53, "");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_gcc_minimal() {
-        let file = generate_example_executable(
-            &["minimal.o"],
-            SourceType::GCC,
-            Machine::X86_64,
-            Endianness::Little,
-            "minimal",
-        );
-        execute_and_assert(&file, 42, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file =
+                generate_example_executable(&["minimal.o"], SourceType::GCC, arch, "minimal");
+            execute_and_assert(arch, &file, 42, "");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_gcc_function() {
-        let file = generate_example_executable(
-            &["function.o"],
-            SourceType::GCC,
-            Machine::X86_64,
-            Endianness::Little,
-            "function",
-        );
-        execute_and_assert(&file, 0, "Hello, world!\n");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file =
+                generate_example_executable(&["function.o"], SourceType::GCC, arch, "function");
+            execute_and_assert(arch, &file, 0, "Hello, world!\n");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_gcc_data() {
-        let file = generate_example_executable(
-            &["data.o"],
-            SourceType::GCC,
-            Machine::X86_64,
-            Endianness::Little,
-            "data",
-        );
-        execute_and_assert(&file, 24, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(&["data.o"], SourceType::GCC, arch, "data");
+            execute_and_assert(arch, &file, 24, "");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_gcc_relocate_within_data() {
-        let file = generate_example_executable(
-            &["relocate-within-data.o"],
-            SourceType::GCC,
-            Machine::X86_64,
-            Endianness::Little,
-            "relocate-within-data",
-        );
-        execute_and_assert(&file, 24, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["relocate-within-data.o"],
+                SourceType::GCC,
+                arch,
+                "relocate-within-data",
+            );
+            execute_and_assert(arch, &file, 24, "");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_gcc_symbol() {
-        let file = generate_example_executable(
-            &["symbol-import.o", "symbol-export.o"],
-            SourceType::GCC,
-            Machine::X86_64,
-            Endianness::Little,
-            "symbol",
-        );
-        execute_and_assert(&file, 24, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["symbol-import.o", "symbol-export.o"],
+                SourceType::GCC,
+                arch,
+                "symbol",
+            );
+            execute_and_assert(arch, &file, 24, "");
+            delete_temporary_file(&file);
+        }
     }
 
     #[test]
     fn test_write_gcc_override() {
-        let file = generate_example_executable(
-            &["override-strong.o", "override-weak.o"],
-            SourceType::GCC,
-            Machine::X86_64,
-            Endianness::Little,
-            "override",
-        );
-        execute_and_assert(&file, 53, "");
-        delete_temporary_file(&file);
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["override-strong.o", "override-weak.o"],
+                SourceType::GCC,
+                arch,
+                "override",
+            );
+            execute_and_assert(arch, &file, 53, "");
+            delete_temporary_file(&file);
+        }
     }
 }

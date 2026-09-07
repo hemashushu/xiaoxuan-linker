@@ -15,6 +15,7 @@ use crate::{
     error::LinkerError,
 };
 
+mod aarch64;
 mod x86_64;
 
 #[derive(Debug, PartialEq)]
@@ -51,6 +52,9 @@ pub fn relocate<'a>(
 ) -> Result<Vec<RelocatedModule<'a>>, LinkerError> {
     // Resolve relocations and generate patch modules
     let patch_modules = match arch {
+        Machine::AArch64 => {
+            aarch64::AArch64RelocationResolver::resolve(merged_file_layout, resolved_modules)?
+        }
         Machine::X86_64 => {
             x86_64::X86_64RelocationResolver::resolve(merged_file_layout, resolved_modules)?
         }
@@ -179,12 +183,11 @@ pub trait RelocationResolver {
 #[cfg(test)]
 mod tests {
 
-    use std::fmt::Display;
+    use std::{collections::HashMap, fmt::Display};
 
     use crate::elf::{
         external_symbol_resolver::{ResolvedAsset, resolve},
-        filter::filter,
-        merger::{MergedAsset, merge},
+        merger::{GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, SectionName, merge},
         module::{Machine, RelocatableModule},
         reader::read_relocatable_module,
         relocator::relocate,
@@ -207,6 +210,15 @@ mod tests {
             }
         }
     }
+
+    const IMPLEMENTED_ARCHS: [Machine; 2] = [
+        Machine::X86_64,
+        Machine::AArch64,
+        // Machine::RiscV,
+        // Machine::LoongArch,
+        // Machine::PowerPC64,
+        // Machine::S390,
+    ];
 
     fn get_arch_dir_name(arch: Machine) -> &'static str {
         match arch {
@@ -257,77 +269,109 @@ mod tests {
             .collect()
     }
 
+    fn add_additional_linker_generated_symbols(
+        arch: Machine,
+        linker_generated_symbols: &mut HashMap<String, GlobalSymbolMapEntry>,
+    ) {
+        match arch {
+            Machine::RiscV => {
+                linker_generated_symbols.insert(
+                    "__global_pointer$".to_string(),
+                    GlobalSymbolMapEntry::new(
+                        GlobalSymbolValue::from_defined(SectionName::Text, 0x1000),
+                        false,
+                    ),
+                );
+            }
+            _ => {
+                // No additional linker-generated symbols for other architectures
+            }
+        }
+    }
+
     #[test]
     fn test_relocate_minimal() {
-        let arch = Machine::X86_64;
+        for arch in IMPLEMENTED_ARCHS {
+            let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
+            let module = get_example_file_module("minimal.o", &file_binary);
+            let modules = vec![module];
 
-        let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
-        let module = get_example_file_module("minimal.o", &file_binary);
-        let modules = vec![module];
+            let MergedAsset {
+                fragment_modules,
+                mut linker_generated_symbols,
+                merged_file_layout,
+            } = merge(modules, arch).unwrap();
 
-        let filtered_modules = filter(modules).unwrap();
-        let MergedAsset {
-            fragment_modules,
-            linker_generated_symbols,
-            merged_file_layout,
-        } = merge(filtered_modules, arch).unwrap();
-        let ResolvedAsset {
-            resolved_modules,
-            global_symbols: _,
-        } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
-        let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+            add_additional_linker_generated_symbols(arch, &mut linker_generated_symbols);
 
-        assert!(relocate_result.is_ok());
+            let ResolvedAsset {
+                resolved_modules,
+                global_symbols: _,
+            } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
+
+            let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+
+            assert!(relocate_result.is_ok());
+        }
     }
 
     #[test]
     fn test_relocate_data() {
-        let arch = Machine::X86_64;
+        for arch in IMPLEMENTED_ARCHS {
+            let file_binary = get_example_file_binary(SourceType::Assembly, arch, "data.o");
+            let module = get_example_file_module("data.o", &file_binary);
+            let modules = vec![module];
 
-        let file_binary = get_example_file_binary(SourceType::Assembly, arch, "data.o");
-        let module = get_example_file_module("data.o", &file_binary);
-        let modules = vec![module];
+            let MergedAsset {
+                fragment_modules,
+                mut linker_generated_symbols,
+                merged_file_layout,
+            } = merge(modules, arch).unwrap();
 
-        let filtered_modules = filter(modules).unwrap();
-        let MergedAsset {
-            fragment_modules,
-            linker_generated_symbols,
-            merged_file_layout,
-        } = merge(filtered_modules, arch).unwrap();
-        let ResolvedAsset {
-            resolved_modules,
-            global_symbols: _,
-        } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
-        let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+            add_additional_linker_generated_symbols(arch, &mut linker_generated_symbols);
 
-        assert!(relocate_result.is_ok());
+            let ResolvedAsset {
+                resolved_modules,
+                global_symbols: _,
+            } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
+
+            let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+
+            assert!(relocate_result.is_ok());
+        }
     }
 
     #[test]
     fn test_relocate_symbol_export_and_import() {
-        let arch = Machine::X86_64;
+        for arch in IMPLEMENTED_ARCHS {
+            let file_binaries = get_example_file_binaries(
+                SourceType::Assembly,
+                arch,
+                &["symbol-import.o", "symbol-export.o"],
+            );
+            let file_binaries_ref: Vec<&[u8]> =
+                file_binaries.iter().map(|b| b.as_slice()).collect();
+            let modules = get_example_file_modules(
+                &["symbol-import.o", "symbol-export.o"],
+                &file_binaries_ref,
+            );
 
-        let file_binaries = get_example_file_binaries(
-            SourceType::Assembly,
-            arch,
-            &["symbol-import.o", "symbol-export.o"],
-        );
-        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
-        let modules =
-            get_example_file_modules(&["symbol-import.o", "symbol-export.o"], &file_binaries_ref);
+            let MergedAsset {
+                fragment_modules,
+                mut linker_generated_symbols,
+                merged_file_layout,
+            } = merge(modules, arch).unwrap();
 
-        let filtered_modules = filter(modules).unwrap();
-        let MergedAsset {
-            fragment_modules,
-            linker_generated_symbols,
-            merged_file_layout,
-        } = merge(filtered_modules, arch).unwrap();
-        let ResolvedAsset {
-            resolved_modules,
-            global_symbols: _,
-        } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
-        let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+            add_additional_linker_generated_symbols(arch, &mut linker_generated_symbols);
 
-        assert!(relocate_result.is_ok());
+            let ResolvedAsset {
+                resolved_modules,
+                global_symbols: _,
+            } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
+
+            let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+
+            assert!(relocate_result.is_ok());
+        }
     }
 }

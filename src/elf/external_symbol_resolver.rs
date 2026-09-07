@@ -53,11 +53,11 @@ pub fn resolve<'a>(
     // A predefined global symbol map
     //
     // This map contains linker-generated symbols such as `_edata` and `__bss_start`,
-    // and user-defined symbols such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
+    // and user-defined symbols such as `__global_pointer$` in RISC-V,
     // which are required to successfully link the final executable.
-    predefined_global_symbols: &HashMap<String, GlobalSymbolMapEntry>,
+    linker_generated_symbols: &HashMap<String, GlobalSymbolMapEntry>,
 ) -> Result<ResolvedAsset<'a>, LinkerError> {
-    let mut global_symbols = predefined_global_symbols.clone();
+    let mut global_symbols = linker_generated_symbols.clone();
 
     // Extract global symbols from all modules
     for fragment_module in &fragment_modules {
@@ -181,15 +181,32 @@ pub fn resolve<'a>(
     Ok(resolved_asset)
 }
 
+pub fn find_entry_point(
+    global_symbols: &HashMap<String, GlobalSymbolMapEntry>,
+) -> Result<usize, LinkerError> {
+    if let Some(entry_symbol) = global_symbols.get("_start") {
+        match entry_symbol.value {
+            GlobalSymbolValue::Defined {
+                virtual_address, ..
+            } => Ok(virtual_address),
+            GlobalSymbolValue::Absolute(value) => Ok(value as usize),
+        }
+    } else {
+        Err(LinkerError::Message(
+            "Entry point symbol \"_start\" not found in the global symbols".to_string(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use pretty_assertions::assert_eq;
-    use std::fmt::Display;
+    use std::{collections::HashMap, fmt::Display};
 
     use crate::elf::{
         external_symbol_resolver::resolve,
-        merger::{MergedAsset, merge},
+        merger::{GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, SectionName, merge},
         module::{Machine, RelocatableModule},
         reader::read_relocatable_module,
     };
@@ -211,6 +228,15 @@ mod tests {
             }
         }
     }
+
+    const IMPLEMENTED_ARCHS: [Machine; 6] = [
+        Machine::X86_64,
+        Machine::AArch64,
+        Machine::RiscV,
+        Machine::LoongArch,
+        Machine::PowerPC64,
+        Machine::S390,
+    ];
 
     fn get_arch_dir_name(arch: Machine) -> &'static str {
         match arch {
@@ -261,6 +287,26 @@ mod tests {
             .collect()
     }
 
+    fn add_additional_linker_generated_symbols(
+        arch: Machine,
+        linker_generated_symbols: &mut HashMap<String, GlobalSymbolMapEntry>,
+    ) {
+        match arch {
+            Machine::RiscV => {
+                linker_generated_symbols.insert(
+                    "__global_pointer$".to_string(),
+                    GlobalSymbolMapEntry::new(
+                        GlobalSymbolValue::from_defined(SectionName::Text, 0x1000),
+                        false,
+                    ),
+                );
+            }
+            _ => {
+                // No additional linker-generated symbols for other architectures
+            }
+        }
+    }
+
     fn assert_contains_all(strs: &[&str], expected: &[&str]) {
         for &expected_str in expected {
             assert!(
@@ -274,46 +320,47 @@ mod tests {
 
     #[test]
     fn test_merge_symbol_import_and_export() {
-        // Test x86_64 architecture only since the other architectures
-        // may contain un-resolved external symbols in the example files,
-        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
-        // which will cause the filter function to fail.
-        let arch = Machine::X86_64;
+        for arch in IMPLEMENTED_ARCHS {
+            let file_binaries = get_example_file_binaries(
+                SourceType::Assembly,
+                arch,
+                &["symbol-import.o", "symbol-export.o"],
+            );
 
-        let file_binaries = get_example_file_binaries(
-            SourceType::Assembly,
-            arch,
-            &["symbol-import.o", "symbol-export.o"],
-        );
+            let file_binaries_ref: Vec<&[u8]> =
+                file_binaries.iter().map(|b| b.as_slice()).collect();
+            let modules = get_example_file_modules(
+                &["symbol-import.o", "symbol-export.o"],
+                &file_binaries_ref,
+            );
 
-        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
-        let modules =
-            get_example_file_modules(&["symbol-import.o", "symbol-export.o"], &file_binaries_ref);
+            let merged_asset_result = merge(modules, arch);
+            assert!(merged_asset_result.is_ok());
 
-        let merged_asset_result = merge(modules, arch);
-        assert!(merged_asset_result.is_ok());
+            let MergedAsset {
+                fragment_modules: merged_modules,
+                mut linker_generated_symbols,
+                ..
+            } = merged_asset_result.unwrap();
 
-        let MergedAsset {
-            fragment_modules: merged_modules,
-            linker_generated_symbols,
-            ..
-        } = merged_asset_result.unwrap();
+            add_additional_linker_generated_symbols(arch, &mut linker_generated_symbols);
 
-        let resolved_asset_result = resolve(merged_modules, &linker_generated_symbols);
-        assert!(resolved_asset_result.is_ok());
+            let resolved_asset_result = resolve(merged_modules, &linker_generated_symbols);
+            assert!(resolved_asset_result.is_ok());
 
-        let resolved_asset = resolved_asset_result.unwrap();
+            let resolved_asset = resolved_asset_result.unwrap();
 
-        // Check the merged modules
-        let merged_modules = &resolved_asset.resolved_modules;
-        assert_eq!(merged_modules.len(), 2);
+            // Check the merged modules
+            let merged_modules = &resolved_asset.resolved_modules;
+            assert_eq!(merged_modules.len(), 2);
 
-        // Check the linker-generated symbols
-        let global_symbol_map = &resolved_asset.global_symbols;
-        let keys = global_symbol_map
-            .keys()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        assert_contains_all(&keys, &["a", "b", "x", "y", "foo", "bar", "inc", "dec"]);
+            // Check the linker-generated symbols
+            let global_symbol_map = &resolved_asset.global_symbols;
+            let keys = global_symbol_map
+                .keys()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>();
+            assert_contains_all(&keys, &["a", "b", "x", "y", "foo", "bar", "inc", "dec"]);
+        }
     }
 }

@@ -11,7 +11,8 @@ use crate::{
         BASE_PROGRAM_HEADER_COUNT, ELF_HEADER_SIZE, Machine, PROGRAM_HEADER_ENTRY_SIZE,
         RelocatableModule, Relocation, SECTION_ALIGN_DATA, SECTION_NAME_BSS, SECTION_NAME_DATA,
         SECTION_NAME_RODATA, SECTION_NAME_TBSS, SECTION_NAME_TDATA, SECTION_NAME_TEXT, Symbol,
-        SymbolBind, get_load_address_base, get_section_align_text, get_segment_align_page_size,
+        SymbolBind, SymbolType, get_load_address_base, get_section_align_text,
+        get_segment_align_page_size,
     },
     error::LinkerError,
 };
@@ -787,20 +788,24 @@ pub fn merge<'a>(
                 Symbol::Defined {
                     name,
                     bind,
+                    symbol_type,
                     section_index,
                     value,
                     ..
                 } => {
                     let section_name = section_name_map[*section_index];
                     if section_name == SectionName::Other {
-                        // The symbol is not in the relevant sections
-                        return Err(LinkerError::Message(format!(
-                            "Symbol {} is defined in an unsupported section in module {}",
-                            name, module.name
-                        )));
-                    }
-
-                    if let Some(fragment_section) = fragment_sections.get(&section_name) {
+                        if symbol_type == &SymbolType::Section {
+                            // The symbol represents a section, which is not relevant to the final executable
+                            merged_symbols.push(MergedSymbol::Other);
+                        } else {
+                            // The symbol is not in the relevant sections
+                            return Err(LinkerError::Message(format!(
+                                "Symbol \"{}\" is defined in an unsupported section in module {}",
+                                name, module.name
+                            )));
+                        }
+                    } else if let Some(fragment_section) = fragment_sections.get(&section_name) {
                         let original_value = *value as usize;
                         let merged_symbol = MergedSymbol::Defined {
                             name: name.clone(),
@@ -935,6 +940,15 @@ mod tests {
         }
     }
 
+    const IMPLEMENTED_ARCHS: [Machine; 6] = [
+        Machine::X86_64,
+        Machine::AArch64,
+        Machine::RiscV,
+        Machine::LoongArch,
+        Machine::PowerPC64,
+        Machine::S390,
+    ];
+
     fn get_arch_dir_name(arch: Machine) -> &'static str {
         match arch {
             Machine::X86_64 => "x86_64",
@@ -947,11 +961,7 @@ mod tests {
         }
     }
 
-    fn get_example_file_binary(
-        source_type: SourceType,
-        arch: Machine,
-        file_name: &str,
-    ) -> Vec<u8> {
+    fn get_example_file_binary(source_type: SourceType, arch: Machine, file_name: &str) -> Vec<u8> {
         let file_path = std::env::current_dir()
             .unwrap()
             .join("resources/examples/elf")
@@ -1001,118 +1011,113 @@ mod tests {
 
     #[test]
     fn test_merge_single_module() {
-        // Test x86_64 architecture only since the other architectures
-        // may contain un-resolved external symbols in the example files,
-        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
-        // which will cause the filter function to fail.
-        let arch = Machine::X86_64;
+        for arch in IMPLEMENTED_ARCHS {
+            let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
+            let module = get_example_file_module("minimal.o", &file_binary);
+            let modules = vec![module];
 
-        let file_binary = get_example_file_binary(SourceType::Assembly, arch, "minimal.o");
-        let module = get_example_file_module("minimal.o", &file_binary);
-        let modules = vec![module];
+            let merged_asset_result = merge(modules, arch);
+            assert!(merged_asset_result.is_ok());
 
-        let merged_asset_result = merge(modules, arch);
-        assert!(merged_asset_result.is_ok());
+            let merged_asset = merged_asset_result.unwrap();
 
-        let merged_asset = merged_asset_result.unwrap();
+            // Check the merged modules
+            let merged_modules = &merged_asset.fragment_modules;
+            assert_eq!(merged_modules.len(), 1);
 
-        // Check the merged modules
-        let merged_modules = merged_asset.fragment_modules;
-        assert_eq!(merged_modules.len(), 1);
+            // Check the linker-generated symbols
+            let linker_generated_symbols = &merged_asset.linker_generated_symbols;
+            let keys = linker_generated_symbols
+                .keys()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>();
+            assert_contains_all(&keys, &["_edata", "__bss_start", "_end"]);
 
-        // Check the linker-generated symbols
-        let global_symbol_map = merged_asset.linker_generated_symbols;
-        let keys = global_symbol_map
-            .keys()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        assert_contains_all(&keys, &["_edata", "__bss_start", "_end"]);
+            // Check the merged file layout
+            let merged_file_layout = &merged_asset.merged_file_layout;
+            assert_eq!(merged_file_layout.contains_read_only_data, false);
+            assert_eq!(merged_file_layout.contains_writable_data, false);
+            assert_eq!(merged_file_layout.contains_tls_data, false);
+            assert_eq!(merged_file_layout.program_header_count, 3); // PHDR, metadata, code
 
-        // Check the merged file layout
-        let merged_file_layout = merged_asset.merged_file_layout;
-        assert_eq!(merged_file_layout.contains_read_only_data, false);
-        assert_eq!(merged_file_layout.contains_writable_data, false);
-        assert_eq!(merged_file_layout.contains_tls_data, false);
-        assert_eq!(merged_file_layout.program_header_count, 3); // PHDR, metadata, code
+            assert!(
+                merged_file_layout
+                    .merged_section_infos
+                    .contains_key(&SectionName::Text)
+            );
 
-        assert!(
-            merged_file_layout
+            let file_section_text = merged_file_layout
                 .merged_section_infos
-                .contains_key(&SectionName::Text)
-        );
-
-        let file_section_text = merged_file_layout
-            .merged_section_infos
-            .get(&SectionName::Text)
-            .unwrap();
-        assert!(file_section_text.size > 0);
+                .get(&SectionName::Text)
+                .unwrap();
+            assert!(file_section_text.size > 0);
+        }
     }
 
     #[test]
     fn test_merge_symbol_import_and_export() {
-        // Test x86_64 architecture only since the other architectures
-        // may contain un-resolved external symbols in the example files,
-        // such as `__global_pointer$` in RISC-V and `.TOC.` in PowerPC64,
-        // which will cause the filter function to fail.
-        let arch = Machine::X86_64;
+        for arch in IMPLEMENTED_ARCHS {
+            let file_binaries = get_example_file_binaries(
+                SourceType::Assembly,
+                arch,
+                &["symbol-import.o", "symbol-export.o"],
+            );
 
-        let file_binaries = get_example_file_binaries(
-            SourceType::Assembly,
-            arch,
-            &["symbol-import.o", "symbol-export.o"],
-        );
+            let file_binaries_ref: Vec<&[u8]> =
+                file_binaries.iter().map(|b| b.as_slice()).collect();
+            let modules = get_example_file_modules(
+                &["symbol-import.o", "symbol-export.o"],
+                &file_binaries_ref,
+            );
 
-        let file_binaries_ref: Vec<&[u8]> = file_binaries.iter().map(|b| b.as_slice()).collect();
-        let modules =
-            get_example_file_modules(&["symbol-import.o", "symbol-export.o"], &file_binaries_ref);
+            let merged_asset_result = merge(modules, arch);
+            assert!(merged_asset_result.is_ok());
 
-        let merged_asset_result = merge(modules, arch);
-        assert!(merged_asset_result.is_ok());
+            let merged_asset = merged_asset_result.unwrap();
 
-        let merged_asset = merged_asset_result.unwrap();
+            // Check the merged modules
+            let merged_modules = &merged_asset.fragment_modules;
+            assert_eq!(merged_modules.len(), 2);
 
-        // Check the merged modules
-        let merged_modules = merged_asset.fragment_modules;
-        assert_eq!(merged_modules.len(), 2);
+            // Check the linker-generated symbols
+            let linker_generated_symbols = &merged_asset.linker_generated_symbols;
+            let keys = linker_generated_symbols
+                .keys()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>();
+            assert_contains_all(&keys, &["_edata", "__bss_start", "_end"]);
 
-        // Check the linker-generated symbols
-        let global_symbol_map = merged_asset.linker_generated_symbols;
-        let keys = global_symbol_map
-            .keys()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        assert_contains_all(&keys, &["_edata", "__bss_start", "_end"]);
+            // Check the merged file layout
+            let merged_file_layout = merged_asset.merged_file_layout;
+            assert_eq!(merged_file_layout.contains_read_only_data, true);
+            assert_eq!(merged_file_layout.contains_writable_data, true);
+            assert_eq!(merged_file_layout.contains_tls_data, false);
 
-        // Check the merged file layout
-        let merged_file_layout = merged_asset.merged_file_layout;
-        assert_eq!(merged_file_layout.contains_read_only_data, true);
-        assert_eq!(merged_file_layout.contains_writable_data, true);
-        assert_eq!(merged_file_layout.contains_tls_data, false);
+            assert_eq!(merged_file_layout.program_header_count, 5); // PHDR, metadata, code, read-only data, writable data
 
-        assert_eq!(merged_file_layout.program_header_count, 5); // PHDR, metadata, code, read-only data, writable data
+            let file_section_text = merged_file_layout
+                .merged_section_infos
+                .get(&SectionName::Text)
+                .unwrap();
+            assert!(file_section_text.size > 0);
 
-        let file_section_text = merged_file_layout
-            .merged_section_infos
-            .get(&SectionName::Text)
-            .unwrap();
-        assert!(file_section_text.size > 0);
+            let file_section_rodata = merged_file_layout
+                .merged_section_infos
+                .get(&SectionName::ROData)
+                .unwrap();
+            assert!(file_section_rodata.size > 0);
 
-        let file_section_rodata = merged_file_layout
-            .merged_section_infos
-            .get(&SectionName::ROData)
-            .unwrap();
-        assert!(file_section_rodata.size > 0);
+            let file_section_data = merged_file_layout
+                .merged_section_infos
+                .get(&SectionName::Data)
+                .unwrap();
+            assert!(file_section_data.size > 0);
 
-        let file_section_data = merged_file_layout
-            .merged_section_infos
-            .get(&SectionName::Data)
-            .unwrap();
-        assert!(file_section_data.size > 0);
-
-        let file_section_bss = merged_file_layout
-            .merged_section_infos
-            .get(&SectionName::BSS)
-            .unwrap();
-        assert!(file_section_bss.size > 0);
+            let file_section_bss = merged_file_layout
+                .merged_section_infos
+                .get(&SectionName::BSS)
+                .unwrap();
+            assert!(file_section_bss.size > 0);
+        }
     }
 }
