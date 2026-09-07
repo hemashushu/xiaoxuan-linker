@@ -71,6 +71,7 @@ fn resolve_section(
 
     let mut iter = relocations.iter();
 
+    #[allow(clippy::while_let_on_iterator)]
     while let Some(relocation) = iter.next() {
         // Process each relocation here
 

@@ -13,6 +13,7 @@ pub(crate) mod writer;
 pub mod module;
 pub mod reader;
 
+pub use external_symbol_resolver::find_entry_point;
 pub use external_symbol_resolver::resolve;
 pub use filter::filter;
 pub use merger::merge;

@@ -16,6 +16,10 @@ use crate::{
 };
 
 mod aarch64;
+mod loongarch64;
+mod powerpc64le;
+mod riscv64;
+mod s390x;
 mod x86_64;
 
 #[derive(Debug, PartialEq)]
@@ -54,6 +58,20 @@ pub fn relocate<'a>(
     let patch_modules = match arch {
         Machine::AArch64 => {
             aarch64::AArch64RelocationResolver::resolve(merged_file_layout, resolved_modules)?
+        }
+        Machine::RiscV => {
+            riscv64::RiscV64RelocationResolver::resolve(merged_file_layout, resolved_modules)?
+        }
+        Machine::LoongArch => loongarch64::LoongArch64RelocationResolver::resolve(
+            merged_file_layout,
+            resolved_modules,
+        )?,
+        Machine::PowerPC64 => powerpc64le::PowerPC64LERelocationResolver::resolve(
+            merged_file_layout,
+            resolved_modules,
+        )?,
+        Machine::S390 => {
+            s390x::S390xRelocationResolver::resolve(merged_file_layout, resolved_modules)?
         }
         Machine::X86_64 => {
             x86_64::X86_64RelocationResolver::resolve(merged_file_layout, resolved_modules)?
@@ -211,13 +229,13 @@ mod tests {
         }
     }
 
-    const IMPLEMENTED_ARCHS: [Machine; 2] = [
+    const IMPLEMENTED_ARCHS: [Machine; 6] = [
         Machine::X86_64,
         Machine::AArch64,
-        // Machine::RiscV,
-        // Machine::LoongArch,
-        // Machine::PowerPC64,
-        // Machine::S390,
+        Machine::RiscV,
+        Machine::LoongArch,
+        Machine::PowerPC64,
+        Machine::S390,
     ];
 
     fn get_arch_dir_name(arch: Machine) -> &'static str {

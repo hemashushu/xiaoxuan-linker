@@ -8,48 +8,48 @@ use std::fmt::Display;
 
 use object::elf;
 
-/// ELF file layout
-/// ===============
-///
-/// Overall
-/// -------
-///
-/// | Size   | Content         |
-/// |--------|-----------------|
-/// | 64     | ELF header      |
-/// | m * 56 | program headers |
-/// | ...    | section data    |
-/// | n * 64 | section headers |
-///
-/// Sections (in file order)
-/// ------------------------
-///
-/// | Name           | Type         | Description                     | Align | Opt? |
-/// |----------------|--------------|---------------------------------|-------|------|
-/// | 00 NULL        | SHT_NULL     | Null section header             | 0     |      |
-/// | 01 `.text`     | SHT_PROGBITS | Executable code                 | 16    |      |
-/// | 02 `.rodata`   | SHT_PROGBITS | Read-only data (strings)        | 4/8   | Opt  |
-/// | 03 `.tdata`    | SHT_PROGBITS | Initialized thread-local data   | 4/8   | Opt  |
-/// | 04 `.tbss`     | SHT_NOBITS   | Uninitialized thread-local data | 4/8   | Opt  |
-/// | 05 `.data`     | SHT_PROGBITS | Initialized data                | 4/8   | Opt  |
-/// | 06 `.bss`      | SHT_NOBITS   | Uninitialized data              | 4/8   | Opt  |
-/// | 07 `.symtab`   | SHT_SYMTAB   | Symbol table                    | 8     |      |
-/// | 08 `.strtab`   | SHT_STRTAB   | Strings for symbol names        | 1     |      |
-/// | 09 `.shstrtab` | SHT_STRTAB   | Strings for section names       | 1     |      |
-///
-/// Note that sections such as `.rela.*` are consumed by the linker and would not appear in the final executable.
-///
-/// Program headers
-/// ---------------
-///
-/// | Segment           | Sections                        | Type    | Flags | Alignment | Opt? |
-/// |-------------------|---------------------------------|---------|-------|-----------|------|
-/// | 00 phdr           | program headers                 | PT_PHDR | R     | 0x8       |      |
-/// | 01 meta           | file header and program headers | PT_LOAD | R     | 0x1000    |      |
-/// | 02 text           | .text                           | PT_LOAD | R E   | 0x1000    |      |
-/// | 03 read-only data | .rodata                         | PT_LOAD | R     | 0x1000    | Opt  |
-/// | 04 writable data  | .tdata, .tbss, .data, .bss      | PT_LOAD | R W   | 0x1000    | Opt  |
-/// | 05 tls            | .tdata, .tbss                   | PT_TLS  | R     | 0x8       | Opt  |
+// ELF file layout
+// ===============
+//
+// Overall
+// -------
+//
+// | Size   | Content         |
+// |--------|-----------------|
+// | 64     | ELF header      |
+// | m * 56 | program headers |
+// | ...    | section data    |
+// | n * 64 | section headers |
+//
+// Sections (in file order)
+// ------------------------
+//
+// | Name           | Type         | Description                     | Align | Opt? |
+// |----------------|--------------|---------------------------------|-------|------|
+// | 00 NULL        | SHT_NULL     | Null section header             | 0     |      |
+// | 01 `.text`     | SHT_PROGBITS | Executable code                 | 16    |      |
+// | 02 `.rodata`   | SHT_PROGBITS | Read-only data (strings)        | 4/8   | Opt  |
+// | 03 `.tdata`    | SHT_PROGBITS | Initialized thread-local data   | 4/8   | Opt  |
+// | 04 `.tbss`     | SHT_NOBITS   | Uninitialized thread-local data | 4/8   | Opt  |
+// | 05 `.data`     | SHT_PROGBITS | Initialized data                | 4/8   | Opt  |
+// | 06 `.bss`      | SHT_NOBITS   | Uninitialized data              | 4/8   | Opt  |
+// | 07 `.symtab`   | SHT_SYMTAB   | Symbol table                    | 8     |      |
+// | 08 `.strtab`   | SHT_STRTAB   | Strings for symbol names        | 1     |      |
+// | 09 `.shstrtab` | SHT_STRTAB   | Strings for section names       | 1     |      |
+//
+// Note that sections such as `.rela.*` are consumed by the linker and would not appear in the final executable.
+//
+// Program headers
+// ---------------
+//
+// | Segment           | Sections                        | Type    | Flags | Alignment | Opt? |
+// |-------------------|---------------------------------|---------|-------|-----------|------|
+// | 00 phdr           | program headers                 | PT_PHDR | R     | 0x8       |      |
+// | 01 meta           | file header and program headers | PT_LOAD | R     | 0x1000    |      |
+// | 02 text           | .text                           | PT_LOAD | R E   | 0x1000    |      |
+// | 03 read-only data | .rodata                         | PT_LOAD | R     | 0x1000    | Opt  |
+// | 04 writable data  | .tdata, .tbss, .data, .bss      | PT_LOAD | R W   | 0x1000    | Opt  |
+// | 05 tls            | .tdata, .tbss                   | PT_TLS  | R     | 0x8       | Opt  |
 
 // The names of the supported sections
 pub const SECTION_NAME_TEXT: &str = ".text";

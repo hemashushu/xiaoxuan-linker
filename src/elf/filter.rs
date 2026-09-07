@@ -33,22 +33,20 @@ pub fn filter<'a>(
         match bind {
             SymbolBind::Global => {
                 let existing_entry = map.get(name);
-                if let Some((existing_module_index, existing_is_weak)) = existing_entry {
-                    if !*existing_is_weak {
-                        // Duplicate strong symbol, which is an error
-                        return Err(LinkerError::Message(format!(
-                            "Duplicate strong symbol \"{}\" defined in module \"{}\" and module \"{}\"",
-                            name, modules[*existing_module_index].name, module_name
-                        )));
-                    }
+                if let Some((existing_module_index, existing_is_weak)) = existing_entry
+                    && !*existing_is_weak
+                {
+                    // Duplicate strong symbol, which is an error
+                    return Err(LinkerError::Message(format!(
+                        "Duplicate strong symbol \"{}\" defined in module \"{}\" and module \"{}\"",
+                        name, modules[*existing_module_index].name, module_name
+                    )));
                 }
                 map.insert(name.to_string(), (module_index, false));
             }
-            SymbolBind::Weak => {
-                if !map.contains_key(name) {
-                    // we should ignore the weak symbol no matter whether the existing symbol is weak or strong
-                    map.insert(name.to_string(), (module_index, true));
-                }
+            SymbolBind::Weak if !map.contains_key(name) => {
+                // we should ignore the weak symbol no matter whether the existing symbol is weak or strong
+                map.insert(name.to_string(), (module_index, true));
             }
             _ => {
                 // Local symbols are not exported

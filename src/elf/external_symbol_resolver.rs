@@ -85,16 +85,14 @@ pub fn resolve<'a>(
                         global_symbols
                             .insert(name.clone(), GlobalSymbolMapEntry::new(value, false));
                     }
-                    SymbolBind::Weak => {
+                    SymbolBind::Weak if !global_symbols.contains_key(name) => {
                         // Append weak symbols to the global symbol map only if they are not already present,
                         // no matter if they are strong or weak symbols, the first one wins.
-                        if !global_symbols.contains_key(name) {
-                            let value =
-                                GlobalSymbolValue::from_defined(*section_name, *virtual_address);
 
-                            global_symbols
-                                .insert(name.clone(), GlobalSymbolMapEntry::new(value, true));
-                        }
+                        let value =
+                            GlobalSymbolValue::from_defined(*section_name, *virtual_address);
+
+                        global_symbols.insert(name.clone(), GlobalSymbolMapEntry::new(value, true));
                     }
                     _ => {
                         // Local symbols are not added to the global symbol map
@@ -164,7 +162,7 @@ pub fn resolve<'a>(
 
     let resolved_modules = fragment_modules
         .into_iter()
-        .zip(resolved_symbolss.into_iter())
+        .zip(resolved_symbolss)
         .map(|(fragment_module, resolved_symbols)| ResolvedModule {
             name: fragment_module.name,
             sections: fragment_module.sections,

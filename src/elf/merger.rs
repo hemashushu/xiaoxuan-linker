@@ -66,10 +66,17 @@ pub struct FragmentModule<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SectionName {
     Text,
+
     ROData,
+
     TData,
+
+    #[allow(clippy::upper_case_acronyms)]
     TBSS,
+
     Data,
+
+    #[allow(clippy::upper_case_acronyms)]
     BSS,
 
     Other, // Other sections that are not relevant to the final executable
@@ -474,7 +481,7 @@ pub fn merge<'a>(
 
             let fragment_section = FragmentSection::new(
                 section.size,
-                &section.binary,
+                section.binary,
                 offset_in_merged_section,
                 offset_in_merged_file,
                 LOAD_ADDR_BASE + offset_in_merged_file,
@@ -519,7 +526,7 @@ pub fn merge<'a>(
 
             let fragment_section = FragmentSection::new(
                 section.size,
-                &section.binary,
+                section.binary,
                 offset_in_merged_section,
                 offset_in_merged_file,
                 LOAD_ADDR_BASE + offset_in_merged_file,
@@ -567,7 +574,7 @@ pub fn merge<'a>(
 
             let fragment_section = FragmentSection::new(
                 section.size,
-                &section.binary,
+                section.binary,
                 offset_in_merged_section,
                 offset_in_merged_file,
                 LOAD_ADDR_BASE + offset_in_merged_file,
@@ -664,7 +671,7 @@ pub fn merge<'a>(
 
             let fragment_section = FragmentSection::new(
                 section.size,
-                &section.binary,
+                section.binary,
                 offset_in_merged_section,
                 offset_in_merged_file,
                 virtual_address,
@@ -862,7 +869,7 @@ pub fn merge<'a>(
                 )));
             }
 
-            if let Some(_) = fragment_sections.get(&target_section_name) {
+            if fragment_sections.get(&target_section_name).is_some() {
                 let fragment_relocation_section = FragmentRelocationSection {
                     target_section_name,
                     relocations: relocation_section.relocations,
@@ -880,9 +887,9 @@ pub fn merge<'a>(
     // Refactor the merged sections, symbols, and relocation sections into a single MergedModule(s)
     let fragment_modules: Vec<FragmentModule> = module_names
         .into_iter()
-        .zip(fragment_sectionss.into_iter())
-        .zip(merged_symbolss.into_iter())
-        .zip(fragment_relocation_sectionss.into_iter())
+        .zip(fragment_sectionss)
+        .zip(merged_symbolss)
+        .zip(fragment_relocation_sectionss)
         .map(
             |(((name, sections), symbols), relocation_sections)| FragmentModule {
                 name,

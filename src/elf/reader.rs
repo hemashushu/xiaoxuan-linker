@@ -247,8 +247,8 @@ fn parse_symbol_table(
                     value,
                 }
             }
-            _ if section_index >= object::elf::SHN_LORESERVE
-                && section_index <= object::elf::SHN_HIRESERVE =>
+            _ if (object::elf::SHN_LORESERVE..=object::elf::SHN_HIRESERVE)
+                .contains(&section_index) =>
             {
                 // Other section index, such as `SHN_COMMON` (common symbol)
                 Symbol::Other
