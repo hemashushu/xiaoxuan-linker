@@ -205,8 +205,11 @@ mod tests {
 
     use crate::elf::{
         external_symbol_resolver::{ResolvedAsset, resolve},
-        merger::{GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, SectionName, merge},
-        module::{Machine, RelocatableModule},
+        merger::{
+            GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, MergedFileLayout, SectionName,
+            merge,
+        },
+        module::{Machine, RelocatableModule, get_load_address_base},
         reader::read_relocatable_module,
         relocator::relocate,
     };
@@ -290,6 +293,7 @@ mod tests {
     fn add_additional_linker_generated_symbols(
         arch: Machine,
         linker_generated_symbols: &mut HashMap<String, GlobalSymbolMapEntry>,
+        merged_file_layout: &MergedFileLayout,
     ) {
         match arch {
             Machine::RiscV => {
@@ -297,6 +301,20 @@ mod tests {
                     "__global_pointer$".to_string(),
                     GlobalSymbolMapEntry::new(
                         GlobalSymbolValue::from_defined(SectionName::Text, 0x1000),
+                        false,
+                    ),
+                );
+            }
+            Machine::PowerPC64 => {
+                let toc_address = merged_file_layout
+                    .get_non_empty_section_info(SectionName::TOC)
+                    .map(|section| section.virtual_address)
+                    .unwrap_or_else(|| get_load_address_base(arch));
+
+                linker_generated_symbols.insert(
+                    ".TOC.".to_string(),
+                    GlobalSymbolMapEntry::new(
+                        GlobalSymbolValue::Absolute((toc_address + 0x8000) as u64),
                         false,
                     ),
                 );
@@ -320,7 +338,11 @@ mod tests {
                 merged_file_layout,
             } = merge(modules, arch).unwrap();
 
-            add_additional_linker_generated_symbols(arch, &mut linker_generated_symbols);
+            add_additional_linker_generated_symbols(
+                arch,
+                &mut linker_generated_symbols,
+                &merged_file_layout,
+            );
 
             let ResolvedAsset {
                 resolved_modules,
@@ -346,7 +368,11 @@ mod tests {
                 merged_file_layout,
             } = merge(modules, arch).unwrap();
 
-            add_additional_linker_generated_symbols(arch, &mut linker_generated_symbols);
+            add_additional_linker_generated_symbols(
+                arch,
+                &mut linker_generated_symbols,
+                &merged_file_layout,
+            );
 
             let ResolvedAsset {
                 resolved_modules,
@@ -380,7 +406,11 @@ mod tests {
                 merged_file_layout,
             } = merge(modules, arch).unwrap();
 
-            add_additional_linker_generated_symbols(arch, &mut linker_generated_symbols);
+            add_additional_linker_generated_symbols(
+                arch,
+                &mut linker_generated_symbols,
+                &merged_file_layout,
+            );
 
             let ResolvedAsset {
                 resolved_modules,

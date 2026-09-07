@@ -533,6 +533,7 @@ fn parse_relocation_type(
                 object::elf::R_PPC64_REL16_LO => Ok(RelocationType::R_PPC64_REL16_LO),
                 object::elf::R_PPC64_TOC16_HA => Ok(RelocationType::R_PPC64_TOC16_HA),
                 object::elf::R_PPC64_TOC16_LO => Ok(RelocationType::R_PPC64_TOC16_LO),
+                object::elf::R_PPC64_TOC16_LO_DS => Ok(RelocationType::R_PPC64_TOC16_LO_DS),
                 /* unsupported */
                 _ => Err(LinkerError::new(&format!(
                     "Unsupported relocation type \"{relocation_type_raw}\" for PowerPC64 architecture in module \"{module_name}\""
@@ -1987,6 +1988,34 @@ mod tests {
                     .find(|s| s.name == ".rela.text"),
                 Some(s) if s.section_type == SectionType::Rela
             ));
+        }
+    }
+
+    #[test]
+    fn test_read_section_header_gcc_symbol_import_o() {
+        // Manually check with command `readelf -S gcc/ARCH/symbol-import.o`
+
+        const FILE_NAME: &str = "symbol-import.o";
+
+        for arch in IMPLEMENTED_ARCHS {
+            let binary = get_example_file_binary(SourceType::GCC, arch, FILE_NAME);
+            let elf = read_file(FILE_NAME, &binary).unwrap();
+            let sections = read_section_headers(FILE_NAME, elf, &binary).unwrap();
+
+            match arch {
+                Machine::PowerPC64 => {
+                    // Check additional section types
+                    assert!(matches!(
+                        sections
+                            .iter()
+                            .find(|s| s.name == ".toc"),
+                        Some(s) if s.section_type == SectionType::Progbits
+                    ));
+                }
+                _ => {
+                    // no additional section types for other architectures
+                }
+            }
         }
     }
 

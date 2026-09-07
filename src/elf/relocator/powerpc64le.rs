@@ -81,20 +81,11 @@ fn resolve_section(
     };
     let toc = layout
         .merged_section_infos
-        .get(&SectionName::Data)
+        .get(&SectionName::TOC)
         .filter(|section| section.size > 0)
         .map(|section| section.virtual_address)
         .unwrap_or_else(|| get_load_address_base(crate::elf::module::Machine::PowerPC64))
         + 0x8000;
-    let entry_address = symbols
-        .iter()
-        .filter_map(|symbol| match symbol {
-            ResolvedSymbol::VirtualAddress(value) => Some(*value),
-            _ => None,
-        })
-        .max()
-        .unwrap_or(section.virtual_address) as u64;
-
     let mut patches = Vec::new();
     for r in relocations {
         let offset = r.offset;
@@ -102,9 +93,9 @@ fn resolve_section(
         let symbol_value = target.wrapping_sub(r.addend as i64 as u64);
         let place = section.virtual_address + offset;
         let signed = match r.relocation_type {
-            RelocationType::R_PPC64_TOC16_HA | RelocationType::R_PPC64_TOC16_LO => {
-                target.wrapping_sub(toc as u64)
-            }
+            RelocationType::R_PPC64_TOC16_HA
+            | RelocationType::R_PPC64_TOC16_LO
+            | RelocationType::R_PPC64_TOC16_LO_DS => target.wrapping_sub(toc as u64),
             _ => target,
         };
 
@@ -115,13 +106,10 @@ fn resolve_section(
             RelocationType::R_PPC64_ADDR16_LO => target,
             RelocationType::R_PPC64_ADDR16_HIGHERA => (target.wrapping_add(0x8000)) >> 32,
             RelocationType::R_PPC64_ADDR16_HIGHESTA => (target.wrapping_add(0x8000)) >> 48,
-            RelocationType::R_PPC64_REL16_HA => {
-                let displacement = symbol_value as i64 - entry_address as i64;
-                ((displacement + 0x8000) >> 16) as u64
-            }
-            RelocationType::R_PPC64_REL16_LO => symbol_value.wrapping_sub(entry_address),
+            RelocationType::R_PPC64_REL16_HA => (symbol_value + 0x8000) >> 16,
+            RelocationType::R_PPC64_REL16_LO => symbol_value,
             RelocationType::R_PPC64_TOC16_HA => signed.wrapping_add(0x8000) >> 16,
-            RelocationType::R_PPC64_TOC16_LO => signed,
+            RelocationType::R_PPC64_TOC16_LO | RelocationType::R_PPC64_TOC16_LO_DS => signed,
             _ => 0,
         } as u32;
 
@@ -137,7 +125,14 @@ fn resolve_section(
             }
             _ => {
                 let ins = read32(binary, offset);
-                PatchItem::from_u32(offset, (ins & 0xffff_0000) | (value16 & 0xffff))
+                let instruction = if r.relocation_type == RelocationType::R_PPC64_REL16_HA {
+                    // Static ET_EXEC does not provide the ELFv2 r12 entry value.
+                    // Use r0 as the addis base to construct the absolute TOC address.
+                    ins & !(0x1f << 16)
+                } else {
+                    ins
+                };
+                PatchItem::from_u32(offset, (instruction & 0xffff_0000) | (value16 & 0xffff))
             }
         };
         patches.push(patch);

@@ -8,8 +8,8 @@ use std::fmt::Display;
 
 use object::elf;
 
-// ELF file layout
-// ===============
+// Executable ELF file layout
+// ==========================
 //
 // Overall
 // -------
@@ -32,24 +32,25 @@ use object::elf;
 // | 03 `.tdata`    | SHT_PROGBITS | Initialized thread-local data   | 4/8   | Opt  |
 // | 04 `.tbss`     | SHT_NOBITS   | Uninitialized thread-local data | 4/8   | Opt  |
 // | 05 `.data`     | SHT_PROGBITS | Initialized data                | 4/8   | Opt  |
-// | 06 `.bss`      | SHT_NOBITS   | Uninitialized data              | 4/8   | Opt  |
-// | 07 `.symtab`   | SHT_SYMTAB   | Symbol table                    | 8     |      |
-// | 08 `.strtab`   | SHT_STRTAB   | Strings for symbol names        | 1     |      |
-// | 09 `.shstrtab` | SHT_STRTAB   | Strings for section names       | 1     |      |
+// | 06 `.toc`      | SHT_PROGBITS | Table of contents (PowerPC64le) | 4/8   | Opt  |
+// | 07 `.bss`      | SHT_NOBITS   | Uninitialized data              | 4/8   | Opt  |
+// | 08 `.symtab`   | SHT_SYMTAB   | Symbol table                    | 8     |      |
+// | 09 `.strtab`   | SHT_STRTAB   | Strings for symbol names        | 1     |      |
+// | 10 `.shstrtab` | SHT_STRTAB   | Strings for section names       | 1     |      |
 //
 // Note that sections such as `.rela.*` are consumed by the linker and would not appear in the final executable.
 //
 // Program headers
 // ---------------
 //
-// | Segment           | Sections                        | Type    | Flags | Alignment | Opt? |
-// |-------------------|---------------------------------|---------|-------|-----------|------|
-// | 00 phdr           | program headers                 | PT_PHDR | R     | 0x8       |      |
-// | 01 meta           | file header and program headers | PT_LOAD | R     | 0x1000    |      |
-// | 02 text           | .text                           | PT_LOAD | R E   | 0x1000    |      |
-// | 03 read-only data | .rodata                         | PT_LOAD | R     | 0x1000    | Opt  |
-// | 04 writable data  | .tdata, .tbss, .data, .bss      | PT_LOAD | R W   | 0x1000    | Opt  |
-// | 05 tls            | .tdata, .tbss                   | PT_TLS  | R     | 0x8       | Opt  |
+// | Segment           | Sections                         | Type    | Flags | Alignment | Opt? |
+// |-------------------|----------------------------------|---------|-------|-----------|------|
+// | 00 phdr           | program headers                  | PT_PHDR | R     | 0x8       |      |
+// | 01 meta           | file header and program headers  | PT_LOAD | R     | 0x1000    |      |
+// | 02 text           | .text                            | PT_LOAD | R E   | 0x1000    |      |
+// | 03 read-only data | .rodata                          | PT_LOAD | R     | 0x1000    | Opt  |
+// | 04 writable data  | .tdata, .tbss, .data, .bss, .toc | PT_LOAD | R W   | 0x1000    | Opt  |
+// | 05 tls            | .tdata, .tbss                    | PT_TLS  | R     | 0x8       | Opt  |
 
 // The names of the supported sections
 pub const SECTION_NAME_TEXT: &str = ".text";
@@ -58,6 +59,7 @@ pub const SECTION_NAME_TDATA: &str = ".tdata";
 pub const SECTION_NAME_TBSS: &str = ".tbss";
 pub const SECTION_NAME_DATA: &str = ".data";
 pub const SECTION_NAME_BSS: &str = ".bss";
+pub const SECTION_NAME_TOC: &str = ".toc"; // PowerPC64 TOC section
 
 pub const SECTION_NAME_SYMTAB: &str = ".symtab";
 pub const SECTION_NAME_STRTAB: &str = ".strtab";
@@ -769,6 +771,9 @@ pub enum RelocationType {
 
     /// A 16-bit low-part TOC-relative relocation on PowerPC64.
     R_PPC64_TOC16_LO,
+
+    /// A 16-bit low-part TOC-relative relocation for a DS-form load/store.
+    R_PPC64_TOC16_LO_DS,
 
     /// A 32-bit PC-relative relocation whose value is divided by two on S390x.
     R_390_PC32DBL,

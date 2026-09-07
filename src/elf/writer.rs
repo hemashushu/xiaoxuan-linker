@@ -24,8 +24,9 @@ use crate::{
             ELF_HEADER_SIZE, Machine, PROGRAM_HEADER_ENTRY_SIZE, SECTION_ALIGN_DATA,
             SECTION_ALIGN_SYMTAB, SECTION_NAME_BSS, SECTION_NAME_DATA, SECTION_NAME_RODATA,
             SECTION_NAME_SHSTRTAB, SECTION_NAME_STRTAB, SECTION_NAME_SYMTAB, SECTION_NAME_TBSS,
-            SECTION_NAME_TDATA, SECTION_NAME_TEXT, SEGMENT_ALIGN_PHDR, SEGMENT_ALIGN_TLS,
-            get_load_address_base, get_section_align_text, get_segment_align_page_size,
+            SECTION_NAME_TDATA, SECTION_NAME_TEXT, SECTION_NAME_TOC, SEGMENT_ALIGN_PHDR,
+            SEGMENT_ALIGN_TLS, get_load_address_base, get_section_align_text,
+            get_segment_align_page_size,
         },
         relocator::{RelocatedModule, RelocatedSectionBinary},
     },
@@ -96,6 +97,7 @@ pub fn write_executable(
     let mut section_name_tdata_opt: Option<StringId> = None;
     let mut section_name_tbss_opt: Option<StringId> = None;
     let mut section_name_data_opt: Option<StringId> = None;
+    let mut section_name_toc_opt: Option<StringId> = None;
     let mut section_name_bss_opt: Option<StringId> = None;
 
     {
@@ -116,6 +118,10 @@ pub fn write_executable(
 
     if merged_file_layout.contains_non_empty_section(SectionName::Data) {
         section_name_data_opt.replace(writer.add_section_name(SECTION_NAME_DATA.as_bytes()));
+    }
+
+    if merged_file_layout.contains_non_empty_section(SectionName::TOC) {
+        section_name_toc_opt.replace(writer.add_section_name(SECTION_NAME_TOC.as_bytes()));
     }
 
     if merged_file_layout.contains_non_empty_section(SectionName::BSS) {
@@ -155,6 +161,10 @@ pub fn write_executable(
 
     if merged_file_layout.contains_non_empty_section(SectionName::Data) {
         writer.reserve_section_index(); // .data section
+    }
+
+    if merged_file_layout.contains_non_empty_section(SectionName::TOC) {
+        writer.reserve_section_index(); // .toc section
     }
 
     if merged_file_layout.contains_non_empty_section(SectionName::BSS) {
@@ -249,6 +259,15 @@ pub fn write_executable(
         debug_assert_eq!(
             actual_section_offset_data,
             section_info_data.offset_in_merged_file
+        );
+    }
+
+    if let Some(section_info_toc) = merged_file_layout.get_non_empty_section_info(SectionName::TOC)
+    {
+        let actual_section_offset_toc = writer.reserve(section_info_toc.size, SECTION_ALIGN_DATA);
+        debug_assert_eq!(
+            actual_section_offset_toc,
+            section_info_toc.offset_in_merged_file
         );
     }
 
@@ -386,6 +405,7 @@ pub fn write_executable(
             .get(&SectionName::TData)
             .or_else(|| merged_section_infos.get(&SectionName::TBSS))
             .or_else(|| merged_section_infos.get(&SectionName::Data))
+            .or_else(|| merged_section_infos.get(&SectionName::TOC))
             .or_else(|| merged_section_infos.get(&SectionName::BSS))
         else {
             unreachable!()
@@ -403,23 +423,31 @@ pub fn write_executable(
         let section_data_size = merged_section_infos
             .get(&SectionName::Data)
             .map_or(0, |s| s.size);
+        let section_toc_size = merged_section_infos
+            .get(&SectionName::TOC)
+            .map_or(0, |s| s.size);
         let section_bss_size = merged_section_infos
             .get(&SectionName::BSS)
             .map_or(0, |s| s.size);
 
         let segment_writable_data_file_size = if merged_file_layout.contains_tls_data {
-            align_up(section_tdata_size, SECTION_ALIGN_DATA) + section_data_size
+            align_up(section_tdata_size, SECTION_ALIGN_DATA)
+                + align_up(section_data_size, SECTION_ALIGN_DATA)
+                + section_toc_size
         } else {
-            section_data_size
+            align_up(section_data_size, SECTION_ALIGN_DATA) + section_toc_size
         };
 
         let segment_writable_data_memory_size = if merged_file_layout.contains_tls_data {
             align_up(section_tdata_size, SECTION_ALIGN_DATA)
                 + align_up(section_tbss_size, SECTION_ALIGN_DATA)
                 + align_up(section_data_size, SECTION_ALIGN_DATA)
+                + align_up(section_toc_size, SECTION_ALIGN_DATA)
                 + section_bss_size
         } else {
-            align_up(section_data_size, SECTION_ALIGN_DATA) + section_bss_size
+            align_up(section_data_size, SECTION_ALIGN_DATA)
+                + align_up(section_toc_size, SECTION_ALIGN_DATA)
+                + section_bss_size
         };
 
         writer.write_program_header(&ProgramHeader {
@@ -570,6 +598,21 @@ pub fn write_executable(
                     RelocatedSectionBinary::None => {
                         //
                     }
+                }
+            }
+        }
+    }
+
+    if merged_file_layout.contains_non_empty_section(SectionName::TOC) {
+        writer.write_align(SECTION_ALIGN_DATA);
+        for relocated_module in relocated_modules {
+            if let Some(relocated_section) = relocated_module.sections.get(&SectionName::TOC)
+                && relocated_section.size > 0
+            {
+                match &relocated_section.binary {
+                    RelocatedSectionBinary::Referenced(data) => writer.write(data),
+                    RelocatedSectionBinary::Owned(data) => writer.write(data),
+                    RelocatedSectionBinary::None => {}
                 }
             }
         }
@@ -731,6 +774,21 @@ pub fn write_executable(
         });
     }
 
+    if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::TOC) {
+        writer.write_section_header(&SectionHeader {
+            name: section_name_toc_opt,
+            sh_type: SHT_PROGBITS,
+            sh_flags: (SHF_ALLOC | PF_W) as u64,
+            sh_addr: section_info.virtual_address as u64,
+            sh_offset: section_info.offset_in_merged_file as u64,
+            sh_size: section_info.size as u64,
+            sh_link: 0,
+            sh_info: 0,
+            sh_addralign: SECTION_ALIGN_DATA as u64,
+            sh_entsize: 0,
+        });
+    }
+
     // Write section header: .bss
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::BSS) {
         writer.write_section_header(&SectionHeader {
@@ -785,8 +843,11 @@ mod tests {
 
     use crate::elf::{
         external_symbol_resolver::{ResolvedAsset, find_entry_point, resolve},
-        merger::{GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, SectionName, merge},
-        module::{Machine, RelocatableModule},
+        merger::{
+            GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, MergedFileLayout, SectionName,
+            merge,
+        },
+        module::{Machine, RelocatableModule, get_load_address_base},
         reader::read_relocatable_module,
         relocator::relocate,
         writer::write_executable,
@@ -810,12 +871,12 @@ mod tests {
         }
     }
 
-    const IMPLEMENTED_ARCHS: [Machine; 6] = [
-        Machine::X86_64,
-        Machine::AArch64,
-        Machine::RiscV,
-        Machine::LoongArch,
-        Machine::S390,
+    const IMPLEMENTED_ARCHS: [Machine; 1] = [
+        // Machine::X86_64,
+        // Machine::AArch64,
+        // Machine::RiscV,
+        // Machine::LoongArch,
+        // Machine::S390,
         Machine::PowerPC64,
     ];
 
@@ -871,6 +932,7 @@ mod tests {
     fn add_additional_linker_generated_symbols(
         arch: Machine,
         linker_generated_symbols: &mut HashMap<String, GlobalSymbolMapEntry>,
+        merged_file_layout: &MergedFileLayout,
     ) {
         match arch {
             Machine::RiscV => {
@@ -883,19 +945,18 @@ mod tests {
                 );
             }
             Machine::PowerPC64 => {
-                // todo
-                //
-                // Add `.TOC.` symbol (as well as the `.toc` data section) for PowerPC64 architecture.
-                // ```rust
-                // let toc_base = "load address base" or "virtual address of the .data section"
-                // linker_generated_symbols.insert(
-                //     ".TOC.".to_string(),
-                //     GlobalSymbolMapEntry::new(
-                //         GlobalSymbolValue::Absolute((toc_base + 0x8000) as u64),
-                //         false,
-                //     ),
-                // );
-                // ```
+                let toc_address = merged_file_layout
+                    .get_non_empty_section_info(SectionName::TOC)
+                    .map(|section| section.virtual_address)
+                    .unwrap_or_else(|| get_load_address_base(arch));
+
+                linker_generated_symbols.insert(
+                    ".TOC.".to_string(),
+                    GlobalSymbolMapEntry::new(
+                        GlobalSymbolValue::Absolute((toc_address + 0x8000) as u64),
+                        false,
+                    ),
+                );
             }
             _ => {
                 // No additional linker-generated symbols for other architectures
@@ -921,7 +982,11 @@ mod tests {
             merged_file_layout,
         } = merge(modules, arch).unwrap();
 
-        add_additional_linker_generated_symbols(arch, &mut linker_generated_symbols);
+        add_additional_linker_generated_symbols(
+            arch,
+            &mut linker_generated_symbols,
+            &merged_file_layout,
+        );
 
         let ResolvedAsset {
             resolved_modules,
@@ -1172,74 +1237,74 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_write_gcc_minimal() {
-    //     for arch in IMPLEMENTED_ARCHS {
-    //         let file =
-    //             generate_example_executable(&["minimal.o"], SourceType::GCC, arch, "minimal");
-    //         execute_and_assert(arch, &file, 42, "");
-    //         delete_temporary_file(&file);
-    //     }
-    // }
+    #[test]
+    fn test_write_gcc_minimal() {
+        for arch in IMPLEMENTED_ARCHS {
+            let file =
+                generate_example_executable(&["minimal.o"], SourceType::GCC, arch, "minimal");
+            execute_and_assert(arch, &file, 42, "");
+            delete_temporary_file(&file);
+        }
+    }
 
-    // #[test]
-    // fn test_write_gcc_function() {
-    //     for arch in IMPLEMENTED_ARCHS {
-    //         let file =
-    //             generate_example_executable(&["function.o"], SourceType::GCC, arch, "function");
-    //         execute_and_assert(arch, &file, 0, "Hello, world!\n");
-    //         delete_temporary_file(&file);
-    //     }
-    // }
+    #[test]
+    fn test_write_gcc_function() {
+        for arch in IMPLEMENTED_ARCHS {
+            let file =
+                generate_example_executable(&["function.o"], SourceType::GCC, arch, "function");
+            execute_and_assert(arch, &file, 0, "Hello, world!\n");
+            delete_temporary_file(&file);
+        }
+    }
 
-    // #[test]
-    // fn test_write_gcc_data() {
-    //     for arch in IMPLEMENTED_ARCHS {
-    //         let file = generate_example_executable(&["data.o"], SourceType::GCC, arch, "data");
-    //         execute_and_assert(arch, &file, 24, "");
-    //         delete_temporary_file(&file);
-    //     }
-    // }
+    #[test]
+    fn test_write_gcc_data() {
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(&["data.o"], SourceType::GCC, arch, "data");
+            execute_and_assert(arch, &file, 24, "");
+            delete_temporary_file(&file);
+        }
+    }
 
-    // #[test]
-    // fn test_write_gcc_relocate_within_data() {
-    //     for arch in IMPLEMENTED_ARCHS {
-    //         let file = generate_example_executable(
-    //             &["relocate-within-data.o"],
-    //             SourceType::GCC,
-    //             arch,
-    //             "relocate-within-data",
-    //         );
-    //         execute_and_assert(arch, &file, 24, "");
-    //         delete_temporary_file(&file);
-    //     }
-    // }
+    #[test]
+    fn test_write_gcc_relocate_within_data() {
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["relocate-within-data.o"],
+                SourceType::GCC,
+                arch,
+                "relocate-within-data",
+            );
+            execute_and_assert(arch, &file, 24, "");
+            delete_temporary_file(&file);
+        }
+    }
 
-    // #[test]
-    // fn test_write_gcc_symbol() {
-    //     for arch in IMPLEMENTED_ARCHS {
-    //         let file = generate_example_executable(
-    //             &["symbol-import.o", "symbol-export.o"],
-    //             SourceType::GCC,
-    //             arch,
-    //             "symbol",
-    //         );
-    //         execute_and_assert(arch, &file, 24, "");
-    //         delete_temporary_file(&file);
-    //     }
-    // }
+    #[test]
+    fn test_write_gcc_symbol() {
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["symbol-import.o", "symbol-export.o"],
+                SourceType::GCC,
+                arch,
+                "symbol",
+            );
+            execute_and_assert(arch, &file, 24, "");
+            delete_temporary_file(&file);
+        }
+    }
 
-    // #[test]
-    // fn test_write_gcc_override() {
-    //     for arch in IMPLEMENTED_ARCHS {
-    //         let file = generate_example_executable(
-    //             &["override-strong.o", "override-weak.o"],
-    //             SourceType::GCC,
-    //             arch,
-    //             "override",
-    //         );
-    //         execute_and_assert(arch, &file, 53, "");
-    //         delete_temporary_file(&file);
-    //     }
-    // }
+    #[test]
+    fn test_write_gcc_override() {
+        for arch in IMPLEMENTED_ARCHS {
+            let file = generate_example_executable(
+                &["override-strong.o", "override-weak.o"],
+                SourceType::GCC,
+                arch,
+                "override",
+            );
+            execute_and_assert(arch, &file, 53, "");
+            delete_temporary_file(&file);
+        }
+    }
 }

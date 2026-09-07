@@ -259,6 +259,7 @@ mod tests {
 
             let ignore_external_symbol_names = match arch {
                 Machine::RiscV => vec!["__global_pointer$".to_string()],
+                Machine::PowerPC64 => vec![".TOC.".to_string()],
                 _ => vec![],
             };
 
@@ -290,6 +291,7 @@ mod tests {
 
             let ignore_external_symbol_names = match arch {
                 Machine::RiscV => vec!["__global_pointer$".to_string()],
+                Machine::PowerPC64 => vec![".TOC.".to_string()],
                 _ => vec![],
             };
 

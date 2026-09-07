@@ -10,9 +10,9 @@ use crate::{
     elf::module::{
         BASE_PROGRAM_HEADER_COUNT, ELF_HEADER_SIZE, Machine, PROGRAM_HEADER_ENTRY_SIZE,
         RelocatableModule, Relocation, SECTION_ALIGN_DATA, SECTION_NAME_BSS, SECTION_NAME_DATA,
-        SECTION_NAME_RODATA, SECTION_NAME_TBSS, SECTION_NAME_TDATA, SECTION_NAME_TEXT, Symbol,
-        SymbolBind, SymbolType, get_load_address_base, get_section_align_text,
-        get_segment_align_page_size,
+        SECTION_NAME_RODATA, SECTION_NAME_TBSS, SECTION_NAME_TDATA, SECTION_NAME_TEXT,
+        SECTION_NAME_TOC, Symbol, SymbolBind, SymbolType, get_load_address_base,
+        get_section_align_text, get_segment_align_page_size,
     },
     error::LinkerError,
 };
@@ -24,18 +24,21 @@ use crate::{
 /// and it is not a complete representation of all the details of an object file.
 /// It assumes that an object file contains only:
 ///
-/// - At most one code section `.text`
-/// - At most one read-only data section `.rodata`
-/// - At most one thread local data section `.tdata`
-/// - At most one thread local uninitialized section `.tbss`
-/// - At most one data section `.data`
-/// - At most one uninitialized data section `.bss`
-/// - At most one symbol table `.symtab`
-/// - At most one relocation table `.rela.text`
-/// - At most one relocation table `.rela.rodata`
-/// - At most one relocation table `.rela.data`
-/// - At most one relocation table `.rela.tdata`
-/// - At most one string table `.strtab` (for symbol names)
+/// - At most one:
+///   - code section `.text`
+///   - read-only data section `.rodata`
+///   - thread local data section `.tdata`
+///   - thread local uninitialized section `.tbss`
+///   - data section `.data`
+///   - uninitialized data section `.bss`
+///   - TOC section `.toc` (for PowerPC64)
+///   - symbol table `.symtab`
+///   - relocation table `.rela.text`
+///   - relocation table `.rela.rodata`
+///   - relocation table `.rela.data`
+///   - relocation table `.rela.tdata`
+///   - relocation table `.rela.toc`
+///   - string table `.strtab` (for symbol names)
 /// - One section header string table `.shstrtab` (for section names)
 ///
 /// Other sections and details of the object file are ignored without notice.
@@ -78,6 +81,9 @@ pub enum SectionName {
 
     #[allow(clippy::upper_case_acronyms)]
     BSS,
+
+    #[allow(clippy::upper_case_acronyms)]
+    TOC, // PowerPC64 TOC section
 
     Other, // Other sections that are not relevant to the final executable
 }
@@ -233,6 +239,7 @@ impl From<&str> for SectionName {
             SECTION_NAME_TBSS => SectionName::TBSS,
             SECTION_NAME_DATA => SectionName::Data,
             SECTION_NAME_BSS => SectionName::BSS,
+            SECTION_NAME_TOC => SectionName::TOC,
             _ => SectionName::Other,
         }
     }
@@ -247,6 +254,7 @@ impl Display for SectionName {
             SectionName::TBSS => SECTION_NAME_TBSS,
             SectionName::Data => SECTION_NAME_DATA,
             SectionName::BSS => SECTION_NAME_BSS,
+            SectionName::TOC => SECTION_NAME_TOC,
             SectionName::Other => "other",
         };
         write!(f, "{}", name)
@@ -278,28 +286,49 @@ fn contains_read_only_data_section(modules: &[RelocatableModule]) -> bool {
 }
 
 fn contains_writable_data_section(modules: &[RelocatableModule]) -> bool {
+    // modules.iter().any(|module| {
+    //     let existing_data = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_DATA),
+    //     Some(section) if section.size > 0);
+    //
+    //     let existing_toc = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_TOC),
+    //     Some(section) if section.size > 0);
+    //
+    //     let existing_bss = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_BSS),
+    //     Some(section) if section.size > 0);
+    //
+    //     let existing_tls = contains_tls_data_section(modules);
+    //
+    //     existing_data || existing_toc || existing_bss || existing_tls
+    // })
+
     modules.iter().any(|module| {
-        let existing_data = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_DATA),
-        Some(section) if section.size > 0);
-
-        let existing_bss = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_BSS),
-        Some(section) if section.size > 0);
-
-        let existing_tls = contains_tls_data_section(modules);
-
-        existing_data || existing_bss || existing_tls
-    })
+        module.sections.iter().any(|section| {
+            matches!(
+                section.name.as_str(),
+                SECTION_NAME_DATA | SECTION_NAME_BSS | SECTION_NAME_TOC
+            ) && section.size > 0
+        })
+    }) || contains_tls_data_section(modules)
 }
 
 fn contains_tls_data_section(modules: &[RelocatableModule]) -> bool {
+    // modules.iter().any(|module| {
+    //     let existing_tdata = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_TDATA),
+    //     Some(section) if section.size > 0);
+    //
+    //     let existing_tbss = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_TBSS),
+    //     Some(section) if section.size > 0);
+    //
+    //     existing_tdata || existing_tbss
+    // })
+
     modules.iter().any(|module| {
-        let existing_tdata = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_TDATA),
-        Some(section) if section.size > 0);
-
-        let existing_tbss = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_TBSS),
-        Some(section) if section.size > 0);
-
-        existing_tdata || existing_tbss
+        module.sections.iter().any(|section| {
+            matches!(
+                section.name.as_str(),
+                SECTION_NAME_TDATA | SECTION_NAME_TBSS
+            ) && section.size > 0
+        })
     })
 }
 
@@ -697,6 +726,56 @@ pub fn merge<'a>(
 
     // The linker-generated symbol `_edata` points to the end of the initialized data.
     let symbol_edata_virtual_address = virtual_address;
+
+    // data alignment
+    offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
+    offset_in_merged_section = 0; // reset
+    virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
+
+    // Merge PowerPC64 TOC sections after initialized data and before BSS.
+    let merged_section_offset_toc = offset_in_merged_file;
+    let merged_section_virtual_address_toc = virtual_address;
+
+    for ((section_name_map, module), fragment_sections) in section_name_maps
+        .iter()
+        .zip(modules.iter())
+        .zip(fragment_sectionss.iter_mut())
+    {
+        if let Some(section_idx) = section_name_map
+            .iter()
+            .position(|&name| name == SectionName::TOC)
+        {
+            let section = &module.sections[section_idx];
+
+            // Both `file_offset` and `virtual_address` need to be accumulated.
+            offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
+            virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
+
+            let fragment_section = FragmentSection::new(
+                section.size,
+                section.binary,
+                offset_in_merged_section,
+                offset_in_merged_file,
+                virtual_address,
+            );
+            fragment_sections.insert(SectionName::TOC, fragment_section);
+
+            // Both `file_offset` and `virtual_address` need to be accumulated.
+            offset_in_merged_file += section.size;
+            offset_in_merged_section += section.size;
+            virtual_address += section.size;
+        }
+    }
+
+    let merged_section_size_toc = virtual_address - merged_section_virtual_address_toc;
+    merged_section_infos.insert(
+        SectionName::TOC,
+        MergedSectionInfo::new(
+            merged_section_offset_toc,
+            merged_section_virtual_address_toc,
+            merged_section_size_toc,
+        ),
+    );
 
     // data alignment
     offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
