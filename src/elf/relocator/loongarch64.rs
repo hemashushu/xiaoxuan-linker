@@ -29,6 +29,22 @@ impl RelocationResolver for LoongArch64RelocationResolver {
             .iter()
             .map(|module| {
                 let mut sections = HashMap::new();
+                let mut got_slots = HashMap::new();
+                for relocation_section in &module.relocation_sections {
+                    for relocation in &relocation_section.relocations {
+                        if matches!(
+                            relocation.relocation_type,
+                            RelocationType::R_LARCH_GOT_PC_HI20
+                                | RelocationType::R_LARCH_GOT_PC_LO12
+                        ) {
+                            let next_slot = got_slots.len() * 8;
+                            got_slots
+                                .entry(relocation.symbol_index)
+                                .or_insert(next_slot);
+                        }
+                    }
+                }
+
                 for FragmentRelocationSection {
                     target_section_name,
                     relocations,
@@ -43,8 +59,30 @@ impl RelocationResolver for LoongArch64RelocationResolver {
                             target_section_name,
                             relocations,
                             &module.symbols,
+                            &got_slots,
                         )?,
                     );
+                }
+
+                if let Some(got_section) = module.sections.get(&SectionName::TOC) {
+                    let mut got_patches = Vec::new();
+                    for (symbol_index, offset) in &got_slots {
+                        let target = match &module.symbols[*symbol_index] {
+                            ResolvedSymbol::VirtualAddress(value) => *value,
+                            ResolvedSymbol::Absolute(value) => *value as usize,
+                            _ => {
+                                return Err(LinkerError::Message(format!(
+                                    "Symbol at index {} in module {} can not initialize GOT",
+                                    symbol_index, module.name
+                                )));
+                            }
+                        };
+                        got_patches.push(PatchItem::from_u64(*offset, target as u64));
+                    }
+                    if !got_patches.is_empty() {
+                        sections.insert(SectionName::TOC, got_patches);
+                    }
+                    let _ = got_section;
                 }
                 Ok(PatchModule {
                     patch_sections: sections,
@@ -61,6 +99,7 @@ fn resolve_section(
     name: &SectionName,
     relocations: &[Relocation],
     symbols: &[ResolvedSymbol],
+    got_slots: &HashMap<usize, usize>,
 ) -> Result<Vec<PatchItem>, LinkerError> {
     let section = sections.get(name).unwrap();
     let FragmentSectionBinary::Referenced(binary) = section.binary else {
@@ -88,6 +127,28 @@ fn resolve_section(
         let place = section.virtual_address + offset;
         let patch = match r.relocation_type {
             RelocationType::R_LARCH_64 => PatchItem::from_u64(offset, target as u64),
+            RelocationType::R_LARCH_GOT_PC_HI20 | RelocationType::R_LARCH_GOT_PC_LO12 => {
+                let slot = *got_slots.get(&r.symbol_index).ok_or_else(|| {
+                    LinkerError::Message(format!(
+                        "Missing LoongArch GOT slot for symbol {}",
+                        r.symbol_index
+                    ))
+                })?;
+                let got_section = sections.get(&SectionName::TOC).ok_or_else(|| {
+                    LinkerError::Message("Missing synthetic LoongArch GOT section".to_string())
+                })?;
+                let got_address = got_section.virtual_address + slot;
+                let delta = (got_address as isize).wrapping_sub(place as isize) as i64;
+                if r.relocation_type == RelocationType::R_LARCH_GOT_PC_HI20 {
+                    let hi = ((delta + 0x800) >> 12) as u32;
+                    PatchItem::from_u32(offset, (ins & !(0xfffff << 5)) | ((hi & 0xfffff) << 5))
+                } else {
+                    PatchItem::from_u32(
+                        offset,
+                        (ins & !(0xfff << 10)) | ((got_address as u32 & 0xfff) << 10),
+                    )
+                }
+            }
             RelocationType::R_LARCH_PCALA_HI20 => {
                 let delta = (target as isize).wrapping_sub(place as isize) as i64;
                 let hi = ((delta + 0x800) >> 12) as u32;
@@ -106,10 +167,12 @@ fn resolve_section(
                 PatchItem::from_u32(offset, patched)
             }
             RelocationType::R_LARCH_CALL36 => {
-                let imm = (target as isize).wrapping_sub(place as isize) as i64 >> 2;
+                let displacement = (target as isize).wrapping_sub(place as isize) as i64;
                 let next = read(binary, offset + 4);
-                let first = (ins & !(0xfffff << 5)) | ((((imm >> 16) as u32) & 0xfffff) << 5);
-                let second = (next & !(0xffff << 10)) | (((imm as u32) & 0xffff) << 10);
+                let high = ((displacement + 0x8000) >> 16) as u32;
+                let first = (ins & !(0xfffff << 5)) | ((high & 0xfffff) << 5);
+                let low = displacement >> 2;
+                let second = (next & !(0xffff << 10)) | ((low as u32 & 0xffff) << 10);
                 PatchItem::new(offset, [first.to_le_bytes(), second.to_le_bytes()].concat())
             }
             _ => unreachable!(

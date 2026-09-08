@@ -4,14 +4,17 @@
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 use crate::{
     elf::module::{
         BASE_PROGRAM_HEADER_COUNT, ELF_HEADER_SIZE, Machine, PROGRAM_HEADER_ENTRY_SIZE,
-        RelocatableModule, Relocation, SECTION_ALIGN_DATA, SECTION_NAME_BSS, SECTION_NAME_DATA,
-        SECTION_NAME_RODATA, SECTION_NAME_TBSS, SECTION_NAME_TDATA, SECTION_NAME_TEXT,
-        SECTION_NAME_TOC, Symbol, SymbolBind, SymbolType, get_load_address_base,
+        RelocatableModule, Relocation, RelocationType, SECTION_ALIGN_DATA, SECTION_NAME_BSS,
+        SECTION_NAME_DATA, SECTION_NAME_RODATA, SECTION_NAME_TBSS, SECTION_NAME_TDATA,
+        SECTION_NAME_TEXT, SECTION_NAME_TOC, Symbol, SymbolBind, SymbolType, get_load_address_base,
         get_section_align_text, get_segment_align_page_size,
     },
     error::LinkerError,
@@ -152,11 +155,28 @@ impl<'a> FragmentSection<'a> {
             virtual_address,
         }
     }
+
+    pub fn new_owned(
+        binary: Vec<u8>,
+        offset_in_merged_section: usize,
+        offset_in_merged_file: usize,
+        virtual_address: usize,
+    ) -> Self {
+        let size = binary.len();
+        FragmentSection {
+            size,
+            binary: FragmentSectionBinary::Owned(binary),
+            offset_in_merged_section,
+            offset_in_merged_file,
+            virtual_address,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum FragmentSectionBinary<'a> {
     Referenced(&'a [u8]),
+    Owned(Vec<u8>),
     None,
 }
 
@@ -764,6 +784,34 @@ pub fn merge<'a>(
             offset_in_merged_file += section.size;
             offset_in_merged_section += section.size;
             virtual_address += section.size;
+        } else if arch == Machine::LoongArch {
+            let mut got_symbols = HashSet::new();
+            for relocation_section in &module.relocation_sections {
+                for relocation in &relocation_section.relocations {
+                    if matches!(
+                        relocation.relocation_type,
+                        RelocationType::R_LARCH_GOT_PC_HI20 | RelocationType::R_LARCH_GOT_PC_LO12
+                    ) {
+                        got_symbols.insert(relocation.symbol_index);
+                    }
+                }
+            }
+
+            if !got_symbols.is_empty() {
+                let binary = vec![0; got_symbols.len() * 8];
+                offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
+                virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
+                let fragment_section = FragmentSection::new_owned(
+                    binary,
+                    offset_in_merged_section,
+                    offset_in_merged_file,
+                    virtual_address,
+                );
+                fragment_sections.insert(SectionName::TOC, fragment_section);
+                offset_in_merged_file += got_symbols.len() * 8;
+                offset_in_merged_section += got_symbols.len() * 8;
+                virtual_address += got_symbols.len() * 8;
+            }
         }
     }
 

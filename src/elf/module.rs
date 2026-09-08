@@ -730,6 +730,10 @@ pub enum RelocationType {
     /// A 64-bit absolute relocation on LoongArch.
     R_LARCH_64,
 
+    /// PC-relative high and low relocations for a static GOT entry.
+    R_LARCH_GOT_PC_HI20,
+    R_LARCH_GOT_PC_LO12,
+
     /// A 26-bit PC-relative relocation on LoongArch.
     R_LARCH_B26,
 

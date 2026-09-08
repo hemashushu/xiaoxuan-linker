@@ -511,6 +511,8 @@ fn parse_relocation_type(
                 object::elf::R_LARCH_PCALA_HI20 => Ok(RelocationType::R_LARCH_PCALA_HI20),
                 object::elf::R_LARCH_PCALA_LO12 => Ok(RelocationType::R_LARCH_PCALA_LO12),
                 object::elf::R_LARCH_64 => Ok(RelocationType::R_LARCH_64),
+                object::elf::R_LARCH_GOT_PC_HI20 => Ok(RelocationType::R_LARCH_GOT_PC_HI20),
+                object::elf::R_LARCH_GOT_PC_LO12 => Ok(RelocationType::R_LARCH_GOT_PC_LO12),
                 object::elf::R_LARCH_B26 => Ok(RelocationType::R_LARCH_B26),
                 object::elf::R_LARCH_CALL36 => Ok(RelocationType::R_LARCH_CALL36),
                 /* unsupported */

@@ -51,30 +51,30 @@ pub enum RelocatedSectionBinary<'a> {
 
 pub fn relocate<'a>(
     merged_file_layout: &MergedFileLayout,
-    resolved_modules: &[ResolvedModule<'a>],
+    resolved_modules: Vec<ResolvedModule<'a>>,
     arch: Machine,
 ) -> Result<Vec<RelocatedModule<'a>>, LinkerError> {
     // Resolve relocations and generate patch modules
     let patch_modules = match arch {
         Machine::AArch64 => {
-            aarch64::AArch64RelocationResolver::resolve(merged_file_layout, resolved_modules)?
+            aarch64::AArch64RelocationResolver::resolve(merged_file_layout, &resolved_modules)?
         }
         Machine::RiscV => {
-            riscv64::RiscV64RelocationResolver::resolve(merged_file_layout, resolved_modules)?
+            riscv64::RiscV64RelocationResolver::resolve(merged_file_layout, &resolved_modules)?
         }
         Machine::LoongArch => loongarch64::LoongArch64RelocationResolver::resolve(
             merged_file_layout,
-            resolved_modules,
+            &resolved_modules,
         )?,
         Machine::PowerPC64 => powerpc64le::PowerPC64LERelocationResolver::resolve(
             merged_file_layout,
-            resolved_modules,
+            &resolved_modules,
         )?,
         Machine::S390 => {
-            s390x::S390xRelocationResolver::resolve(merged_file_layout, resolved_modules)?
+            s390x::S390xRelocationResolver::resolve(merged_file_layout, &resolved_modules)?
         }
         Machine::X86_64 => {
-            x86_64::X86_64RelocationResolver::resolve(merged_file_layout, resolved_modules)?
+            x86_64::X86_64RelocationResolver::resolve(merged_file_layout, &resolved_modules)?
         }
         _ => {
             unimplemented!(
@@ -87,20 +87,22 @@ pub fn relocate<'a>(
     // Apply the patch modules to the merged modules
     let mut relocated_modules = Vec::new();
 
-    for (resolved_module, patch_module) in resolved_modules.iter().zip(patch_modules) {
+    for (resolved_module, patch_module) in resolved_modules.into_iter().zip(patch_modules) {
         let mut relocated_sections: HashMap<SectionName, RelocatedSection<'a>> = HashMap::new();
 
-        for (section_name, section) in &resolved_module.sections {
-            if let Some(patch_items) = patch_module.patch_sections.get(section_name) {
+        for (section_name, section) in resolved_module.sections {
+            if let Some(patch_items) = patch_module.patch_sections.get(&section_name) {
                 // If there are patch items for this section, we need to apply them to the binary data
-                let FragmentSectionBinary::Referenced(source_data) = section.binary else {
-                    return Err(LinkerError::Message(format!(
-                        "Section {} does not have a referenced binary",
-                        section_name
-                    )));
+                let mut binary = match &section.binary {
+                    FragmentSectionBinary::Referenced(source_data) => source_data.to_vec(),
+                    FragmentSectionBinary::Owned(source_data) => source_data.clone(),
+                    FragmentSectionBinary::None => {
+                        return Err(LinkerError::Message(format!(
+                            "Section {} does not have binary data",
+                            section_name
+                        )));
+                    }
                 };
-
-                let mut binary = source_data.to_vec();
                 for patch_item in patch_items {
                     binary.splice(
                         patch_item.offset..patch_item.offset + patch_item.data.len(),
@@ -109,7 +111,7 @@ pub fn relocate<'a>(
                 }
 
                 relocated_sections.insert(
-                    *section_name,
+                    section_name,
                     RelocatedSection {
                         size: binary.len(),
                         binary: RelocatedSectionBinary::Owned(binary),
@@ -120,16 +122,25 @@ pub fn relocate<'a>(
                 match section.binary {
                     FragmentSectionBinary::Referenced(source_data) => {
                         relocated_sections.insert(
-                            *section_name,
+                            section_name,
                             RelocatedSection {
                                 size: section.size,
                                 binary: RelocatedSectionBinary::Referenced(source_data),
                             },
                         );
                     }
+                    FragmentSectionBinary::Owned(source_data) => {
+                        relocated_sections.insert(
+                            section_name,
+                            RelocatedSection {
+                                size: section.size,
+                                binary: RelocatedSectionBinary::Owned(source_data),
+                            },
+                        );
+                    }
                     FragmentSectionBinary::None => {
                         relocated_sections.insert(
-                            *section_name,
+                            section_name,
                             RelocatedSection {
                                 size: section.size,
                                 binary: RelocatedSectionBinary::None,
@@ -349,7 +360,7 @@ mod tests {
                 global_symbols: _,
             } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
 
-            let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+            let relocate_result = relocate(&merged_file_layout, resolved_modules, arch);
 
             assert!(relocate_result.is_ok());
         }
@@ -379,7 +390,7 @@ mod tests {
                 global_symbols: _,
             } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
 
-            let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+            let relocate_result = relocate(&merged_file_layout, resolved_modules, arch);
 
             assert!(relocate_result.is_ok());
         }
@@ -417,7 +428,7 @@ mod tests {
                 global_symbols: _,
             } = resolve(fragment_modules, &linker_generated_symbols).unwrap();
 
-            let relocate_result = relocate(&merged_file_layout, &resolved_modules, arch);
+            let relocate_result = relocate(&merged_file_layout, resolved_modules, arch);
 
             assert!(relocate_result.is_ok());
         }

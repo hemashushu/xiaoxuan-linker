@@ -871,12 +871,12 @@ mod tests {
         }
     }
 
-    const IMPLEMENTED_ARCHS: [Machine; 1] = [
-        // Machine::X86_64,
-        // Machine::AArch64,
-        // Machine::RiscV,
-        // Machine::LoongArch,
-        // Machine::S390,
+    const IMPLEMENTED_ARCHS: [Machine; 6] = [
+        Machine::X86_64,
+        Machine::AArch64,
+        Machine::RiscV,
+        Machine::LoongArch,
+        Machine::S390,
         Machine::PowerPC64,
     ];
 
@@ -995,7 +995,7 @@ mod tests {
 
         let entry_point = find_entry_point(&global_symbols).unwrap();
 
-        let relocated_modules = relocate(&merged_file_layout, &resolved_modules, arch).unwrap();
+        let relocated_modules = relocate(&merged_file_layout, resolved_modules, arch).unwrap();
 
         write_executable(
             &relocated_modules,
