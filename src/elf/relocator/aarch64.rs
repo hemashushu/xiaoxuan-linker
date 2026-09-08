@@ -63,8 +63,9 @@ fn resolve_section(
     relocations: &[Relocation],
     symbols: &[ResolvedSymbol],
 ) -> Result<Vec<PatchItem>, LinkerError> {
-    let fragment_section = fragment_sections.get(target_section_name).unwrap();
-    let FragmentSectionBinary::Referenced(binary) = fragment_section.binary else {
+
+    let target_fragment_section = fragment_sections.get(target_section_name).unwrap();
+    let FragmentSectionBinary::Referenced(binary) = target_fragment_section.binary else {
         return Err(LinkerError::Message(format!(
             "Section {} does not have a referenced binary",
             target_section_name
@@ -75,6 +76,7 @@ fn resolve_section(
 
     for relocation in relocations {
         let placeholder_offset = relocation.offset;
+
         let symbol_value = match &symbols[relocation.symbol_index] {
             ResolvedSymbol::VirtualAddress(value) => *value,
             ResolvedSymbol::Absolute(value) => *value as usize,
@@ -85,6 +87,7 @@ fn resolve_section(
                 )));
             }
         };
+
         let target = symbol_value.wrapping_add(relocation.addend as usize);
 
         let patch_item = match relocation.relocation_type {
@@ -94,7 +97,7 @@ fn resolve_section(
             RelocationType::R_AARCH64_ADR_PREL_PG_HI21 => {
                 // ADRP: Page(S + A) - Page(P), encoded as immhi:immlo.
                 let instruction = read_instruction(binary, placeholder_offset);
-                let place = fragment_section.virtual_address + placeholder_offset;
+                let place = target_fragment_section.virtual_address + placeholder_offset;
                 let page_delta = ((target & !0xfff) as i64).wrapping_sub((place & !0xfff) as i64);
                 let immediate = ((page_delta >> 12) as u32) & 0x1f_ffff;
                 let patched = (instruction & !0x60ff_ffe0)
@@ -120,7 +123,7 @@ fn resolve_section(
             RelocationType::R_AARCH64_CALL26 => {
                 // CALL26: S + A - P, divided by four, is stored in instruction bits [25:0].
                 let instruction = read_instruction(binary, placeholder_offset);
-                let place = fragment_section.virtual_address + placeholder_offset;
+                let place = target_fragment_section.virtual_address + placeholder_offset;
                 let immediate = target.wrapping_sub(place) >> 2;
                 let patched = (instruction & !0x03ff_ffff) | (immediate as u32 & 0x03ff_ffff);
 

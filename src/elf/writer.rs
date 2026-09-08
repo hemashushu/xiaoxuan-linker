@@ -308,10 +308,9 @@ pub fn write_executable(
 
     // Write PHDR segment header
     //
-    // Some compilers (e.g. GCC) generate the first section called `.note.gnu.build-id`
-    // before the `.text` section, and this section is included in the PHDR segment.
-    // But our linker does not generate the `.note.gnu.build-id` section,
-    // so the PHDR segment only includes the ELF header and program headers.
+    // Some compilers (e.g. GCC) generate an optional `.note.gnu.build-id` section,
+    // which may be included in the PHDR segment. This linker does not generate
+    // that section, so the PHDR segment contains only the ELF header and program headers.
     //
     // P.S.: using the command `readelf -n FILE` to show the notes.
 

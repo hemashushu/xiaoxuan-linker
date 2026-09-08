@@ -36,9 +36,9 @@ pub struct RelocatedSection<'a> {
 
     /// The binary data of the section.
     ///
-    /// Note: only `.text`, `.rodata`, `.tdata`, and `.data` sections
-    /// contain binary data in the object file,
-    /// while `.bss` and `.tbss` sections do not contain binary data in the object file.
+    /// File-backed sections contain binary data. Synthetic sections, such as
+    /// the static GOT, may own generated binary data; `.bss` and `.tbss` do
+    /// not contain file-backed data.
     pub binary: RelocatedSectionBinary<'a>,
 }
 
@@ -161,7 +161,7 @@ pub fn relocate<'a>(
 
 /// A patch item represents a modification to be made to a section's binary data.
 ///
-/// Note that this linker does not support changing code size (e.g., the relaxation of the RISCV instruction set),
+/// Note that this linker does not support changing code size (e.g., relaxation of the RISC-V instruction set),
 /// so a patch item only modifies the binary data of a section without changing its size.
 pub struct PatchItem {
     pub offset: usize,
@@ -200,7 +200,7 @@ pub struct PatchModule {
 
 /// A trait for resolving relocations in a merged module.
 ///
-/// This linker does not support changing code size (e.g., the relaxation of the RISCV instruction set),
+/// This linker does not support changing code size (e.g., relaxation of the RISC-V instruction set),
 /// so the relocation resolver only needs to resolve the relocation entries and generate the corresponding patch items.
 pub trait RelocationResolver {
     fn resolve(

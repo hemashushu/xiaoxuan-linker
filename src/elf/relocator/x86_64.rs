@@ -19,7 +19,7 @@ use crate::{
 pub struct X86_64RelocationResolver;
 
 impl RelocationResolver for X86_64RelocationResolver {
-    /// This linker does not support changing code size (e.g., the relaxation of the RISCV instruction set),
+    /// This linker does not support changing code size (e.g., relaxation of the RISC-V instruction set),
     /// so a relocation resolver only needs to resolve the relocation entries and generate the corresponding patch items.
     fn resolve(
         merged_file_layout: &MergedFileLayout,
@@ -69,10 +69,7 @@ fn resolve_section(
 ) -> Result<Vec<PatchItem>, LinkerError> {
     let mut patch_items = Vec::new();
 
-    let mut iter = relocations.iter();
-
-    #[allow(clippy::while_let_on_iterator)]
-    while let Some(relocation) = iter.next() {
+    for relocation in relocations {
         // Process each relocation here
 
         let relocation_type = relocation.relocation_type;

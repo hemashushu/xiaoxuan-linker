@@ -32,7 +32,7 @@ use object::elf;
 // | 03 `.tdata`    | SHT_PROGBITS | Initialized thread-local data   | 4/8   | Opt  |
 // | 04 `.tbss`     | SHT_NOBITS   | Uninitialized thread-local data | 4/8   | Opt  |
 // | 05 `.data`     | SHT_PROGBITS | Initialized data                | 4/8   | Opt  |
-// | 06 `.toc`      | SHT_PROGBITS | Table of contents (PowerPC64le) | 4/8   | Opt  |
+// | 06 `.toc`      | SHT_PROGBITS | PowerPC64 TOC or static GOT data | 4/8   | Opt  |
 // | 07 `.bss`      | SHT_NOBITS   | Uninitialized data              | 4/8   | Opt  |
 // | 08 `.symtab`   | SHT_SYMTAB   | Symbol table                    | 8     |      |
 // | 09 `.strtab`   | SHT_STRTAB   | Strings for symbol names        | 1     |      |
@@ -59,7 +59,7 @@ pub const SECTION_NAME_TDATA: &str = ".tdata";
 pub const SECTION_NAME_TBSS: &str = ".tbss";
 pub const SECTION_NAME_DATA: &str = ".data";
 pub const SECTION_NAME_BSS: &str = ".bss";
-pub const SECTION_NAME_TOC: &str = ".toc"; // PowerPC64 TOC section
+pub const SECTION_NAME_TOC: &str = ".toc"; // PowerPC64 TOC or synthetic static GOT section
 
 pub const SECTION_NAME_SYMTAB: &str = ".symtab";
 pub const SECTION_NAME_STRTAB: &str = ".strtab";
@@ -77,10 +77,10 @@ pub const ELF_HEADER_SIZE: usize = 64;
 // ELF64 program header entry size is fixed at 56 bytes
 pub const PROGRAM_HEADER_ENTRY_SIZE: usize = 56;
 
-// All executable file contains `PHDR`, `meta`, and `code` segements,
+// Every executable contains `PHDR`, `meta`, and `code` segments,
 // and the following are optional:
 // - `read-only data`: .rodata
-// - `writable data`: .tdata, .tbss, .data, .bss
+// - `writable data`: .tdata, .tbss, .data, .toc, .bss
 // - `TLS data`: .tdata, .tbss
 pub const BASE_PROGRAM_HEADER_COUNT: usize = 3;
 
@@ -604,7 +604,7 @@ pub enum RelocationType {
     /// Currently, only `local-exec` is supported.
     ///
     /// The formula for calculating the value to be written at the relocation site is:
-    /// TPOFF(sym) = symbol_offset_in_tls_block − tls_block_size_rounded
+    /// TPOFF(sym) = symbol_offset_in_tls_block - tls_block_size
     ///
     /// For example, if we have the following TLS variable declarations in C:
     ///

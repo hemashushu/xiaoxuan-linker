@@ -86,7 +86,7 @@ pub enum SectionName {
     BSS,
 
     #[allow(clippy::upper_case_acronyms)]
-    TOC, // PowerPC64 TOC section
+    TOC, // PowerPC64 TOC or synthetic static GOT section
 
     Other, // Other sections that are not relevant to the final executable
 }
@@ -101,9 +101,10 @@ pub struct FragmentSection<'a> {
 
     /// The binary data of the section.
     ///
-    /// Note: only `.text`, `.rodata`, `.tdata`, and `.data` sections
-    /// contain binary data in the object file,
-    /// while `.bss` and `.tbss` sections do not contain binary data in the object file.
+    /// Input `.text`, `.rodata`, `.tdata`, `.data`, and `.toc` sections contain
+    /// binary data. Synthetic sections, such as the static GOT stored in `.toc`,
+    /// may own generated binary data. `.bss` and `.tbss` do not contain binary
+    /// data in the object file.
     pub binary: FragmentSectionBinary<'a>,
 
     // The offset of the fragment sections in the merged section in the runtime memory of the final executable file
@@ -290,6 +291,7 @@ pub struct FragmentRelocationSection {
     /// - RoData
     /// - Data
     /// - TData
+    /// - TOC
     pub target_section_name: SectionName,
 
     /// The relocation entries in this section.
@@ -306,21 +308,6 @@ fn contains_read_only_data_section(modules: &[RelocatableModule]) -> bool {
 }
 
 fn contains_writable_data_section(modules: &[RelocatableModule]) -> bool {
-    // modules.iter().any(|module| {
-    //     let existing_data = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_DATA),
-    //     Some(section) if section.size > 0);
-    //
-    //     let existing_toc = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_TOC),
-    //     Some(section) if section.size > 0);
-    //
-    //     let existing_bss = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_BSS),
-    //     Some(section) if section.size > 0);
-    //
-    //     let existing_tls = contains_tls_data_section(modules);
-    //
-    //     existing_data || existing_toc || existing_bss || existing_tls
-    // })
-
     modules.iter().any(|module| {
         module.sections.iter().any(|section| {
             matches!(
@@ -332,16 +319,6 @@ fn contains_writable_data_section(modules: &[RelocatableModule]) -> bool {
 }
 
 fn contains_tls_data_section(modules: &[RelocatableModule]) -> bool {
-    // modules.iter().any(|module| {
-    //     let existing_tdata = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_TDATA),
-    //     Some(section) if section.size > 0);
-    //
-    //     let existing_tbss = matches!(module.sections.iter().find(|s| s.name == SECTION_NAME_TBSS),
-    //     Some(section) if section.size > 0);
-    //
-    //     existing_tdata || existing_tbss
-    // })
-
     modules.iter().any(|module| {
         module.sections.iter().any(|section| {
             matches!(

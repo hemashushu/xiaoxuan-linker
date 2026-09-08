@@ -22,33 +22,31 @@ pub struct PowerPC64LERelocationResolver;
 
 impl RelocationResolver for PowerPC64LERelocationResolver {
     fn resolve(
-        layout: &MergedFileLayout,
-        modules: &[ResolvedModule],
+        merged_file_layout: &MergedFileLayout,
+        resolved_modules: &[ResolvedModule],
     ) -> Result<Vec<PatchModule>, LinkerError> {
-        modules
+        resolved_modules
             .iter()
-            .map(|m| {
-                let mut sections = HashMap::new();
+            .map(|resolved_module| {
+                let mut patch_sections = HashMap::new();
                 for FragmentRelocationSection {
                     target_section_name,
                     relocations,
-                } in &m.relocation_sections
+                } in &resolved_module.relocation_sections
                 {
-                    sections.insert(
+                    patch_sections.insert(
                         *target_section_name,
                         resolve_section(
-                            &m.name,
-                            layout,
-                            &m.sections,
+                            &resolved_module.name,
+                            merged_file_layout,
+                            &resolved_module.sections,
                             target_section_name,
                             relocations,
-                            &m.symbols,
+                            &resolved_module.symbols,
                         )?,
                     );
                 }
-                Ok(PatchModule {
-                    patch_sections: sections,
-                })
+                Ok(PatchModule { patch_sections })
             })
             .collect()
     }
@@ -56,20 +54,21 @@ impl RelocationResolver for PowerPC64LERelocationResolver {
 
 fn resolve_section(
     module_name: &str,
-    layout: &MergedFileLayout,
-    sections: &HashMap<SectionName, FragmentSection>,
-    name: &SectionName,
+    merged_file_layout: &MergedFileLayout,
+    fragment_sections: &HashMap<SectionName, FragmentSection>,
+    target_section_name: &SectionName,
     relocations: &[Relocation],
     symbols: &[ResolvedSymbol],
 ) -> Result<Vec<PatchItem>, LinkerError> {
-    let section = sections.get(name).unwrap();
-    let FragmentSectionBinary::Referenced(binary) = section.binary else {
+    let target_fragment_section = fragment_sections.get(target_section_name).unwrap();
+    let FragmentSectionBinary::Referenced(binary) = target_fragment_section.binary else {
         return Err(LinkerError::Message(format!(
             "Section {} does not have a referenced binary",
-            name
+            target_section_name
         )));
     };
-    let value = |r: &Relocation| -> Result<usize, LinkerError> {
+
+    let get_symbol_value = |r: &Relocation| -> Result<usize, LinkerError> {
         match &symbols[r.symbol_index] {
             ResolvedSymbol::VirtualAddress(v) => Ok(v.wrapping_add(r.addend as usize)),
             ResolvedSymbol::Absolute(v) => Ok((*v as usize).wrapping_add(r.addend as usize)),
@@ -79,23 +78,23 @@ fn resolve_section(
             ))),
         }
     };
-    let toc = layout
-        .merged_section_infos
-        .get(&SectionName::TOC)
-        .filter(|section| section.size > 0)
+
+    let toc_value = merged_file_layout
+        .get_non_empty_section_info(SectionName::TOC)
         .map(|section| section.virtual_address)
         .unwrap_or_else(|| get_load_address_base(crate::elf::module::Machine::PowerPC64))
         + 0x8000;
+
     let mut patches = Vec::new();
     for r in relocations {
         let offset = r.offset;
-        let target = value(r)? as u64;
+        let target = get_symbol_value(r)? as u64;
         let symbol_value = target.wrapping_sub(r.addend as i64 as u64);
-        let place = section.virtual_address + offset;
+        let place = target_fragment_section.virtual_address + offset;
         let signed = match r.relocation_type {
             RelocationType::R_PPC64_TOC16_HA
             | RelocationType::R_PPC64_TOC16_LO
-            | RelocationType::R_PPC64_TOC16_LO_DS => target.wrapping_sub(toc as u64),
+            | RelocationType::R_PPC64_TOC16_LO_DS => target.wrapping_sub(toc_value as u64),
             _ => target,
         };
 

@@ -23,32 +23,32 @@ pub struct RiscV64RelocationResolver;
 
 impl RelocationResolver for RiscV64RelocationResolver {
     fn resolve(
-        layout: &MergedFileLayout,
-        modules: &[ResolvedModule],
+        merged_file_layout: &MergedFileLayout,
+        resolved_modules: &[ResolvedModule],
     ) -> Result<Vec<PatchModule>, LinkerError> {
-        modules
+        resolved_modules
             .iter()
-            .map(|module| {
-                let mut sections = HashMap::new();
+            .map(|resolved_module| {
+                let mut patch_sections = HashMap::new();
                 for FragmentRelocationSection {
                     target_section_name,
                     relocations,
-                } in &module.relocation_sections
+                } in &resolved_module.relocation_sections
                 {
-                    sections.insert(
+                    patch_sections.insert(
                         *target_section_name,
                         resolve_section(
-                            &module.name,
-                            layout,
-                            &module.sections,
+                            &resolved_module.name,
+                            merged_file_layout,
+                            &resolved_module.sections,
                             target_section_name,
                             relocations,
-                            &module.symbols,
+                            &resolved_module.symbols,
                         )?,
                     );
                 }
                 Ok(PatchModule {
-                    patch_sections: sections,
+                    patch_sections,
                 })
             })
             .collect()
@@ -57,20 +57,22 @@ impl RelocationResolver for RiscV64RelocationResolver {
 
 fn resolve_section(
     module_name: &str,
-    _layout: &MergedFileLayout,
-    sections: &HashMap<SectionName, FragmentSection>,
-    section_name: &SectionName,
+    _merged_file_layout: &MergedFileLayout,
+    fragment_sections: &HashMap<SectionName, FragmentSection>,
+    target_section_name: &SectionName,
     relocations: &[Relocation],
     symbols: &[ResolvedSymbol],
 ) -> Result<Vec<PatchItem>, LinkerError> {
-    let section = sections.get(section_name).unwrap();
-    let FragmentSectionBinary::Referenced(binary) = section.binary else {
+
+    let target_fragment_section = fragment_sections.get(target_section_name).unwrap();
+    let FragmentSectionBinary::Referenced(binary) = target_fragment_section.binary else {
         return Err(LinkerError::Message(format!(
             "Section {} does not have a referenced binary",
-            section_name
+            target_section_name
         )));
     };
-    let value = |relocation: &Relocation| -> Result<usize, LinkerError> {
+
+    let get_symbol_value = |relocation: &Relocation| -> Result<usize, LinkerError> {
         match &symbols[relocation.symbol_index] {
             ResolvedSymbol::VirtualAddress(value) => {
                 Ok(value.wrapping_add(relocation.addend as usize))
@@ -84,23 +86,25 @@ fn resolve_section(
             ))),
         }
     };
+
     let mut hi_targets = HashMap::new();
     for relocation in relocations {
         if relocation.relocation_type == RelocationType::R_RISCV_PCREL_HI20 {
-            let p = section.virtual_address + relocation.offset;
-            hi_targets.insert(p, value(relocation)?);
+            let p = target_fragment_section.virtual_address + relocation.offset;
+            hi_targets.insert(p, get_symbol_value(relocation)?);
         }
     }
-    let mut patches = Vec::new();
+
+    let mut patche_items = Vec::new();
     for relocation in relocations {
         let offset = relocation.offset;
         let instruction = read_u32(binary, offset);
-        let target = value(relocation)?;
+        let target = get_symbol_value(relocation)?;
         let patch = match relocation.relocation_type {
             RelocationType::R_RISCV_64 => PatchItem::from_u64(offset, target as u64),
             RelocationType::R_RISCV_PCREL_HI20 | RelocationType::R_RISCV_HI20 => {
                 let delta = if relocation.relocation_type == RelocationType::R_RISCV_PCREL_HI20 {
-                    (target as isize).wrapping_sub((section.virtual_address + offset) as isize)
+                    (target as isize).wrapping_sub((target_fragment_section.virtual_address + offset) as isize)
                         as i64
                 } else {
                     target as i64
@@ -112,7 +116,7 @@ fn resolve_section(
                 let hi_address = target;
                 let hi_target = *hi_targets.get(&hi_address).ok_or_else(|| {
                     LinkerError::Message(format!(
-                        "Missing RISC-V PC-relative HI20 relocation for LO12 at offset {offset}"
+                        "RISC-V PC-relative HI20/LO12 relocation pair mismatch at offset {offset}"
                     ))
                 })?;
                 let delta = (hi_target as isize).wrapping_sub(hi_address as isize) as u32;
@@ -134,7 +138,7 @@ fn resolve_section(
             }
             RelocationType::R_RISCV_CALL_PLT => {
                 let delta = (target as isize)
-                    .wrapping_sub((section.virtual_address + offset) as isize)
+                    .wrapping_sub((target_fragment_section.virtual_address + offset) as isize)
                     as i64;
                 let hi = ((delta + 0x800) >> 12) as u32;
                 let lo = delta as u32 & 0xfff;
@@ -148,9 +152,9 @@ fn resolve_section(
                 relocation.relocation_type
             ),
         };
-        patches.push(patch);
+        patche_items.push(patch);
     }
-    Ok(patches)
+    Ok(patche_items)
 }
 
 fn read_u32(binary: &[u8], offset: usize) -> u32 {

@@ -22,15 +22,16 @@ pub struct LoongArch64RelocationResolver;
 
 impl RelocationResolver for LoongArch64RelocationResolver {
     fn resolve(
-        layout: &MergedFileLayout,
-        modules: &[ResolvedModule],
+        merged_file_layout: &MergedFileLayout,
+        resolved_modules: &[ResolvedModule],
     ) -> Result<Vec<PatchModule>, LinkerError> {
-        modules
+        resolved_modules
             .iter()
-            .map(|module| {
-                let mut sections = HashMap::new();
+            .map(|resolved_module| {
+                let mut patch_sections = HashMap::new();
                 let mut got_slots = HashMap::new();
-                for relocation_section in &module.relocation_sections {
+
+                for relocation_section in &resolved_module.relocation_sections {
                     for relocation in &relocation_section.relocations {
                         if matches!(
                             relocation.relocation_type,
@@ -48,44 +49,45 @@ impl RelocationResolver for LoongArch64RelocationResolver {
                 for FragmentRelocationSection {
                     target_section_name,
                     relocations,
-                } in &module.relocation_sections
+                } in &resolved_module.relocation_sections
                 {
-                    sections.insert(
+                    patch_sections.insert(
                         *target_section_name,
                         resolve_section(
-                            &module.name,
-                            layout,
-                            &module.sections,
+                            &resolved_module.name,
+                            merged_file_layout,
+                            &resolved_module.sections,
                             target_section_name,
                             relocations,
-                            &module.symbols,
+                            &resolved_module.symbols,
                             &got_slots,
                         )?,
                     );
                 }
 
-                if let Some(got_section) = module.sections.get(&SectionName::TOC) {
+                if let Some(got_section) = resolved_module.sections.get(&SectionName::TOC) {
                     let mut got_patches = Vec::new();
                     for (symbol_index, offset) in &got_slots {
-                        let target = match &module.symbols[*symbol_index] {
+                        let target = match &resolved_module.symbols[*symbol_index] {
                             ResolvedSymbol::VirtualAddress(value) => *value,
                             ResolvedSymbol::Absolute(value) => *value as usize,
                             _ => {
                                 return Err(LinkerError::Message(format!(
                                     "Symbol at index {} in module {} can not initialize GOT",
-                                    symbol_index, module.name
+                                    symbol_index, resolved_module.name
                                 )));
                             }
                         };
                         got_patches.push(PatchItem::from_u64(*offset, target as u64));
                     }
                     if !got_patches.is_empty() {
-                        sections.insert(SectionName::TOC, got_patches);
+                        patch_sections.insert(SectionName::TOC, got_patches);
                     }
                     let _ = got_section;
                 }
+
                 Ok(PatchModule {
-                    patch_sections: sections,
+                    patch_sections,
                 })
             })
             .collect()
@@ -94,18 +96,18 @@ impl RelocationResolver for LoongArch64RelocationResolver {
 
 fn resolve_section(
     module_name: &str,
-    _layout: &MergedFileLayout,
-    sections: &HashMap<SectionName, FragmentSection>,
-    name: &SectionName,
+    _merged_file_layout: &MergedFileLayout,
+    fragment_sections: &HashMap<SectionName, FragmentSection>,
+    target_section_name: &SectionName,
     relocations: &[Relocation],
     symbols: &[ResolvedSymbol],
     got_slots: &HashMap<usize, usize>,
 ) -> Result<Vec<PatchItem>, LinkerError> {
-    let section = sections.get(name).unwrap();
+    let section = fragment_sections.get(target_section_name).unwrap();
     let FragmentSectionBinary::Referenced(binary) = section.binary else {
         return Err(LinkerError::Message(format!(
             "Section {} does not have a referenced binary",
-            name
+            target_section_name
         )));
     };
     let value = |r: &Relocation| -> Result<usize, LinkerError> {
@@ -134,7 +136,7 @@ fn resolve_section(
                         r.symbol_index
                     ))
                 })?;
-                let got_section = sections.get(&SectionName::TOC).ok_or_else(|| {
+                let got_section = fragment_sections.get(&SectionName::TOC).ok_or_else(|| {
                     LinkerError::Message("Missing synthetic LoongArch GOT section".to_string())
                 })?;
                 let got_address = got_section.virtual_address + slot;
