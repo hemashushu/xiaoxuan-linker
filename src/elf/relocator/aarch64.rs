@@ -26,32 +26,35 @@ impl RelocationResolver for AArch64RelocationResolver {
         merged_file_layout: &MergedFileLayout,
         resolved_modules: &[ResolvedModule],
     ) -> Result<Vec<PatchModule>, LinkerError> {
-        let mut patch_modules = Vec::new();
+        resolved_modules
+            .iter()
+            .map(|resolved_module| {
+                let module_name = &resolved_module.name;
+                let fragment_sections = &resolved_module.sections;
+                let resolved_symbols = &resolved_module.symbols;
 
-        for resolved_module in resolved_modules {
-            let mut patch_sections = HashMap::new();
+                let mut patch_sections = HashMap::new();
 
-            for FragmentRelocationSection {
-                target_section_name,
-                relocations,
-            } in &resolved_module.relocation_sections
-            {
-                let patch_items = resolve_section(
-                    &resolved_module.name,
-                    merged_file_layout,
-                    &resolved_module.sections,
+                for FragmentRelocationSection {
                     target_section_name,
                     relocations,
-                    &resolved_module.symbols,
-                )?;
+                } in &resolved_module.relocation_sections
+                {
+                    let patch_items = resolve_section(
+                        module_name,
+                        merged_file_layout,
+                        fragment_sections,
+                        target_section_name,
+                        relocations,
+                        resolved_symbols,
+                    )?;
 
-                patch_sections.insert(*target_section_name, patch_items);
-            }
+                    patch_sections.insert(*target_section_name, patch_items);
+                }
 
-            patch_modules.push(PatchModule { patch_sections });
-        }
-
-        Ok(patch_modules)
+                Ok(PatchModule { patch_sections })
+            })
+            .collect()
     }
 }
 
@@ -63,37 +66,37 @@ fn resolve_section(
     relocations: &[Relocation],
     symbols: &[ResolvedSymbol],
 ) -> Result<Vec<PatchItem>, LinkerError> {
-
     let target_fragment_section = fragment_sections.get(target_section_name).unwrap();
     let FragmentSectionBinary::Referenced(binary) = target_fragment_section.binary else {
         return Err(LinkerError::Message(format!(
-            "Section {} does not have a referenced binary",
-            target_section_name
+            "Section {} in module {} does not have binary data",
+            target_section_name, module_name
         )));
+    };
+
+    let get_symbol_value = |r: &Relocation| -> Result<u64, LinkerError> {
+        match &symbols[r.symbol_index] {
+            ResolvedSymbol::VirtualAddress(v) => Ok(*v as u64),
+            ResolvedSymbol::Absolute(v) => Ok(*v),
+            _ => Err(LinkerError::Message(format!(
+                "Symbol at index {} in module {} can not be used for relocation",
+                r.symbol_index, module_name
+            ))),
+        }
     };
 
     let mut patch_items = Vec::new();
 
     for relocation in relocations {
+        let relocation_type = relocation.relocation_type;
         let placeholder_offset = relocation.offset;
+        let addend = relocation.addend;
 
-        let symbol_value = match &symbols[relocation.symbol_index] {
-            ResolvedSymbol::VirtualAddress(value) => *value,
-            ResolvedSymbol::Absolute(value) => *value as usize,
-            _ => {
-                return Err(LinkerError::Message(format!(
-                    "Symbol at index {} in module {} can not be used for relocation",
-                    relocation.symbol_index, module_name
-                )));
-            }
-        };
+        let symbol_value = get_symbol_value(relocation)?;
+        let target = symbol_value.wrapping_add(addend as u64);
 
-        let target = symbol_value.wrapping_add(relocation.addend as usize);
-
-        let patch_item = match relocation.relocation_type {
-            RelocationType::R_AARCH64_ABS64 => {
-                PatchItem::from_u64(placeholder_offset, target as u64)
-            }
+        let patch_item = match relocation_type {
+            RelocationType::R_AARCH64_ABS64 => PatchItem::from_u64(placeholder_offset, target),
             RelocationType::R_AARCH64_ADR_PREL_PG_HI21 => {
                 // ADRP: Page(S + A) - Page(P), encoded as immhi:immlo.
                 let instruction = read_instruction(binary, placeholder_offset);
@@ -124,7 +127,7 @@ fn resolve_section(
                 // CALL26: S + A - P, divided by four, is stored in instruction bits [25:0].
                 let instruction = read_instruction(binary, placeholder_offset);
                 let place = target_fragment_section.virtual_address + placeholder_offset;
-                let immediate = target.wrapping_sub(place) >> 2;
+                let immediate = target.wrapping_sub(place as u64) >> 2;
                 let patched = (instruction & !0x03ff_ffff) | (immediate as u32 & 0x03ff_ffff);
 
                 PatchItem::from_u32(placeholder_offset, patched)
@@ -132,7 +135,7 @@ fn resolve_section(
             _ => {
                 unreachable!(
                     "Relocation type {:?} is not supported for AArch64 architecture",
-                    relocation.relocation_type
+                    relocation_type
                 );
             }
         };
