@@ -13,9 +13,9 @@ use crate::{
     elf::module::{
         BASE_PROGRAM_HEADER_COUNT, ELF_HEADER_SIZE, Machine, PROGRAM_HEADER_ENTRY_SIZE,
         RelocatableModule, Relocation, RelocationType, SECTION_ALIGN_DATA, SECTION_NAME_BSS,
-        SECTION_NAME_DATA, SECTION_NAME_RODATA, SECTION_NAME_TBSS, SECTION_NAME_TDATA,
-        SECTION_NAME_TEXT, SECTION_NAME_TOC, Symbol, SymbolBind, SymbolType, get_load_address_base,
-        get_section_align_text, get_segment_align_page_size,
+        SECTION_NAME_DATA, SECTION_NAME_GOT, SECTION_NAME_RODATA, SECTION_NAME_TBSS,
+        SECTION_NAME_TDATA, SECTION_NAME_TEXT, SECTION_NAME_TOC, Symbol, SymbolBind, SymbolType,
+        get_load_address_base, get_section_align_text, get_segment_align_page_size,
     },
     error::LinkerError,
 };
@@ -75,6 +75,9 @@ pub enum SectionName {
 
     ROData,
 
+    #[allow(clippy::upper_case_acronyms)]
+    GOT, // LoongArch64 synthetic static GOT section
+
     TData,
 
     #[allow(clippy::upper_case_acronyms)]
@@ -86,7 +89,7 @@ pub enum SectionName {
     BSS,
 
     #[allow(clippy::upper_case_acronyms)]
-    TOC, // PowerPC64 TOC or synthetic static GOT section
+    TOC, // PowerPC64 TOC
 
     Other, // Other sections that are not relevant to the final executable
 }
@@ -256,6 +259,7 @@ impl From<&str> for SectionName {
         match value {
             SECTION_NAME_TEXT => SectionName::Text,
             SECTION_NAME_RODATA => SectionName::ROData,
+            SECTION_NAME_GOT => SectionName::GOT,
             SECTION_NAME_TDATA => SectionName::TData,
             SECTION_NAME_TBSS => SectionName::TBSS,
             SECTION_NAME_DATA => SectionName::Data,
@@ -271,6 +275,7 @@ impl Display for SectionName {
         let name = match self {
             SectionName::Text => SECTION_NAME_TEXT,
             SectionName::ROData => SECTION_NAME_RODATA,
+            SectionName::GOT => SECTION_NAME_GOT,
             SectionName::TData => SECTION_NAME_TDATA,
             SectionName::TBSS => SECTION_NAME_TBSS,
             SectionName::Data => SECTION_NAME_DATA,
@@ -298,15 +303,19 @@ pub struct FragmentRelocationSection {
     pub relocations: Vec<Relocation>,
 }
 
-fn contains_read_only_data_section(modules: &[RelocatableModule]) -> bool {
+/// Checks if the given modules contain a read-only data section
+/// (e.g., `.rodata` or synthetic static GOT section `.got`).
+fn contains_read_only_data_section(arch: Machine, modules: &[RelocatableModule]) -> bool {
     modules.iter().any(|module| {
         module
             .sections
             .iter()
             .any(|s| s.name == SECTION_NAME_RODATA && s.size > 0)
-    })
+    }) || contains_synthetic_static_got_section(arch, modules)
 }
 
+/// Checks if the given modules contain a writable data section
+/// (e.g., `.data`, `.bss`, `.tdata`, `.tbss`, or `.toc`).
 fn contains_writable_data_section(modules: &[RelocatableModule]) -> bool {
     modules.iter().any(|module| {
         module.sections.iter().any(|section| {
@@ -318,6 +327,7 @@ fn contains_writable_data_section(modules: &[RelocatableModule]) -> bool {
     }) || contains_tls_data_section(modules)
 }
 
+/// Checks if the given modules contain a TLS data section (e.g., `.tdata` or `.tbss`).
 fn contains_tls_data_section(modules: &[RelocatableModule]) -> bool {
     modules.iter().any(|module| {
         module.sections.iter().any(|section| {
@@ -325,6 +335,25 @@ fn contains_tls_data_section(modules: &[RelocatableModule]) -> bool {
                 section.name.as_str(),
                 SECTION_NAME_TDATA | SECTION_NAME_TBSS
             ) && section.size > 0
+        })
+    })
+}
+
+/// Checks if the given modules should create a synthetic static GOT section
+/// (e.g., `.got` for LoongArch64).
+fn contains_synthetic_static_got_section(arch: Machine, modules: &[RelocatableModule]) -> bool {
+    if arch != Machine::LoongArch {
+        return false;
+    }
+
+    modules.iter().any(|module| {
+        module.relocation_sections.iter().any(|relocation_section| {
+            relocation_section.relocations.iter().any(|relocation| {
+                matches!(
+                    relocation.relocation_type,
+                    RelocationType::R_LARCH_GOT_PC_HI20 | RelocationType::R_LARCH_GOT_PC_LO12
+                )
+            })
         })
     })
 }
@@ -359,8 +388,12 @@ impl MergedSectionInfo {
 
 #[derive(Debug, PartialEq)]
 pub struct MergedFileLayout {
+    /// Indicates whether the final executable contains read-only data sections
+    /// (e.g., `.rodata` or synthetic static GOT section `.got`).
     pub contains_read_only_data: bool,
 
+    /// Indicates whether the final executable contains writable data sections
+    /// (e.g., `.data`, `.bss`, `.tdata`, `.tbss`, or `.toc`).
     pub contains_writable_data: bool,
 
     /// Indicates whether the final executable contains TLS segments.
@@ -438,7 +471,7 @@ pub fn merge<'a>(
     // which is after the file header and program headers.
     let mut program_header_count = BASE_PROGRAM_HEADER_COUNT;
 
-    let contains_read_only_data = contains_read_only_data_section(&modules);
+    let contains_read_only_data = contains_read_only_data_section(arch, &modules);
     let contains_writable_data = contains_writable_data_section(&modules);
     let contains_tls_data = contains_tls_data_section(&modules);
 
@@ -573,6 +606,63 @@ pub fn merge<'a>(
             merged_section_size_rodata,
         ),
     );
+
+    // create synthetic static GOT section for LoongArch64 if needed
+    if arch == Machine::LoongArch && contains_synthetic_static_got_section(arch, &modules) {
+        // data alignment
+        offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
+        offset_in_merged_section = 0; // reset
+        virtual_address = LOAD_ADDR_BASE + offset_in_merged_file;
+
+        let merged_section_offset_got = offset_in_merged_file;
+        let merged_section_virtual_address_got = virtual_address;
+
+        for (module, fragment_sections) in modules.iter().zip(fragment_sectionss.iter_mut()) {
+            let mut got_symbols = HashSet::new();
+            for relocation_section in &module.relocation_sections {
+                for relocation in &relocation_section.relocations {
+                    if matches!(
+                        relocation.relocation_type,
+                        RelocationType::R_LARCH_GOT_PC_HI20 | RelocationType::R_LARCH_GOT_PC_LO12
+                    ) {
+                        got_symbols.insert(relocation.symbol_index);
+                    }
+                }
+            }
+
+            if !got_symbols.is_empty() {
+                let slot_size = 8; // Each GOT slot is 8 bytes (64 bits) for LoongArch64
+                let slots_size = got_symbols.len() * slot_size;
+                let binary = vec![0; slots_size]; // Initialize GOT slots with zeros
+
+                offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
+                virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
+
+                let fragment_section = FragmentSection::new_owned(
+                    binary,
+                    offset_in_merged_section,
+                    offset_in_merged_file,
+                    virtual_address,
+                );
+
+                fragment_sections.insert(SectionName::GOT, fragment_section);
+
+                offset_in_merged_file += slots_size;
+                offset_in_merged_section += slots_size;
+                virtual_address += slots_size;
+            }
+        }
+
+        let merged_section_size_got = virtual_address - merged_section_virtual_address_got;
+        merged_section_infos.insert(
+            SectionName::GOT,
+            MergedSectionInfo::new(
+                merged_section_offset_got,
+                merged_section_virtual_address_got,
+                merged_section_size_got,
+            ),
+        );
+    }
 
     // merging all writable data sections
     // ----------------------------------
@@ -724,83 +814,59 @@ pub fn merge<'a>(
     // The linker-generated symbol `_edata` points to the end of the initialized data.
     let symbol_edata_virtual_address = virtual_address;
 
-    // data alignment
-    offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
-    offset_in_merged_section = 0; // reset
-    virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
+    if arch == Machine::PowerPC64 {
+        // For PowerPC64, the `.toc` section is placed after the `.data` section
+        // and before the `.bss` section
 
-    // Merge PowerPC64 TOC sections after initialized data and before BSS.
-    let merged_section_offset_toc = offset_in_merged_file;
-    let merged_section_virtual_address_toc = virtual_address;
+        // data alignment
+        offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
+        offset_in_merged_section = 0; // reset
+        virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
 
-    for ((section_name_map, module), fragment_sections) in section_name_maps
-        .iter()
-        .zip(modules.iter())
-        .zip(fragment_sectionss.iter_mut())
-    {
-        if let Some(section_idx) = section_name_map
+        let merged_section_offset_toc = offset_in_merged_file;
+        let merged_section_virtual_address_toc = virtual_address;
+
+        for ((section_name_map, module), fragment_sections) in section_name_maps
             .iter()
-            .position(|&name| name == SectionName::TOC)
+            .zip(modules.iter())
+            .zip(fragment_sectionss.iter_mut())
         {
-            let section = &module.sections[section_idx];
+            if let Some(section_idx) = section_name_map
+                .iter()
+                .position(|&name| name == SectionName::TOC)
+            {
+                let section = &module.sections[section_idx];
 
-            // Both `file_offset` and `virtual_address` need to be accumulated.
-            offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
-            virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
-
-            let fragment_section = FragmentSection::new(
-                section.size,
-                section.binary,
-                offset_in_merged_section,
-                offset_in_merged_file,
-                virtual_address,
-            );
-            fragment_sections.insert(SectionName::TOC, fragment_section);
-
-            // Both `file_offset` and `virtual_address` need to be accumulated.
-            offset_in_merged_file += section.size;
-            offset_in_merged_section += section.size;
-            virtual_address += section.size;
-        } else if arch == Machine::LoongArch {
-            let mut got_symbols = HashSet::new();
-            for relocation_section in &module.relocation_sections {
-                for relocation in &relocation_section.relocations {
-                    if matches!(
-                        relocation.relocation_type,
-                        RelocationType::R_LARCH_GOT_PC_HI20 | RelocationType::R_LARCH_GOT_PC_LO12
-                    ) {
-                        got_symbols.insert(relocation.symbol_index);
-                    }
-                }
-            }
-
-            if !got_symbols.is_empty() {
-                let binary = vec![0; got_symbols.len() * 8];
+                // Both `file_offset` and `virtual_address` need to be accumulated.
                 offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
                 virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
-                let fragment_section = FragmentSection::new_owned(
-                    binary,
+
+                let fragment_section = FragmentSection::new(
+                    section.size,
+                    section.binary,
                     offset_in_merged_section,
                     offset_in_merged_file,
                     virtual_address,
                 );
                 fragment_sections.insert(SectionName::TOC, fragment_section);
-                offset_in_merged_file += got_symbols.len() * 8;
-                offset_in_merged_section += got_symbols.len() * 8;
-                virtual_address += got_symbols.len() * 8;
+
+                // Both `file_offset` and `virtual_address` need to be accumulated.
+                offset_in_merged_file += section.size;
+                offset_in_merged_section += section.size;
+                virtual_address += section.size;
             }
         }
-    }
 
-    let merged_section_size_toc = virtual_address - merged_section_virtual_address_toc;
-    merged_section_infos.insert(
-        SectionName::TOC,
-        MergedSectionInfo::new(
-            merged_section_offset_toc,
-            merged_section_virtual_address_toc,
-            merged_section_size_toc,
-        ),
-    );
+        let merged_section_size_toc = virtual_address - merged_section_virtual_address_toc;
+        merged_section_infos.insert(
+            SectionName::TOC,
+            MergedSectionInfo::new(
+                merged_section_offset_toc,
+                merged_section_virtual_address_toc,
+                merged_section_size_toc,
+            ),
+        );
+    }
 
     // data alignment
     offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);

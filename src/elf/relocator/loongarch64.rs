@@ -69,7 +69,7 @@ impl RelocationResolver for LoongArch64RelocationResolver {
                     patch_sections.insert(*target_section_name, patch_items);
                 }
 
-                if fragment_sections.get(&SectionName::TOC).is_some() {
+                if fragment_sections.get(&SectionName::GOT).is_some() {
                     let mut got_patches = Vec::new();
 
                     for (symbol_index, offset) in &got_slots {
@@ -87,7 +87,7 @@ impl RelocationResolver for LoongArch64RelocationResolver {
                     }
 
                     if !got_patches.is_empty() {
-                        patch_sections.insert(SectionName::TOC, got_patches);
+                        patch_sections.insert(SectionName::GOT, got_patches);
                     }
                 }
 
@@ -147,7 +147,7 @@ fn resolve_section(
                     ))
                 })?;
 
-                let got_section = fragment_sections.get(&SectionName::TOC).ok_or_else(|| {
+                let got_section = fragment_sections.get(&SectionName::GOT).ok_or_else(|| {
                     LinkerError::Message(format!(
                         "Missing synthetic LoongArch GOT section in module {}",
                         module_name

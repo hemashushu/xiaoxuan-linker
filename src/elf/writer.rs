@@ -5,13 +5,9 @@
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
 use object::{
-    Endianness,
-    elf::{
-        EF_LARCH_ABI_DOUBLE_FLOAT, EF_LARCH_OBJABI_V1, EF_RISCV_FLOAT_ABI_DOUBLE, EF_RISCV_RVC,
-        ELFOSABI_NONE, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD, PT_PHDR, PT_TLS, SHF_ALLOC,
-        SHF_EXECINSTR, SHT_NOBITS, SHT_PROGBITS,
-    },
-    write::{
+    Endianness, elf::{
+        EF_LARCH_ABI_DOUBLE_FLOAT, EF_LARCH_OBJABI_V1, EF_RISCV_FLOAT_ABI_DOUBLE, EF_RISCV_RVC, ELFOSABI_NONE, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD, PT_PHDR, PT_TLS, SHF_ALLOC, SHF_EXECINSTR, SHF_TLS, SHF_WRITE, SHT_NOBITS, SHT_PROGBITS,
+    }, write::{
         StringId, WritableBuffer,
         elf::{FileHeader, ProgramHeader, SectionHeader, Writer},
     },
@@ -22,10 +18,10 @@ use crate::{
         merger::{MergedFileLayout, SectionName},
         module::{
             ELF_HEADER_SIZE, Machine, PROGRAM_HEADER_ENTRY_SIZE, SECTION_ALIGN_DATA,
-            SECTION_ALIGN_SYMTAB, SECTION_NAME_BSS, SECTION_NAME_DATA, SECTION_NAME_RODATA,
-            SECTION_NAME_SHSTRTAB, SECTION_NAME_STRTAB, SECTION_NAME_SYMTAB, SECTION_NAME_TBSS,
-            SECTION_NAME_TDATA, SECTION_NAME_TEXT, SECTION_NAME_TOC, SEGMENT_ALIGN_PHDR,
-            SEGMENT_ALIGN_TLS, get_load_address_base, get_section_align_text,
+            SECTION_ALIGN_SYMTAB, SECTION_NAME_BSS, SECTION_NAME_DATA, SECTION_NAME_GOT,
+            SECTION_NAME_RODATA, SECTION_NAME_SHSTRTAB, SECTION_NAME_STRTAB, SECTION_NAME_SYMTAB,
+            SECTION_NAME_TBSS, SECTION_NAME_TDATA, SECTION_NAME_TEXT, SECTION_NAME_TOC,
+            SEGMENT_ALIGN_PHDR, SEGMENT_ALIGN_TLS, get_load_address_base, get_section_align_text,
             get_segment_align_page_size,
         },
         relocator::{RelocatedModule, RelocatedSectionBinary},
@@ -94,6 +90,7 @@ pub fn write_executable(
 
     let mut section_name_text_opt: Option<StringId> = None;
     let mut section_name_rodata_opt: Option<StringId> = None;
+    let mut section_name_got_opt: Option<StringId> = None;
     let mut section_name_tdata_opt: Option<StringId> = None;
     let mut section_name_tbss_opt: Option<StringId> = None;
     let mut section_name_data_opt: Option<StringId> = None;
@@ -106,6 +103,10 @@ pub fn write_executable(
 
     if merged_file_layout.contains_non_empty_section(SectionName::ROData) {
         section_name_rodata_opt.replace(writer.add_section_name(SECTION_NAME_RODATA.as_bytes()));
+    }
+
+    if merged_file_layout.contains_non_empty_section(SectionName::GOT) {
+        section_name_got_opt.replace(writer.add_section_name(SECTION_NAME_GOT.as_bytes()));
     }
 
     if merged_file_layout.contains_non_empty_section(SectionName::TData) {
@@ -149,6 +150,10 @@ pub fn write_executable(
 
     if merged_file_layout.contains_non_empty_section(SectionName::ROData) {
         writer.reserve_section_index(); // .rodata section
+    }
+
+    if merged_file_layout.contains_non_empty_section(SectionName::GOT) {
+        writer.reserve_section_index(); // .got section
     }
 
     if merged_file_layout.contains_non_empty_section(SectionName::TData) {
@@ -228,6 +233,23 @@ pub fn write_executable(
         );
     }
 
+    if let Some(section_info_got) = merged_file_layout.get_non_empty_section_info(SectionName::GOT)
+    {
+        let section_align_data =
+            if merged_file_layout.contains_non_empty_section(SectionName::ROData) {
+                SECTION_ALIGN_DATA
+            } else {
+                SEGMENT_ALIGN_PAGE_SIZE
+            };
+
+        let actual_section_offset_got = writer.reserve(section_info_got.size, section_align_data);
+
+        debug_assert_eq!(
+            actual_section_offset_got,
+            section_info_got.offset_in_merged_file
+        );
+    }
+
     // Reserve space for section `.tdata`
     if let Some(section_info_tdata) =
         merged_file_layout.get_non_empty_section_info(SectionName::TData)
@@ -264,7 +286,18 @@ pub fn write_executable(
 
     if let Some(section_info_toc) = merged_file_layout.get_non_empty_section_info(SectionName::TOC)
     {
-        let actual_section_offset_toc = writer.reserve(section_info_toc.size, SECTION_ALIGN_DATA);
+        // If there is TLS data or a `.data` section, the `.toc` section must be aligned to `DATA_ALIGN`
+        // instead of `PAGE_SIZE`, because it is merged into the writable data segment.
+        let section_align_data = if merged_file_layout
+            .contains_non_empty_section(SectionName::TData)
+            || merged_file_layout.contains_non_empty_section(SectionName::Data)
+        {
+            SECTION_ALIGN_DATA
+        } else {
+            SEGMENT_ALIGN_PAGE_SIZE
+        };
+
+        let actual_section_offset_toc = writer.reserve(section_info_toc.size, section_align_data);
         debug_assert_eq!(
             actual_section_offset_toc,
             section_info_toc.offset_in_merged_file
@@ -377,21 +410,36 @@ pub fn write_executable(
 
     // Write read-only data segment header
     if merged_file_layout.contains_read_only_data {
-        let Some(section_info_rodata) = merged_file_layout
-            .merged_section_infos
+        let merged_section_infos = &merged_file_layout.merged_section_infos;
+
+        let Some(first_read_only_section) = merged_section_infos
             .get(&SectionName::ROData)
+            .or_else(|| merged_section_infos.get(&SectionName::GOT))
         else {
             unreachable!()
         };
 
+        let segment_read_only_data_offset = first_read_only_section.offset_in_merged_file;
+        let segment_read_only_data_virtual_address = first_read_only_section.virtual_address;
+
+        let section_rodata_size = merged_section_infos
+            .get(&SectionName::ROData)
+            .map_or(0, |s| s.size);
+        let section_got_size = merged_section_infos
+            .get(&SectionName::GOT)
+            .map_or(0, |s| s.size);
+
+        let segment_read_only_data_file_size =
+            align_up(section_rodata_size, SECTION_ALIGN_DATA) + section_got_size;
+
         writer.write_program_header(&ProgramHeader {
             p_type: PT_LOAD,
             p_flags: PF_R,
-            p_offset: section_info_rodata.offset_in_merged_file as u64,
-            p_vaddr: section_info_rodata.virtual_address as u64,
-            p_paddr: section_info_rodata.virtual_address as u64,
-            p_filesz: section_info_rodata.size as u64,
-            p_memsz: section_info_rodata.size as u64,
+            p_offset: segment_read_only_data_offset as u64,
+            p_vaddr: segment_read_only_data_virtual_address as u64,
+            p_paddr: segment_read_only_data_virtual_address as u64,
+            p_filesz: segment_read_only_data_file_size as u64,
+            p_memsz: segment_read_only_data_file_size as u64,
             p_align: SEGMENT_ALIGN_PAGE_SIZE as u64,
         });
     }
@@ -429,25 +477,15 @@ pub fn write_executable(
             .get(&SectionName::BSS)
             .map_or(0, |s| s.size);
 
-        let segment_writable_data_file_size = if merged_file_layout.contains_tls_data {
-            align_up(section_tdata_size, SECTION_ALIGN_DATA)
-                + align_up(section_data_size, SECTION_ALIGN_DATA)
-                + section_toc_size
-        } else {
-            align_up(section_data_size, SECTION_ALIGN_DATA) + section_toc_size
-        };
+        let segment_writable_data_file_size = align_up(section_tdata_size, SECTION_ALIGN_DATA)
+            + align_up(section_data_size, SECTION_ALIGN_DATA)
+            + section_toc_size;
 
-        let segment_writable_data_memory_size = if merged_file_layout.contains_tls_data {
-            align_up(section_tdata_size, SECTION_ALIGN_DATA)
-                + align_up(section_tbss_size, SECTION_ALIGN_DATA)
-                + align_up(section_data_size, SECTION_ALIGN_DATA)
-                + align_up(section_toc_size, SECTION_ALIGN_DATA)
-                + section_bss_size
-        } else {
-            align_up(section_data_size, SECTION_ALIGN_DATA)
-                + align_up(section_toc_size, SECTION_ALIGN_DATA)
-                + section_bss_size
-        };
+        let segment_writable_data_memory_size = align_up(section_tdata_size, SECTION_ALIGN_DATA)
+            + align_up(section_tbss_size, SECTION_ALIGN_DATA)
+            + align_up(section_data_size, SECTION_ALIGN_DATA)
+            + align_up(section_toc_size, SECTION_ALIGN_DATA)
+            + section_bss_size;
 
         writer.write_program_header(&ProgramHeader {
             p_type: PT_LOAD,
@@ -548,10 +586,40 @@ pub fn write_executable(
         }
     }
 
+    // Write .got section data
+    if merged_file_layout.contains_non_empty_section(SectionName::GOT) {
+        // The .got section must be aligned to `DATA_ALIGN` instead of `PAGE_SIZE`
+        // if it is merged with the .rodata section, because they are in the same read-only data segment.
+        if !merged_file_layout.contains_non_empty_section(SectionName::ROData) {
+            writer.write_align(SEGMENT_ALIGN_PAGE_SIZE);
+        }
+
+        for relocated_module in relocated_modules {
+            if let Some(relocated_section) = relocated_module.sections.get(&SectionName::GOT)
+                && relocated_section.size > 0
+            {
+                writer.write_align(SECTION_ALIGN_DATA);
+                match &relocated_section.binary {
+                    RelocatedSectionBinary::Referenced(data) => {
+                        writer.write(data);
+                    }
+                    RelocatedSectionBinary::Owned(data) => {
+                        writer.write(data);
+                    }
+                    RelocatedSectionBinary::None => {
+                        //
+                    }
+                }
+            }
+        }
+    }
+
     // Write .tdata and .data section data
     //
     // Note that there is no need to write .tbss and .bss section data,
     // because they are empty in the file.
+    //
+    // write .tdata section data
     if merged_file_layout.contains_non_empty_section(SectionName::TData) {
         writer.write_align(SEGMENT_ALIGN_PAGE_SIZE);
 
@@ -575,6 +643,7 @@ pub fn write_executable(
         }
     }
 
+    // write .data section data
     if merged_file_layout.contains_non_empty_section(SectionName::Data) {
         // The .data section must be aligned to `DATA_ALIGN` instead of `PAGE_SIZE` if
         // it is merged with the .tdata section, because they are in the same writable data segment.
@@ -602,6 +671,7 @@ pub fn write_executable(
         }
     }
 
+    // write .toc section data
     if merged_file_layout.contains_non_empty_section(SectionName::TOC) {
         writer.write_align(SECTION_ALIGN_DATA);
         for relocated_module in relocated_modules {
@@ -721,12 +791,28 @@ pub fn write_executable(
         });
     }
 
+    // Write section header: .got
+    if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::GOT) {
+        writer.write_section_header(&SectionHeader {
+            name: section_name_got_opt,
+            sh_type: SHT_PROGBITS,
+            sh_flags: SHF_ALLOC as u64,
+            sh_addr: section_info.virtual_address as u64,
+            sh_offset: section_info.offset_in_merged_file as u64,
+            sh_size: section_info.size as u64,
+            sh_link: 0,
+            sh_info: 0,
+            sh_addralign: SECTION_ALIGN_DATA as u64,
+            sh_entsize: 0,
+        });
+    }
+
     // Write section header: .tdata
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::TData) {
         writer.write_section_header(&SectionHeader {
             name: section_name_tdata_opt,
             sh_type: SHT_PROGBITS,
-            sh_flags: (SHF_ALLOC | PF_W) as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE | SHF_TLS) as u64,
             sh_addr: section_info.virtual_address as u64,
             sh_offset: section_info.offset_in_merged_file as u64,
             sh_size: section_info.size as u64,
@@ -743,7 +829,7 @@ pub fn write_executable(
         writer.write_section_header(&SectionHeader {
             name: section_name_tbss_opt,
             sh_type: SHT_NOBITS,
-            sh_flags: (SHF_ALLOC | PF_W) as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE | SHF_TLS) as u64,
             sh_addr: section_info.virtual_address as u64,
             sh_offset: section_info.offset_in_merged_file as u64,
             // .bss has no data in the file
@@ -761,7 +847,7 @@ pub fn write_executable(
         writer.write_section_header(&SectionHeader {
             name: section_name_data_opt,
             sh_type: SHT_PROGBITS,
-            sh_flags: (SHF_ALLOC | PF_W) as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE) as u64,
             sh_addr: section_info.virtual_address as u64,
             sh_offset: section_info.offset_in_merged_file as u64,
             sh_size: section_info.size as u64,
@@ -777,7 +863,7 @@ pub fn write_executable(
         writer.write_section_header(&SectionHeader {
             name: section_name_toc_opt,
             sh_type: SHT_PROGBITS,
-            sh_flags: (SHF_ALLOC | PF_W) as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE) as u64,
             sh_addr: section_info.virtual_address as u64,
             sh_offset: section_info.offset_in_merged_file as u64,
             sh_size: section_info.size as u64,
@@ -793,7 +879,7 @@ pub fn write_executable(
         writer.write_section_header(&SectionHeader {
             name: section_name_bss_opt,
             sh_type: SHT_NOBITS,
-            sh_flags: (SHF_ALLOC | PF_W) as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE) as u64,
             sh_addr: section_info.virtual_address as u64,
             sh_offset: section_info.offset_in_merged_file as u64,
             // .bss has no data in the file

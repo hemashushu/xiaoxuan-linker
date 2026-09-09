@@ -24,19 +24,20 @@ use object::elf;
 // Sections (in file order)
 // ------------------------
 //
-// | Name           | Type         | Description                     | Align | Opt? |
-// |----------------|--------------|---------------------------------|-------|------|
-// | 00 NULL        | SHT_NULL     | Null section header             | 0     |      |
-// | 01 `.text`     | SHT_PROGBITS | Executable code                 | 16    |      |
-// | 02 `.rodata`   | SHT_PROGBITS | Read-only data (strings)        | 4/8   | Opt  |
-// | 03 `.tdata`    | SHT_PROGBITS | Initialized thread-local data   | 4/8   | Opt  |
-// | 04 `.tbss`     | SHT_NOBITS   | Uninitialized thread-local data | 4/8   | Opt  |
-// | 05 `.data`     | SHT_PROGBITS | Initialized data                | 4/8   | Opt  |
-// | 06 `.toc`      | SHT_PROGBITS | PowerPC64 TOC or static GOT data | 4/8   | Opt  |
-// | 07 `.bss`      | SHT_NOBITS   | Uninitialized data              | 4/8   | Opt  |
-// | 08 `.symtab`   | SHT_SYMTAB   | Symbol table                    | 8     |      |
-// | 09 `.strtab`   | SHT_STRTAB   | Strings for symbol names        | 1     |      |
-// | 10 `.shstrtab` | SHT_STRTAB   | Strings for section names       | 1     |      |
+// | Name           | Type         | Description                      | Align | Opt? |
+// |----------------|--------------|----------------------------------|-------|------|
+// | 00 NULL        | SHT_NULL     | Null section header              | 0     |      |
+// | 01 `.text`     | SHT_PROGBITS | Executable code                  | *     |      |
+// | 02 `.rodata`   | SHT_PROGBITS | Read-only data (strings)         | 4/8   | Opt  |
+// | 03 `.got`      | SHT_PROGBITS | LoongArch64 synthetic static GOT | 8     | Opt  |
+// | 04 `.tdata`    | SHT_PROGBITS | Initialized thread-local data    | 4/8   | Opt  |
+// | 05 `.tbss`     | SHT_NOBITS   | Uninitialized thread-local data  | 4/8   | Opt  |
+// | 06 `.data`     | SHT_PROGBITS | Initialized data                 | 4/8   | Opt  |
+// | 07 `.toc`      | SHT_PROGBITS | PowerPC64 TOC                    | 8     | Opt  |
+// | 08 `.bss`      | SHT_NOBITS   | Uninitialized data               | 4/8   | Opt  |
+// | 09 `.symtab`   | SHT_SYMTAB   | Symbol table                     | 8     |      |
+// | 10 `.strtab`   | SHT_STRTAB   | Strings for symbol names         | 1     |      |
+// | 11 `.shstrtab` | SHT_STRTAB   | Strings for section names        | 1     |      |
 //
 // Note that sections such as `.rela.*` are consumed by the linker and would not appear in the final executable.
 //
@@ -48,18 +49,19 @@ use object::elf;
 // | 00 phdr           | program headers                  | PT_PHDR | R     | 0x8       |      |
 // | 01 meta           | file header and program headers  | PT_LOAD | R     | 0x1000    |      |
 // | 02 text           | .text                            | PT_LOAD | R E   | 0x1000    |      |
-// | 03 read-only data | .rodata                          | PT_LOAD | R     | 0x1000    | Opt  |
+// | 03 read-only data | .rodata, .got                    | PT_LOAD | R     | 0x1000    | Opt  |
 // | 04 writable data  | .tdata, .tbss, .data, .bss, .toc | PT_LOAD | R W   | 0x1000    | Opt  |
 // | 05 tls            | .tdata, .tbss                    | PT_TLS  | R     | 0x8       | Opt  |
 
 // The names of the supported sections
 pub const SECTION_NAME_TEXT: &str = ".text";
 pub const SECTION_NAME_RODATA: &str = ".rodata";
+pub const SECTION_NAME_GOT: &str = ".got"; // LoongArch64 synthetic static GOT section
 pub const SECTION_NAME_TDATA: &str = ".tdata";
 pub const SECTION_NAME_TBSS: &str = ".tbss";
 pub const SECTION_NAME_DATA: &str = ".data";
 pub const SECTION_NAME_BSS: &str = ".bss";
-pub const SECTION_NAME_TOC: &str = ".toc"; // PowerPC64 TOC or synthetic static GOT section
+pub const SECTION_NAME_TOC: &str = ".toc"; // PowerPC64 TOC
 
 pub const SECTION_NAME_SYMTAB: &str = ".symtab";
 pub const SECTION_NAME_STRTAB: &str = ".strtab";
@@ -79,8 +81,8 @@ pub const PROGRAM_HEADER_ENTRY_SIZE: usize = 56;
 
 // Every executable contains `PHDR`, `meta`, and `code` segments,
 // and the following are optional:
-// - `read-only data`: .rodata
-// - `writable data`: .tdata, .tbss, .data, .toc, .bss
+// - `read-only data`: .rodata, (.got loongarch64)
+// - `writable data`: .tdata, .tbss, .data, (.toc powerpc64le), .bss
 // - `TLS data`: .tdata, .tbss
 pub const BASE_PROGRAM_HEADER_COUNT: usize = 3;
 
