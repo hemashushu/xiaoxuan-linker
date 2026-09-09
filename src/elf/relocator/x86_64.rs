@@ -67,7 +67,7 @@ fn resolve_section(
 ) -> Result<Vec<PatchItem>, LinkerError> {
     let get_symbol_value = |r: &Relocation| -> Result<u64, LinkerError> {
         match &symbols[r.symbol_index] {
-            ResolvedSymbol::VirtualAddress(v) => Ok(*v as u64),
+            ResolvedSymbol::VirtualAddress(v) => Ok(*v),
             ResolvedSymbol::Absolute(v) => Ok(*v),
             _ => Err(LinkerError::Message(format!(
                 "Symbol at index {} in module {} can not be used for relocation",
@@ -102,7 +102,7 @@ fn resolve_section(
                 // R_X86_64_PC32: S + A - P
                 let fragment_section = fragment_sections.get(target_section_name).unwrap();
                 let p = fragment_section.virtual_address + placeholder_offset;
-                let relocated_value = target.wrapping_sub(p as u64);
+                let relocated_value = target.wrapping_sub(p );
 
                 PatchItem::from_u32(placeholder_offset, relocated_value as u32)
             }
@@ -119,11 +119,11 @@ fn resolve_section(
                     - file_section_tdata.virtual_address
                     + file_section_tbss.size;
                 let symbol_offset_in_tls_block =
-                    symbol_value - file_section_tdata.virtual_address as u64;
+                    symbol_value - file_section_tdata.virtual_address ;
 
                 let relocated_value = symbol_offset_in_tls_block
                     .wrapping_add(addend as u64)
-                    .wrapping_sub(tls_block_size as u64);
+                    .wrapping_sub(tls_block_size );
 
                 PatchItem::from_u32(placeholder_offset, relocated_value as u32)
             }

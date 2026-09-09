@@ -32,7 +32,7 @@ pub struct RelocatedSection<'a> {
     /// The size of the section.
     /// For the `.bss` and `.tbss` sections, this is the memory size of the section,
     /// which is not present in the file, but occupies space in memory.
-    pub size: usize,
+    pub size: u64,
 
     /// The binary data of the section.
     ///
@@ -98,14 +98,15 @@ pub fn relocate<'a>(
                     FragmentSectionBinary::Owned(source_data) => source_data.clone(),
                     FragmentSectionBinary::None => {
                         return Err(LinkerError::Message(format!(
-                            "Section {} does not have binary data",
-                            section_name
+                            "Section {} in module {} has no binary data, but there are relocation items for it",
+                            section_name, resolved_module.name
                         )));
                     }
                 };
                 for patch_item in patch_items {
                     binary.splice(
-                        patch_item.offset..patch_item.offset + patch_item.data.len(),
+                        patch_item.offset as usize
+                            ..patch_item.offset as usize + patch_item.data.len(),
                         patch_item.data.clone(),
                     );
                 }
@@ -113,7 +114,7 @@ pub fn relocate<'a>(
                 relocated_sections.insert(
                     section_name,
                     RelocatedSection {
-                        size: binary.len(),
+                        size: binary.len() as u64,
                         binary: RelocatedSectionBinary::Owned(binary),
                     },
                 );
@@ -164,31 +165,31 @@ pub fn relocate<'a>(
 /// Note that this linker does not support changing code size (e.g., relaxation of the RISC-V instruction set),
 /// so a patch item only modifies the binary data of a section without changing its size.
 pub struct PatchItem {
-    pub offset: usize,
+    pub offset: u64,
     pub data: Vec<u8>,
 }
 
 impl PatchItem {
-    pub fn new(offset: usize, data: Vec<u8>) -> Self {
+    pub fn new(offset: u64, data: Vec<u8>) -> Self {
         Self { offset, data }
     }
 
-    pub fn from_u64(offset: usize, value: u64) -> Self {
+    pub fn from_u64(offset: u64, value: u64) -> Self {
         let data = value.to_le_bytes().to_vec();
         Self { offset, data }
     }
 
-    pub fn from_u32(offset: usize, value: u32) -> Self {
+    pub fn from_u32(offset: u64, value: u32) -> Self {
         let data = value.to_le_bytes().to_vec();
         Self { offset, data }
     }
 
-    pub fn from_u64_big_endian(offset: usize, value: u64) -> Self {
+    pub fn from_u64_big_endian(offset: u64, value: u64) -> Self {
         let data = value.to_be_bytes().to_vec();
         Self { offset, data }
     }
 
-    pub fn from_u32_big_endian(offset: usize, value: u32) -> Self {
+    pub fn from_u32_big_endian(offset: u64, value: u32) -> Self {
         let data = value.to_be_bytes().to_vec();
         Self { offset, data }
     }
@@ -325,7 +326,7 @@ mod tests {
                 linker_generated_symbols.insert(
                     ".TOC.".to_string(),
                     GlobalSymbolMapEntry::new(
-                        GlobalSymbolValue::Absolute((toc_address + 0x8000) as u64),
+                        GlobalSymbolValue::Absolute(toc_address + 0x8000),
                         false,
                     ),
                 );

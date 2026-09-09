@@ -5,9 +5,13 @@
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
 use object::{
-    Endianness, elf::{
-        EF_LARCH_ABI_DOUBLE_FLOAT, EF_LARCH_OBJABI_V1, EF_RISCV_FLOAT_ABI_DOUBLE, EF_RISCV_RVC, ELFOSABI_NONE, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD, PT_PHDR, PT_TLS, SHF_ALLOC, SHF_EXECINSTR, SHF_TLS, SHF_WRITE, SHT_NOBITS, SHT_PROGBITS,
-    }, write::{
+    Endianness,
+    elf::{
+        EF_LARCH_ABI_DOUBLE_FLOAT, EF_LARCH_OBJABI_V1, EF_RISCV_FLOAT_ABI_DOUBLE, EF_RISCV_RVC,
+        ELFOSABI_NONE, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD, PT_PHDR, PT_TLS, SHF_ALLOC,
+        SHF_EXECINSTR, SHF_TLS, SHF_WRITE, SHT_NOBITS, SHT_PROGBITS,
+    },
+    write::{
         StringId, WritableBuffer,
         elf::{FileHeader, ProgramHeader, SectionHeader, Writer},
     },
@@ -36,7 +40,7 @@ use crate::{
 pub fn write_executable(
     relocated_modules: &[RelocatedModule],
     merged_file_layout: &MergedFileLayout,
-    entry_point: usize,
+    entry_point: u64,
     arch: Machine,
     endian: Endianness,
     output_buffer: &mut dyn WritableBuffer,
@@ -305,8 +309,12 @@ pub fn write_executable(
     }
 
     writer.reserve_symtab();
-    writer.reserve_strtab();
-    writer.reserve_shstrtab();
+    writer
+        .reserve_strtab()
+        .map_err(|_| LinkerError::new("Failed to reserve .strtab section"))?;
+    writer
+        .reserve_shstrtab()
+        .map_err(|_| LinkerError::new("Failed to reserve .shstrtab section"))?;
     writer.reserve_section_headers();
 
     // -------------------------------------------------------------------------
@@ -316,8 +324,8 @@ pub fn write_executable(
     let flags = match arch {
         Machine::RiscV => EF_RISCV_RVC | EF_RISCV_FLOAT_ABI_DOUBLE, // RVC, double-float ABI
         Machine::LoongArch => EF_LARCH_OBJABI_V1 | EF_LARCH_ABI_DOUBLE_FLOAT, // DOUBLE-FLOAT, OBJ-v1
-        Machine::PowerPC64 => 0x2,                                            // abiv2
-        _ => 0,
+        Machine::PowerPC64 => object::elf::FileFlags(0x2),                    // abiv2
+        _ => object::elf::FileFlags(0),
     };
 
     // Write ELF header
@@ -327,7 +335,7 @@ pub fn write_executable(
             abi_version: 0,
             e_type: ET_EXEC,
             e_machine: arch.into(),
-            e_entry: entry_point as u64,
+            e_entry: entry_point,
             e_flags: flags,
         })
         .expect("failed to write ELF file header");
@@ -348,18 +356,19 @@ pub fn write_executable(
     // P.S.: using the command `readelf -n FILE` to show the notes.
 
     let segment_phdr_offset = ELF_HEADER_SIZE;
-    let segment_phdr_size = PROGRAM_HEADER_ENTRY_SIZE * merged_file_layout.program_header_count;
+    let segment_phdr_size =
+        PROGRAM_HEADER_ENTRY_SIZE * merged_file_layout.program_header_count as u64;
     let segment_phdr_virtual_address = LOAD_ADDR_BASE + ELF_HEADER_SIZE;
 
     writer.write_program_header(&ProgramHeader {
         p_type: PT_PHDR,
         p_flags: PF_R,
-        p_offset: segment_phdr_offset as u64,
-        p_vaddr: segment_phdr_virtual_address as u64,
-        p_paddr: segment_phdr_virtual_address as u64,
-        p_filesz: segment_phdr_size as u64,
-        p_memsz: segment_phdr_size as u64,
-        p_align: SEGMENT_ALIGN_PHDR as u64,
+        p_offset: segment_phdr_offset,
+        p_vaddr: segment_phdr_virtual_address,
+        p_paddr: segment_phdr_virtual_address,
+        p_filesz: segment_phdr_size,
+        p_memsz: segment_phdr_size,
+        p_align: SEGMENT_ALIGN_PHDR,
     });
 
     // Common segment type (p_type) includes:
@@ -371,20 +380,20 @@ pub fn write_executable(
     // Write metadata segment header
     // The metadata segment contains the ELF header and program headers,
     // which are required for the loader to load the executable.
-    let segment_metadata_offset = 0_usize;
-    let segment_metadata_size =
-        ELF_HEADER_SIZE + PROGRAM_HEADER_ENTRY_SIZE * merged_file_layout.program_header_count;
+    let segment_metadata_offset = 0;
+    let segment_metadata_size = ELF_HEADER_SIZE
+        + PROGRAM_HEADER_ENTRY_SIZE * merged_file_layout.program_header_count as u64;
     let segment_metadata_virtual_address = LOAD_ADDR_BASE;
 
     writer.write_program_header(&ProgramHeader {
         p_type: PT_LOAD,
         p_flags: PF_R,
-        p_offset: segment_metadata_offset as u64,
-        p_vaddr: segment_metadata_virtual_address as u64,
-        p_paddr: segment_metadata_virtual_address as u64,
-        p_filesz: segment_metadata_size as u64,
-        p_memsz: segment_metadata_size as u64,
-        p_align: SEGMENT_ALIGN_PAGE_SIZE as u64,
+        p_offset: segment_metadata_offset,
+        p_vaddr: segment_metadata_virtual_address,
+        p_paddr: segment_metadata_virtual_address,
+        p_filesz: segment_metadata_size,
+        p_memsz: segment_metadata_size,
+        p_align: SEGMENT_ALIGN_PAGE_SIZE,
     });
 
     // Write code segment header
@@ -399,12 +408,12 @@ pub fn write_executable(
         writer.write_program_header(&ProgramHeader {
             p_type: PT_LOAD,
             p_flags: PF_R | PF_X,
-            p_offset: section_info_text.offset_in_merged_file as u64,
-            p_vaddr: section_info_text.virtual_address as u64,
-            p_paddr: section_info_text.virtual_address as u64,
-            p_filesz: section_info_text.size as u64,
-            p_memsz: section_info_text.size as u64,
-            p_align: SEGMENT_ALIGN_PAGE_SIZE as u64,
+            p_offset: section_info_text.offset_in_merged_file,
+            p_vaddr: section_info_text.virtual_address,
+            p_paddr: section_info_text.virtual_address,
+            p_filesz: section_info_text.size,
+            p_memsz: section_info_text.size,
+            p_align: SEGMENT_ALIGN_PAGE_SIZE,
         });
     }
 
@@ -435,12 +444,12 @@ pub fn write_executable(
         writer.write_program_header(&ProgramHeader {
             p_type: PT_LOAD,
             p_flags: PF_R,
-            p_offset: segment_read_only_data_offset as u64,
-            p_vaddr: segment_read_only_data_virtual_address as u64,
-            p_paddr: segment_read_only_data_virtual_address as u64,
-            p_filesz: segment_read_only_data_file_size as u64,
-            p_memsz: segment_read_only_data_file_size as u64,
-            p_align: SEGMENT_ALIGN_PAGE_SIZE as u64,
+            p_offset: segment_read_only_data_offset,
+            p_vaddr: segment_read_only_data_virtual_address,
+            p_paddr: segment_read_only_data_virtual_address,
+            p_filesz: segment_read_only_data_file_size,
+            p_memsz: segment_read_only_data_file_size,
+            p_align: SEGMENT_ALIGN_PAGE_SIZE,
         });
     }
 
@@ -490,12 +499,12 @@ pub fn write_executable(
         writer.write_program_header(&ProgramHeader {
             p_type: PT_LOAD,
             p_flags: PF_R | PF_W, // writable data
-            p_offset: segment_writable_data_offset as u64,
-            p_vaddr: segment_writable_data_virtual_address as u64,
-            p_paddr: segment_writable_data_virtual_address as u64,
-            p_filesz: segment_writable_data_file_size as u64,
-            p_memsz: segment_writable_data_memory_size as u64,
-            p_align: SEGMENT_ALIGN_PAGE_SIZE as u64,
+            p_offset: segment_writable_data_offset,
+            p_vaddr: segment_writable_data_virtual_address,
+            p_paddr: segment_writable_data_virtual_address,
+            p_filesz: segment_writable_data_file_size,
+            p_memsz: segment_writable_data_memory_size,
+            p_align: SEGMENT_ALIGN_PAGE_SIZE,
         });
     }
 
@@ -527,12 +536,12 @@ pub fn write_executable(
         writer.write_program_header(&ProgramHeader {
             p_type: PT_TLS,
             p_flags: PF_R,
-            p_offset: segment_tls_data_offset as u64,
-            p_vaddr: segment_tls_data_virtual_address as u64,
-            p_paddr: segment_tls_data_virtual_address as u64,
-            p_filesz: segment_tls_file_size as u64,
-            p_memsz: segment_tls_memory_size as u64,
-            p_align: SEGMENT_ALIGN_TLS as u64,
+            p_offset: segment_tls_data_offset,
+            p_vaddr: segment_tls_data_virtual_address,
+            p_paddr: segment_tls_data_virtual_address,
+            p_filesz: segment_tls_file_size,
+            p_memsz: segment_tls_memory_size,
+            p_align: SEGMENT_ALIGN_TLS,
         });
     }
 
@@ -751,12 +760,12 @@ pub fn write_executable(
     // Write section header: .text
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::Text) {
         writer.write_section_header(&SectionHeader {
-            name: section_name_text_opt,
+            sh_name: writer.section_name_offset(section_name_text_opt),
             sh_type: SHT_PROGBITS,
-            sh_flags: (SHF_ALLOC | SHF_EXECINSTR) as u64,
-            sh_addr: section_info.virtual_address as u64,
-            sh_offset: section_info.offset_in_merged_file as u64,
-            sh_size: section_info.size as u64,
+            sh_flags: SHF_ALLOC | SHF_EXECINSTR,
+            sh_addr: section_info.virtual_address,
+            sh_offset: section_info.offset_in_merged_file,
+            sh_size: section_info.size,
 
             // depends on the section type, for SHT_PROGBITS it is usually 0
             // for section `.rela.text`, it is the index of the section `.symtab` that holds the symbols.
@@ -769,7 +778,7 @@ pub fn write_executable(
             sh_info: 0,
 
             // code sections are usually aligned to 16 bytes
-            sh_addralign: SECTION_ALIGN_TEXT as u64,
+            sh_addralign: SECTION_ALIGN_TEXT,
             sh_entsize: 0,
         });
     }
@@ -777,16 +786,16 @@ pub fn write_executable(
     // Write section header: .rodata
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::ROData) {
         writer.write_section_header(&SectionHeader {
-            name: section_name_rodata_opt,
+            sh_name: writer.section_name_offset(section_name_rodata_opt),
             sh_type: SHT_PROGBITS,
-            sh_flags: SHF_ALLOC as u64,
-            sh_addr: section_info.virtual_address as u64,
-            sh_offset: section_info.offset_in_merged_file as u64,
-            sh_size: section_info.size as u64,
+            sh_flags: SHF_ALLOC,
+            sh_addr: section_info.virtual_address,
+            sh_offset: section_info.offset_in_merged_file,
+            sh_size: section_info.size,
             sh_link: 0,
             sh_info: 0,
             // read-only data sections are usually aligned to 8 or 4 bytes
-            sh_addralign: SECTION_ALIGN_DATA as u64,
+            sh_addralign: SECTION_ALIGN_DATA,
             sh_entsize: 0,
         });
     }
@@ -794,15 +803,15 @@ pub fn write_executable(
     // Write section header: .got
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::GOT) {
         writer.write_section_header(&SectionHeader {
-            name: section_name_got_opt,
+            sh_name: writer.section_name_offset(section_name_got_opt),
             sh_type: SHT_PROGBITS,
-            sh_flags: SHF_ALLOC as u64,
-            sh_addr: section_info.virtual_address as u64,
-            sh_offset: section_info.offset_in_merged_file as u64,
-            sh_size: section_info.size as u64,
+            sh_flags: SHF_ALLOC,
+            sh_addr: section_info.virtual_address,
+            sh_offset: section_info.offset_in_merged_file,
+            sh_size: section_info.size,
             sh_link: 0,
             sh_info: 0,
-            sh_addralign: SECTION_ALIGN_DATA as u64,
+            sh_addralign: SECTION_ALIGN_DATA,
             sh_entsize: 0,
         });
     }
@@ -810,16 +819,16 @@ pub fn write_executable(
     // Write section header: .tdata
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::TData) {
         writer.write_section_header(&SectionHeader {
-            name: section_name_tdata_opt,
+            sh_name: writer.section_name_offset(section_name_tdata_opt),
             sh_type: SHT_PROGBITS,
-            sh_flags: (SHF_ALLOC | SHF_WRITE | SHF_TLS) as u64,
-            sh_addr: section_info.virtual_address as u64,
-            sh_offset: section_info.offset_in_merged_file as u64,
-            sh_size: section_info.size as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE | SHF_TLS),
+            sh_addr: section_info.virtual_address,
+            sh_offset: section_info.offset_in_merged_file,
+            sh_size: section_info.size,
             sh_link: 0,
             sh_info: 0,
             // data sections are usually aligned to 8 or 4 bytes
-            sh_addralign: SECTION_ALIGN_DATA as u64,
+            sh_addralign: SECTION_ALIGN_DATA,
             sh_entsize: 0,
         });
     }
@@ -827,17 +836,17 @@ pub fn write_executable(
     // Write section header: .tbss
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::TBSS) {
         writer.write_section_header(&SectionHeader {
-            name: section_name_tbss_opt,
+            sh_name: writer.section_name_offset(section_name_tbss_opt),
             sh_type: SHT_NOBITS,
-            sh_flags: (SHF_ALLOC | SHF_WRITE | SHF_TLS) as u64,
-            sh_addr: section_info.virtual_address as u64,
-            sh_offset: section_info.offset_in_merged_file as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE | SHF_TLS),
+            sh_addr: section_info.virtual_address,
+            sh_offset: section_info.offset_in_merged_file,
             // .bss has no data in the file
             sh_size: 0,
             sh_link: 0,
             sh_info: 0,
             // .bss sections are usually aligned to 8 or 4 bytes
-            sh_addralign: SECTION_ALIGN_DATA as u64,
+            sh_addralign: SECTION_ALIGN_DATA,
             sh_entsize: 0,
         });
     }
@@ -845,31 +854,31 @@ pub fn write_executable(
     // Write section header: .data
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::Data) {
         writer.write_section_header(&SectionHeader {
-            name: section_name_data_opt,
+            sh_name: writer.section_name_offset(section_name_data_opt),
             sh_type: SHT_PROGBITS,
-            sh_flags: (SHF_ALLOC | SHF_WRITE) as u64,
-            sh_addr: section_info.virtual_address as u64,
-            sh_offset: section_info.offset_in_merged_file as u64,
-            sh_size: section_info.size as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE),
+            sh_addr: section_info.virtual_address,
+            sh_offset: section_info.offset_in_merged_file,
+            sh_size: section_info.size,
             sh_link: 0,
             sh_info: 0,
             // data sections are usually aligned to 8 or 4 bytes
-            sh_addralign: SECTION_ALIGN_DATA as u64,
+            sh_addralign: SECTION_ALIGN_DATA,
             sh_entsize: 0,
         });
     }
 
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::TOC) {
         writer.write_section_header(&SectionHeader {
-            name: section_name_toc_opt,
+            sh_name: writer.section_name_offset(section_name_toc_opt),
             sh_type: SHT_PROGBITS,
-            sh_flags: (SHF_ALLOC | SHF_WRITE) as u64,
-            sh_addr: section_info.virtual_address as u64,
-            sh_offset: section_info.offset_in_merged_file as u64,
-            sh_size: section_info.size as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE),
+            sh_addr: section_info.virtual_address,
+            sh_offset: section_info.offset_in_merged_file,
+            sh_size: section_info.size,
             sh_link: 0,
             sh_info: 0,
-            sh_addralign: SECTION_ALIGN_DATA as u64,
+            sh_addralign: SECTION_ALIGN_DATA,
             sh_entsize: 0,
         });
     }
@@ -877,17 +886,17 @@ pub fn write_executable(
     // Write section header: .bss
     if let Some(section_info) = merged_file_layout.get_non_empty_section_info(SectionName::BSS) {
         writer.write_section_header(&SectionHeader {
-            name: section_name_bss_opt,
+            sh_name: writer.section_name_offset(section_name_bss_opt),
             sh_type: SHT_NOBITS,
-            sh_flags: (SHF_ALLOC | SHF_WRITE) as u64,
-            sh_addr: section_info.virtual_address as u64,
-            sh_offset: section_info.offset_in_merged_file as u64,
+            sh_flags: (SHF_ALLOC | SHF_WRITE),
+            sh_addr: section_info.virtual_address,
+            sh_offset: section_info.offset_in_merged_file,
             // .bss has no data in the file
             sh_size: 0,
             sh_link: 0,
             sh_info: 0,
             // .bss sections are usually aligned to 8 or 4 bytes
-            sh_addralign: SECTION_ALIGN_DATA as u64,
+            sh_addralign: SECTION_ALIGN_DATA,
             sh_entsize: 0,
         });
     }
@@ -905,7 +914,7 @@ pub fn write_executable(
     Ok(())
 }
 
-fn align_up(val: usize, align: usize) -> usize {
+fn align_up(val: u64, align: u64) -> u64 {
     (val + align - 1) & !(align - 1)
 }
 
@@ -1038,7 +1047,7 @@ mod tests {
                 linker_generated_symbols.insert(
                     ".TOC.".to_string(),
                     GlobalSymbolMapEntry::new(
-                        GlobalSymbolValue::Absolute((toc_address + 0x8000) as u64),
+                        GlobalSymbolValue::Absolute(toc_address + 0x8000),
                         false,
                     ),
                 );

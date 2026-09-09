@@ -13,7 +13,7 @@ use object::{
 use crate::{
     elf::module::{
         DataEncoding, FileClass, FileType, Machine, OSABI, RelocatableModule, Relocation,
-        RelocationType, SectionType, SegmentFlag, SegmentType, Symbol, SymbolBind, SymbolType,
+        RelocationType, SectionType, SegmentFlags, SegmentType, Symbol, SymbolBind, SymbolType,
     },
     error::LinkerError,
 };
@@ -49,7 +49,7 @@ pub fn read_file_header(
     let file_type = FileType::from(elf.e_type(endian));
     let machine = Machine::from(elf.e_machine(endian));
 
-    let entry_point = elf.e_entry(endian) as usize;
+    let entry_point = elf.e_entry(endian);
     let program_header_count = elf.e_phnum(endian) as usize;
     let section_header_count = elf.e_shnum(endian) as usize;
 
@@ -92,10 +92,10 @@ pub fn read_section_headers<'a>(
         let section_name =
             str::from_utf8(section_table.section_name(endian, section_header).unwrap()).unwrap();
 
-        let virtual_address = section_header.sh_addr(endian) as usize;
-        let offset = section_header.sh_offset(endian) as usize;
-        let size = section_header.sh_size(endian) as usize;
-        let align = section_header.sh_addralign(endian) as usize;
+        let virtual_address = section_header.sh_addr(endian);
+        let offset = section_header.sh_offset(endian);
+        let size = section_header.sh_size(endian);
+        let align = section_header.sh_addralign(endian);
 
         // Common section type (sh_type) includes:
         // - object::elf::SHT_NULL => "NULL"
@@ -247,9 +247,7 @@ fn parse_symbol_table(
                     value,
                 }
             }
-            _ if (object::elf::SHN_LORESERVE..=object::elf::SHN_HIRESERVE)
-                .contains(&section_index) =>
-            {
+            _ if section_index.is_reserved() => {
                 // Other section index, such as `SHN_COMMON` (common symbol)
                 Symbol::Other
             }
@@ -298,7 +296,7 @@ fn parse_symbol_table(
 
                 Symbol::Defined {
                     name: symbol_name.to_string(),
-                    section_index: section_index as usize,
+                    section_index: section_index.0 as usize,
                     bind,
                     symbol_type,
                     value,
@@ -406,8 +404,8 @@ fn parse_relocations(
         }
 
         // the position of placeholder
-        let offset = rela.r_offset(endian) as usize;
-        let addend = rela.r_addend(endian) as isize;
+        let offset = rela.r_offset(endian);
+        let addend = rela.r_addend(endian);
 
         // The `r_info` field encodes both the symbol index and the relocation type.
         // - high 32 bits is the symbol index.
@@ -454,7 +452,7 @@ fn parse_relocations(
 fn parse_relocation_type(
     module_name: &str,
     machine: Machine,
-    relocation_type_raw: u32,
+    relocation_type_raw: object::elf::RelocationType,
 ) -> Result<RelocationType, LinkerError> {
     match machine {
         Machine::X86_64 => {
@@ -583,21 +581,22 @@ pub fn read_program_headers(
         let mut segment_flags = vec![];
 
         let flags = segment.p_flags(endian);
-        if flags & object::elf::PF_X != 0 {
-            segment_flags.push(SegmentFlag::Execute);
+
+        if flags.contains(object::elf::PF_X) {
+            segment_flags.push(SegmentFlags::Execute);
         }
-        if flags & object::elf::PF_W != 0 {
-            segment_flags.push(SegmentFlag::Write);
+        if flags.contains(object::elf::PF_W) {
+            segment_flags.push(SegmentFlags::Write);
         }
-        if flags & object::elf::PF_R != 0 {
-            segment_flags.push(SegmentFlag::Read);
+        if flags.contains(object::elf::PF_R) {
+            segment_flags.push(SegmentFlags::Read);
         }
 
-        let offset = segment.p_offset(endian) as usize;
-        let virtual_address = segment.p_vaddr(endian) as usize;
-        let file_size = segment.p_filesz(endian) as usize;
-        let memory_size = segment.p_memsz(endian) as usize;
-        let align = segment.p_align(endian) as usize;
+        let offset = segment.p_offset(endian);
+        let virtual_address = segment.p_vaddr(endian);
+        let file_size = segment.p_filesz(endian);
+        let memory_size = segment.p_memsz(endian);
+        let align = segment.p_align(endian);
 
         let program_header = super::module::ProgramHeader {
             segment_type,
@@ -688,7 +687,7 @@ mod tests {
     use crate::elf::{
         module::{
             DataEncoding, FileClass, FileType, Machine, OSABI, RelocationType, SectionType,
-            SegmentFlag, SegmentType, Symbol, SymbolBind, SymbolType,
+            SegmentFlags, SegmentType, Symbol, SymbolBind, SymbolType,
         },
         reader::{
             read_file, read_file_header, read_program_headers, read_relocatable_module,
@@ -1650,13 +1649,13 @@ mod tests {
 
                     // segment 0 covers file header and program headers
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
-                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlags::Read]);
 
                     // segment 1 covers .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::AArch64 => {
@@ -1664,7 +1663,7 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::RiscV => {
@@ -1674,7 +1673,7 @@ mod tests {
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::LoongArch => {
@@ -1682,7 +1681,7 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::PowerPC64 => {
@@ -1690,7 +1689,7 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::S390 => {
@@ -1698,7 +1697,7 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::Other(_) => unimplemented!(),
@@ -1724,24 +1723,24 @@ mod tests {
 
                     // segment 0 covers file header and program headers
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
-                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlags::Read]);
 
                     // segment 1 covers .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 2 covers .rodata
                     assert_eq!(program_headers[2].segment_type, SegmentType::Load);
-                    assert_eq!(program_headers[2].segment_flags, vec![SegmentFlag::Read]);
+                    assert_eq!(program_headers[2].segment_flags, vec![SegmentFlags::Read]);
 
                     // segment 3 covers .data and .bss
                     assert_eq!(program_headers[3].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[3].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::AArch64 => {
@@ -1749,14 +1748,14 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::RiscV => {
@@ -1766,14 +1765,14 @@ mod tests {
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 2 covers .data and .bss
                     assert_eq!(program_headers[2].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[2].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::LoongArch => {
@@ -1781,14 +1780,14 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::PowerPC64 => {
@@ -1796,14 +1795,14 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::S390 => {
@@ -1811,14 +1810,14 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::Other(_) => unimplemented!(),
@@ -2734,13 +2733,13 @@ mod tests {
 
                     // segment 0 covers file header and program headers
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
-                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlags::Read]);
 
                     // segment 1 covers .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::AArch64 => {
@@ -2748,7 +2747,7 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::RiscV => {
@@ -2758,7 +2757,7 @@ mod tests {
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::LoongArch => {
@@ -2766,7 +2765,7 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::PowerPC64 => {
@@ -2774,7 +2773,7 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::S390 => {
@@ -2782,7 +2781,7 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
                 }
                 Machine::Other(_) => unimplemented!(),
@@ -2808,24 +2807,24 @@ mod tests {
 
                     // segment 0 covers file header and program headers
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
-                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlag::Read]);
+                    assert_eq!(program_headers[0].segment_flags, vec![SegmentFlags::Read]);
 
                     // segment 1 covers .text
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 2 covers .rodata
                     assert_eq!(program_headers[2].segment_type, SegmentType::Load);
-                    assert_eq!(program_headers[2].segment_flags, vec![SegmentFlag::Read]);
+                    assert_eq!(program_headers[2].segment_flags, vec![SegmentFlags::Read]);
 
                     // segment 3 covers .data and .bss
                     assert_eq!(program_headers[3].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[3].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::AArch64 => {
@@ -2833,14 +2832,14 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::RiscV => {
@@ -2850,14 +2849,14 @@ mod tests {
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 2 covers .data and .bss
                     assert_eq!(program_headers[2].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[2].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::LoongArch => {
@@ -2865,14 +2864,14 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::PowerPC64 => {
@@ -2880,14 +2879,14 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::S390 => {
@@ -2895,14 +2894,14 @@ mod tests {
                     assert_eq!(program_headers[0].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[0].segment_flags,
-                        vec![SegmentFlag::Execute, SegmentFlag::Read]
+                        vec![SegmentFlags::Execute, SegmentFlags::Read]
                     );
 
                     // segment 1 covers .data and .bss
                     assert_eq!(program_headers[1].segment_type, SegmentType::Load);
                     assert_eq!(
                         program_headers[1].segment_flags,
-                        vec![SegmentFlag::Write, SegmentFlag::Read]
+                        vec![SegmentFlags::Write, SegmentFlags::Read]
                     );
                 }
                 Machine::Other(_) => unimplemented!(),

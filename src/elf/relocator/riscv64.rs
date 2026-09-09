@@ -77,7 +77,7 @@ fn resolve_section(
 
     let get_symbol_value = |r: &Relocation| -> Result<u64, LinkerError> {
         match &symbols[r.symbol_index] {
-            ResolvedSymbol::VirtualAddress(v) => Ok(*v as u64),
+            ResolvedSymbol::VirtualAddress(v) => Ok(*v),
             ResolvedSymbol::Absolute(v) => Ok(*v),
             _ => Err(LinkerError::Message(format!(
                 "Symbol at index {} in module {} can not be used for relocation",
@@ -90,7 +90,7 @@ fn resolve_section(
     for relocation in relocations {
         if relocation.relocation_type == RelocationType::R_RISCV_PCREL_HI20 {
             let p = target_fragment_section.virtual_address + relocation.offset;
-            hi_targets.insert(p as u64, get_symbol_value(relocation)?);
+            hi_targets.insert(p , get_symbol_value(relocation)?);
         }
     }
 
@@ -103,9 +103,8 @@ fn resolve_section(
 
         let instruction = read_u32(binary, placeholder_offset);
         let symbol_value = get_symbol_value(relocation)?;
-
-        let place = (target_fragment_section.virtual_address + placeholder_offset) as u64;
         let target = symbol_value.wrapping_add(addend as u64);
+        let place = target_fragment_section.virtual_address + placeholder_offset ;
 
         let patch_item = match relocation_type {
             RelocationType::R_RISCV_64 => PatchItem::from_u64(placeholder_offset, target),
@@ -164,6 +163,10 @@ fn resolve_section(
     Ok(patch_items)
 }
 
-fn read_u32(binary: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(binary[offset..offset + 4].try_into().unwrap())
+fn read_u32(binary: &[u8], offset: u64) -> u32 {
+    u32::from_le_bytes(
+        binary[offset as usize..offset as usize + 4]
+            .try_into()
+            .unwrap(),
+    )
 }

@@ -37,7 +37,7 @@ impl RelocationResolver for LoongArch64RelocationResolver {
                             RelocationType::R_LARCH_GOT_PC_HI20
                                 | RelocationType::R_LARCH_GOT_PC_LO12
                         ) {
-                            let next_slot = got_slots.len() * 8;
+                            let next_slot = got_slots.len() as u64 * 8;
                             got_slots
                                 .entry(relocation.symbol_index)
                                 .or_insert(next_slot);
@@ -75,7 +75,7 @@ impl RelocationResolver for LoongArch64RelocationResolver {
                     for (symbol_index, offset) in &got_slots {
                         let target = match &resolved_symbols[*symbol_index] {
                             ResolvedSymbol::VirtualAddress(value) => *value,
-                            ResolvedSymbol::Absolute(value) => *value as usize,
+                            ResolvedSymbol::Absolute(value) => *value,
                             _ => {
                                 return Err(LinkerError::Message(format!(
                                     "Symbol at index {} in module {} can not initialize GOT",
@@ -83,7 +83,7 @@ impl RelocationResolver for LoongArch64RelocationResolver {
                                 )));
                             }
                         };
-                        got_patches.push(PatchItem::from_u64(*offset, target as u64));
+                        got_patches.push(PatchItem::from_u64(*offset , target));
                     }
 
                     if !got_patches.is_empty() {
@@ -104,7 +104,7 @@ fn resolve_section(
     target_section_name: &SectionName,
     relocations: &[Relocation],
     symbols: &[ResolvedSymbol],
-    got_slots: &HashMap<usize, usize>,
+    got_slots: &HashMap<usize, u64>,
 ) -> Result<Vec<PatchItem>, LinkerError> {
     let fragment_section = fragment_sections.get(target_section_name).unwrap();
     let FragmentSectionBinary::Referenced(binary) = fragment_section.binary else {
@@ -114,10 +114,10 @@ fn resolve_section(
         )));
     };
 
-    let get_symbol_value = |r: &Relocation| -> Result<usize, LinkerError> {
+    let get_symbol_value = |r: &Relocation| -> Result<u64, LinkerError> {
         match &symbols[r.symbol_index] {
-            ResolvedSymbol::VirtualAddress(v) => Ok(v.wrapping_add(r.addend as usize)),
-            ResolvedSymbol::Absolute(v) => Ok((*v as usize).wrapping_add(r.addend as usize)),
+            ResolvedSymbol::VirtualAddress(v) => Ok(*v),
+            ResolvedSymbol::Absolute(v) => Ok(*v),
             _ => Err(LinkerError::Message(format!(
                 "Symbol at index {} in module {} can not be used for relocation",
                 r.symbol_index, module_name
@@ -134,11 +134,11 @@ fn resolve_section(
 
         let ins = read32(binary, placeholder_offset);
         let symbol_value = get_symbol_value(relocation)?;
-        let target = symbol_value.wrapping_add(addend as usize);
+        let target = symbol_value.wrapping_add(addend as u64);
         let place = fragment_section.virtual_address + placeholder_offset;
 
         let patch_item = match relocation_type {
-            RelocationType::R_LARCH_64 => PatchItem::from_u64(placeholder_offset, target as u64),
+            RelocationType::R_LARCH_64 => PatchItem::from_u64(placeholder_offset, target ),
             RelocationType::R_LARCH_GOT_PC_HI20 | RelocationType::R_LARCH_GOT_PC_LO12 => {
                 let slot = *got_slots.get(&relocation.symbol_index).ok_or_else(|| {
                     LinkerError::Message(format!(
@@ -212,6 +212,10 @@ fn resolve_section(
     Ok(patch_items)
 }
 
-fn read32(binary: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(binary[offset..offset + 4].try_into().unwrap())
+fn read32(binary: &[u8], offset: u64) -> u32 {
+    u32::from_le_bytes(
+        binary[offset as usize..offset as usize + 4]
+            .try_into()
+            .unwrap(),
+    )
 }

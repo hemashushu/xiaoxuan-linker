@@ -65,7 +65,7 @@ fn resolve_section(
 
     let get_symbol_value = |r: &Relocation| -> Result<u64, LinkerError> {
         match &symbols[r.symbol_index] {
-            ResolvedSymbol::VirtualAddress(v) => Ok(*v as u64),
+            ResolvedSymbol::VirtualAddress(v) => Ok(*v),
             ResolvedSymbol::Absolute(v) => Ok(*v),
             _ => Err(LinkerError::Message(format!(
                 "Symbol at index {} in module {} can not be used for relocation",
@@ -89,7 +89,7 @@ fn resolve_section(
         let patch_item = match relocation_type {
             RelocationType::R_390_64 => PatchItem::from_u64_big_endian(placeholder_offset, target),
             RelocationType::R_390_PC32DBL | RelocationType::R_390_PLT32DBL => {
-                let delta = target.wrapping_sub(place as u64) >> 1;
+                let delta = target.wrapping_sub(place ) >> 1;
                 PatchItem::from_u32_big_endian(placeholder_offset, delta as u32)
             }
             _ => unreachable!(

@@ -100,7 +100,7 @@ pub struct FragmentSection<'a> {
     /// The size of the section.
     /// For the `.bss` and `.tbss` sections, this is the memory size of the section,
     /// which is not present in the file, but occupies space in memory.
-    pub size: usize,
+    pub size: u64,
 
     /// The binary data of the section.
     ///
@@ -115,26 +115,26 @@ pub struct FragmentSection<'a> {
     // Note that the offset in the merged section is different from the offset in the merged file,
     // because the `.bss` and `.tbss` sections are NOBITS sections, which do not occupy space in the file,
     // but occupy space in memory, so the offset in the merged section is affected by the size of `.bss` and `.tbss`.
-    pub offset_in_merged_section: usize,
+    pub offset_in_merged_section: u64,
 
     /// The section offset in the final executable
-    pub offset_in_merged_file: usize,
+    pub offset_in_merged_file: u64,
 
     /// The virtual address of the section in the runtime memory of the final executable file.
     ///
     /// For most sections, `virtual address = load address + section offset`,
     /// but start from the `.data` section, the virtual address is also affected by the
     /// size of the previous section `.bss` (which is not present in the file, but occupies space in memory).
-    pub virtual_address: usize,
+    pub virtual_address: u64,
 }
 
 impl<'a> FragmentSection<'a> {
     pub fn new(
-        size: usize,
+        size: u64,
         binary: &'a [u8],
-        offset_in_merged_section: usize,
-        offset_in_merged_file: usize,
-        virtual_address: usize,
+        offset_in_merged_section: u64,
+        offset_in_merged_file: u64,
+        virtual_address: u64,
     ) -> Self {
         FragmentSection {
             size,
@@ -146,10 +146,10 @@ impl<'a> FragmentSection<'a> {
     }
 
     pub fn new_bss(
-        size: usize,
-        offset_in_merged_section: usize,
-        offset_in_merged_file: usize,
-        virtual_address: usize,
+        size: u64,
+        offset_in_merged_section: u64,
+        offset_in_merged_file: u64,
+        virtual_address: u64,
     ) -> Self {
         FragmentSection {
             size,
@@ -162,11 +162,11 @@ impl<'a> FragmentSection<'a> {
 
     pub fn new_owned(
         binary: Vec<u8>,
-        offset_in_merged_section: usize,
-        offset_in_merged_file: usize,
-        virtual_address: usize,
+        offset_in_merged_section: u64,
+        offset_in_merged_file: u64,
+        virtual_address: u64,
     ) -> Self {
-        let size = binary.len();
+        let size = binary.len() as u64;
         FragmentSection {
             size,
             binary: FragmentSectionBinary::Owned(binary),
@@ -199,10 +199,10 @@ pub enum MergedSymbol {
         section_name: SectionName,
 
         /// The offset of the symbol in the merged section in the final executable,
-        offset_in_merged_section: usize,
+        offset_in_merged_section: u64,
 
         /// The virtual address of the symbol in the merged section in the final executable,
-        virtual_address: usize,
+        virtual_address: u64,
     },
     Absolute {
         /// The name of the symbol
@@ -230,7 +230,7 @@ pub struct GlobalSymbolMapEntry {
 pub enum GlobalSymbolValue {
     Defined {
         section_name: SectionName,
-        virtual_address: usize,
+        virtual_address: u64,
     },
     Absolute(u64),
 }
@@ -242,7 +242,7 @@ impl GlobalSymbolMapEntry {
 }
 
 impl GlobalSymbolValue {
-    pub fn from_defined(section_name: SectionName, virtual_address: usize) -> Self {
+    pub fn from_defined(section_name: SectionName, virtual_address: u64) -> Self {
         GlobalSymbolValue::Defined {
             section_name,
             virtual_address,
@@ -358,26 +358,26 @@ fn contains_synthetic_static_got_section(arch: Machine, modules: &[RelocatableMo
     })
 }
 
-fn align_up(val: usize, align: usize) -> usize {
+fn align_up(val: u64, align: u64) -> u64 {
     (val + align - 1) & !(align - 1)
 }
 
 #[derive(Debug, PartialEq)]
 pub struct MergedSectionInfo {
     /// The offset of the section in the final executable file.
-    pub offset_in_merged_file: usize,
+    pub offset_in_merged_file: u64,
 
     /// The virtual address of the section in the runtime memory of the final executable file.
-    pub virtual_address: usize,
+    pub virtual_address: u64,
 
     /// The size of the section in the final executable file.
     /// For the `.bss` and `.tbss` sections, this is the memory size of the section,
     /// which is not present in the file, but occupies space in memory.
-    pub size: usize,
+    pub size: u64,
 }
 
 impl MergedSectionInfo {
-    pub fn new(offset_in_merged_file: usize, virtual_address: usize, size: usize) -> Self {
+    pub fn new(offset_in_merged_file: u64, virtual_address: u64, size: u64) -> Self {
         MergedSectionInfo {
             offset_in_merged_file,
             virtual_address,
@@ -488,24 +488,24 @@ pub fn merge<'a>(
     }
 
     let file_header_and_program_headers_size =
-        ELF_HEADER_SIZE + program_header_count * PROGRAM_HEADER_ENTRY_SIZE;
+        ELF_HEADER_SIZE + program_header_count as u64 * PROGRAM_HEADER_ENTRY_SIZE;
 
     // The offset of the fragment sections in the final executable file
-    let mut offset_in_merged_file: usize;
+    let mut offset_in_merged_file: u64;
 
     // The offset of the fragment sections in the merged section in the runtime memory of the final executable file
     //
     // Note that the offset in the merged section is different from the offset in the merged file,
     // because the `.bss` and `.tbss` sections are NOBITS sections, which do not occupy space in the file,
     // but occupy space in memory, so the offset in the merged section is affected by the size of `.bss` and `.tbss`.
-    let mut offset_in_merged_section: usize;
+    let mut offset_in_merged_section: u64;
 
     // The overall virtual address of the merged sections in the final executable file
     // By default, the virtual address is calculated as `load_address_base + file_offset`,
     // but for the `.bss` and `.tbss` sections, which are NOBITS sections and do not occupy space in the file,
     // but occupy space in memory,
     // we need to calculate the virtual address separately.
-    let mut virtual_address: usize;
+    let mut virtual_address: u64;
 
     let mut fragment_sectionss: Vec<HashMap<SectionName, FragmentSection<'a>>> =
         vec![HashMap::new(); modules.len()];
@@ -632,8 +632,8 @@ pub fn merge<'a>(
 
             if !got_symbols.is_empty() {
                 let slot_size = 8; // Each GOT slot is 8 bytes (64 bits) for LoongArch64
-                let slots_size = got_symbols.len() * slot_size;
-                let binary = vec![0; slots_size]; // Initialize GOT slots with zeros
+                let slots_size = got_symbols.len() as u64 * slot_size;
+                let binary = vec![0; slots_size as usize]; // Initialize GOT slots with zeros
 
                 offset_in_merged_file = align_up(offset_in_merged_file, SECTION_ALIGN_DATA);
                 virtual_address = align_up(virtual_address, SECTION_ALIGN_DATA);
@@ -983,7 +983,7 @@ pub fn merge<'a>(
                             )));
                         }
                     } else if let Some(fragment_section) = fragment_sections.get(&section_name) {
-                        let original_value = *value as usize;
+                        let original_value = *value;
                         let merged_symbol = MergedSymbol::Defined {
                             name: name.clone(),
                             bind: *bind,

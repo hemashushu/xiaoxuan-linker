@@ -6,8 +6,6 @@
 
 use std::fmt::Display;
 
-use object::elf;
-
 // Executable ELF file layout
 // ==========================
 //
@@ -74,10 +72,10 @@ pub const SECTION_NAME_RELA_DATA: &str = ".rela.data";
 pub const SECTION_NAME_RELA_TDATA: &str = ".rela.tdata";
 
 // ELF64 header size is fixed at 64 bytes
-pub const ELF_HEADER_SIZE: usize = 64;
+pub const ELF_HEADER_SIZE: u64 = 64;
 
 // ELF64 program header entry size is fixed at 56 bytes
-pub const PROGRAM_HEADER_ENTRY_SIZE: usize = 56;
+pub const PROGRAM_HEADER_ENTRY_SIZE: u64 = 56;
 
 // Every executable contains `PHDR`, `meta`, and `code` segments,
 // and the following are optional:
@@ -86,15 +84,15 @@ pub const PROGRAM_HEADER_ENTRY_SIZE: usize = 56;
 // - `TLS data`: .tdata, .tbss
 pub const BASE_PROGRAM_HEADER_COUNT: usize = 3;
 
-pub const SEGMENT_ALIGN_PHDR: usize = 0x8;
-pub const SEGMENT_ALIGN_TLS: usize = 0x8;
+pub const SEGMENT_ALIGN_PHDR: u64 = 0x8;
+pub const SEGMENT_ALIGN_TLS: u64 = 0x8;
 
 // .rodata, .data and .tdata sections are 8-byte aligned. This is used for
 // merging data sections from different modules
-pub const SECTION_ALIGN_DATA: usize = 8;
+pub const SECTION_ALIGN_DATA: u64 = 8;
 
 // The symbol table section is 8-byte aligned
-pub const SECTION_ALIGN_SYMTAB: usize = 8;
+pub const SECTION_ALIGN_SYMTAB: u64 = 8;
 
 /// The ELF file header information used by the linker.
 // https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
@@ -116,7 +114,7 @@ pub struct FileHeader {
     pub file_type: FileType,
 
     /// The virtual address of the entry point.
-    pub entry_point: usize,
+    pub entry_point: u64,
 
     /// The number of entries in the program header table.
     pub program_header_count: usize,
@@ -132,8 +130,6 @@ pub enum DataEncoding {
     LittleEndian,
     /// Most-significant byte first (`ELFDATA2MSB`).
     BigEndian,
-    /// An encoding value not recognized by this linker.
-    Other(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,8 +139,6 @@ pub enum FileClass {
     Elf32,
     /// 64-bit ELF (`ELFCLASS64`).
     Elf64,
-    /// An ELF class value not recognized by this linker.
-    Other(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,74 +182,75 @@ pub enum FileType {
     Executable,
     /// Shared object or position-independent executable (`ET_DYN`).
     SharedObject,
-    /// A file type value not recognized by this linker.
-    Other(u16),
+    /// Core dump file (`ET_CORE`).
+    CoreDump,
 }
 
-impl From<u8> for DataEncoding {
-    fn from(value: u8) -> Self {
+impl From<object::elf::DataEncoding> for DataEncoding {
+    fn from(value: object::elf::DataEncoding) -> Self {
         match value {
-            elf::ELFDATA2LSB => DataEncoding::LittleEndian,
-            elf::ELFDATA2MSB => DataEncoding::BigEndian,
-            other => DataEncoding::Other(other),
+            object::elf::ELFDATA2LSB => DataEncoding::LittleEndian,
+            object::elf::ELFDATA2MSB => DataEncoding::BigEndian,
+            _ => panic!("Unsupported ELF data encoding: {}", value),
         }
     }
 }
 
-impl From<u8> for FileClass {
-    fn from(value: u8) -> Self {
+impl From<object::elf::FileClass> for FileClass {
+    fn from(value: object::elf::FileClass) -> Self {
         match value {
-            elf::ELFCLASS32 => FileClass::Elf32,
-            elf::ELFCLASS64 => FileClass::Elf64,
-            other => FileClass::Other(other),
+            object::elf::ELFCLASS32 => FileClass::Elf32,
+            object::elf::ELFCLASS64 => FileClass::Elf64,
+            _ => panic!("Unsupported ELF file class: {}", value),
         }
     }
 }
 
-impl From<u8> for OSABI {
-    fn from(value: u8) -> Self {
+impl From<object::elf::OsAbi> for OSABI {
+    fn from(value: object::elf::OsAbi) -> Self {
         match value {
-            elf::ELFOSABI_SYSV => OSABI::SystemV,
-            other => OSABI::Other(other),
+            object::elf::ELFOSABI_SYSV => OSABI::SystemV,
+            other => OSABI::Other(other.0),
         }
     }
 }
 
-impl From<u16> for Machine {
-    fn from(value: u16) -> Self {
+impl From<object::elf::Machine> for Machine {
+    fn from(value: object::elf::Machine) -> Self {
         match value {
-            elf::EM_X86_64 => Machine::X86_64,
-            elf::EM_AARCH64 => Machine::AArch64,
-            elf::EM_RISCV => Machine::RiscV,
-            elf::EM_LOONGARCH => Machine::LoongArch,
-            elf::EM_PPC64 => Machine::PowerPC64,
-            elf::EM_S390 => Machine::S390,
-            other => Machine::Other(other),
+            object::elf::EM_X86_64 => Machine::X86_64,
+            object::elf::EM_AARCH64 => Machine::AArch64,
+            object::elf::EM_RISCV => Machine::RiscV,
+            object::elf::EM_LOONGARCH => Machine::LoongArch,
+            object::elf::EM_PPC64 => Machine::PowerPC64,
+            object::elf::EM_S390 => Machine::S390,
+            _ => Machine::Other(value.0),
         }
     }
 }
 
-impl From<Machine> for u16 {
+impl From<Machine> for object::elf::Machine {
     fn from(value: Machine) -> Self {
         match value {
-            Machine::X86_64 => elf::EM_X86_64,
-            Machine::AArch64 => elf::EM_AARCH64,
-            Machine::RiscV => elf::EM_RISCV,
-            Machine::LoongArch => elf::EM_LOONGARCH,
-            Machine::PowerPC64 => elf::EM_PPC64,
-            Machine::S390 => elf::EM_S390,
-            Machine::Other(value) => value,
+            Machine::X86_64 => object::elf::EM_X86_64,
+            Machine::AArch64 => object::elf::EM_AARCH64,
+            Machine::RiscV => object::elf::EM_RISCV,
+            Machine::LoongArch => object::elf::EM_LOONGARCH,
+            Machine::PowerPC64 => object::elf::EM_PPC64,
+            Machine::S390 => object::elf::EM_S390,
+            Machine::Other(value) => object::elf::Machine(value),
         }
     }
 }
 
-impl From<u16> for FileType {
-    fn from(value: u16) -> Self {
+impl From<object::elf::FileType> for FileType {
+    fn from(value: object::elf::FileType) -> Self {
         match value {
-            elf::ET_REL => FileType::Relocatable,
-            elf::ET_EXEC => FileType::Executable,
-            elf::ET_DYN => FileType::SharedObject,
-            other => FileType::Other(other),
+            object::elf::ET_REL => FileType::Relocatable,
+            object::elf::ET_EXEC => FileType::Executable,
+            object::elf::ET_DYN => FileType::SharedObject,
+            object::elf::ET_CORE => FileType::CoreDump,
+            _ => panic!("Unsupported ELF file type: {}", value),
         }
     }
 }
@@ -265,7 +260,6 @@ impl Display for FileClass {
         match self {
             FileClass::Elf32 => write!(f, "32-bit ELF"),
             FileClass::Elf64 => write!(f, "64-bit ELF"),
-            FileClass::Other(value) => write!(f, "Unknown (value: {})", value),
         }
     }
 }
@@ -275,7 +269,6 @@ impl Display for DataEncoding {
         match self {
             DataEncoding::LittleEndian => write!(f, "Little Endian"),
             DataEncoding::BigEndian => write!(f, "Big Endian"),
-            DataEncoding::Other(value) => write!(f, "Unknown (value: {})", value),
         }
     }
 }
@@ -305,19 +298,19 @@ pub struct SectionHeader<'data> {
     /// The address of the section in memory.
     ///
     /// For a relocatable file, this field is usually zero.
-    pub virtual_address: usize,
+    pub virtual_address: u64,
 
     /// The byte offset of the section data in the file.
-    pub offset: usize,
+    pub offset: u64,
 
     /// The size of the section in bytes.
     ///
     /// For a `Nobits` section, such as `.bss`, this is the size occupied in
     /// memory; the section has no corresponding bytes in the file.
-    pub size: usize,
+    pub size: u64,
 
     /// The required alignment of the section in bytes.
-    pub align: usize,
+    pub align: u64,
 
     /// The section data stored in the input file.
     ///
@@ -344,16 +337,16 @@ pub enum SectionType {
     Other(u32),
 }
 
-impl From<u32> for SectionType {
-    fn from(value: u32) -> Self {
+impl From<object::elf::SectionType> for SectionType {
+    fn from(value: object::elf::SectionType) -> Self {
         match value {
-            elf::SHT_NULL => SectionType::Null,
-            elf::SHT_PROGBITS => SectionType::Progbits,
-            elf::SHT_SYMTAB => SectionType::Symtab,
-            elf::SHT_STRTAB => SectionType::Strtab,
-            elf::SHT_RELA => SectionType::Rela,
-            elf::SHT_NOBITS => SectionType::Nobits,
-            other => SectionType::Other(other),
+            object::elf::SHT_NULL => SectionType::Null,
+            object::elf::SHT_PROGBITS => SectionType::Progbits,
+            object::elf::SHT_SYMTAB => SectionType::Symtab,
+            object::elf::SHT_STRTAB => SectionType::Strtab,
+            object::elf::SHT_RELA => SectionType::Rela,
+            object::elf::SHT_NOBITS => SectionType::Nobits,
+            other => SectionType::Other(other.0),
         }
     }
 }
@@ -448,26 +441,26 @@ pub enum SymbolType {
     Other(u8),
 }
 
-impl From<u8> for SymbolBind {
-    fn from(value: u8) -> Self {
+impl From<object::elf::SymbolBind> for SymbolBind {
+    fn from(value: object::elf::SymbolBind) -> Self {
         match value {
-            elf::STB_LOCAL => SymbolBind::Local,
-            elf::STB_GLOBAL => SymbolBind::Global,
-            elf::STB_WEAK => SymbolBind::Weak,
-            other => SymbolBind::Other(other),
+            object::elf::STB_LOCAL => SymbolBind::Local,
+            object::elf::STB_GLOBAL => SymbolBind::Global,
+            object::elf::STB_WEAK => SymbolBind::Weak,
+            other => SymbolBind::Other(other.0),
         }
     }
 }
 
-impl From<u8> for SymbolType {
-    fn from(value: u8) -> Self {
+impl From<object::elf::SymbolType> for SymbolType {
+    fn from(value: object::elf::SymbolType) -> Self {
         match value {
-            elf::STT_NOTYPE => SymbolType::Notype,
-            elf::STT_OBJECT => SymbolType::Object,
-            elf::STT_FUNC => SymbolType::Func,
-            elf::STT_SECTION => SymbolType::Section,
-            elf::STT_TLS => SymbolType::TLS,
-            other => SymbolType::Other(other),
+            object::elf::STT_NOTYPE => SymbolType::Notype,
+            object::elf::STT_OBJECT => SymbolType::Object,
+            object::elf::STT_FUNC => SymbolType::Func,
+            object::elf::STT_SECTION => SymbolType::Section,
+            object::elf::STT_TLS => SymbolType::TLS,
+            other => SymbolType::Other(other.0),
         }
     }
 }
@@ -490,13 +483,13 @@ pub struct Relocation {
     pub relocation_type: RelocationType,
 
     /// The position of the placeholder in the section that needs to be patched.
-    pub offset: usize,
+    pub offset: u64,
 
     /// The index of the referenced symbol in the symbol table.
     pub symbol_index: usize,
 
     /// The addend used by the relocation calculation.
-    pub addend: isize,
+    pub addend: i64,
 }
 
 /// The type of relocation that must be applied to a symbol reference in code or data.
@@ -798,22 +791,22 @@ pub struct ProgramHeader {
     pub segment_type: SegmentType,
 
     /// The permissions assigned to the segment.
-    pub segment_flags: Vec<SegmentFlag>,
+    pub segment_flags: Vec<SegmentFlags>,
 
     /// The byte offset of the segment data in the file.
-    pub offset: usize,
+    pub offset: u64,
 
     /// The number of bytes occupied by the segment in the file.
-    pub file_size: usize,
+    pub file_size: u64,
 
     /// The number of bytes occupied by the segment in memory.
-    pub memory_size: usize,
+    pub memory_size: u64,
 
     /// The virtual address at which the segment is loaded.
-    pub virtual_address: usize,
+    pub virtual_address: u64,
 
     /// The required alignment of the segment in bytes.
-    pub align: usize,
+    pub align: u64,
 }
 
 /// Segment types relevant to the linker's output.
@@ -833,7 +826,7 @@ pub enum SegmentType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// A permission bit assigned to an ELF program segment.
-pub enum SegmentFlag {
+pub enum SegmentFlags {
     /// The segment is executable (`PF_X`).
     Execute,
     /// The segment is writable (`PF_W`).
@@ -844,24 +837,24 @@ pub enum SegmentFlag {
     Other(u32),
 }
 
-impl From<u32> for SegmentType {
-    fn from(value: u32) -> Self {
+impl From<object::elf::ProgramType> for SegmentType {
+    fn from(value: object::elf::ProgramType) -> Self {
         match value {
-            elf::PT_PHDR => SegmentType::PHDR,
-            elf::PT_LOAD => SegmentType::Load,
-            elf::PT_TLS => SegmentType::TLS,
-            other => SegmentType::Other(other),
+            object::elf::PT_PHDR => SegmentType::PHDR,
+            object::elf::PT_LOAD => SegmentType::Load,
+            object::elf::PT_TLS => SegmentType::TLS,
+            other => SegmentType::Other(other.0),
         }
     }
 }
 
-impl From<u32> for SegmentFlag {
-    fn from(value: u32) -> Self {
+impl From<object::elf::ProgramFlags> for SegmentFlags {
+    fn from(value: object::elf::ProgramFlags) -> Self {
         match value {
-            elf::PF_X => SegmentFlag::Execute,
-            elf::PF_W => SegmentFlag::Write,
-            elf::PF_R => SegmentFlag::Read,
-            other => SegmentFlag::Other(other),
+            object::elf::PF_X => SegmentFlags::Execute,
+            object::elf::PF_W => SegmentFlags::Write,
+            object::elf::PF_R => SegmentFlags::Read,
+            other => SegmentFlags::Other(other.0),
         }
     }
 }
@@ -884,7 +877,7 @@ pub struct RelocatableModule<'a> {
     pub relocation_sections: Vec<RelocationSection>,
 }
 
-pub fn get_load_address_base(arch: Machine) -> usize {
+pub fn get_load_address_base(arch: Machine) -> u64 {
     match arch {
         // typical base address for x86_64 executables (ET_EXEC),
         // by a contrast, PIE/DSO (ET_DYN) usually has a base address of 0.
@@ -898,7 +891,7 @@ pub fn get_load_address_base(arch: Machine) -> usize {
     }
 }
 
-pub fn get_segment_align_page_size(arch: Machine) -> usize {
+pub fn get_segment_align_page_size(arch: Machine) -> u64 {
     match arch {
         Machine::X86_64 => 0x1000,
         Machine::AArch64 => 0x10000,
@@ -910,7 +903,7 @@ pub fn get_segment_align_page_size(arch: Machine) -> usize {
     }
 }
 
-pub fn get_section_align_text(arch: Machine) -> usize {
+pub fn get_section_align_text(arch: Machine) -> u64 {
     match arch {
         Machine::X86_64 => 16,
         Machine::AArch64 => 64,

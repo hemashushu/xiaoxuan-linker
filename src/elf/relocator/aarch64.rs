@@ -76,7 +76,7 @@ fn resolve_section(
 
     let get_symbol_value = |r: &Relocation| -> Result<u64, LinkerError> {
         match &symbols[r.symbol_index] {
-            ResolvedSymbol::VirtualAddress(v) => Ok(*v as u64),
+            ResolvedSymbol::VirtualAddress(v) => Ok(*v),
             ResolvedSymbol::Absolute(v) => Ok(*v),
             _ => Err(LinkerError::Message(format!(
                 "Symbol at index {} in module {} can not be used for relocation",
@@ -127,7 +127,7 @@ fn resolve_section(
                 // CALL26: S + A - P, divided by four, is stored in instruction bits [25:0].
                 let instruction = read_instruction(binary, placeholder_offset);
                 let place = target_fragment_section.virtual_address + placeholder_offset;
-                let immediate = target.wrapping_sub(place as u64) >> 2;
+                let immediate = target.wrapping_sub(place) >> 2;
                 let patched = (instruction & !0x03ff_ffff) | (immediate as u32 & 0x03ff_ffff);
 
                 PatchItem::from_u32(placeholder_offset, patched)
@@ -146,6 +146,10 @@ fn resolve_section(
     Ok(patch_items)
 }
 
-fn read_instruction(binary: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(binary[offset..offset + 4].try_into().unwrap())
+fn read_instruction(binary: &[u8], offset: u64) -> u32 {
+    u32::from_le_bytes(
+        binary[offset as usize..offset as usize + 4]
+            .try_into()
+            .unwrap(),
+    )
 }

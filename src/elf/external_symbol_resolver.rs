@@ -36,7 +36,7 @@ pub struct ResolvedModule<'a> {
 /// Symbol represents a symbol in the merged module
 #[derive(Debug, PartialEq)]
 pub enum ResolvedSymbol {
-    VirtualAddress(usize),
+    VirtualAddress(u64),
     Absolute(u64),
     Other,
 }
@@ -151,15 +151,6 @@ pub fn resolve<'a>(
         resolved_symbolss.push(resolved_symbols);
     }
 
-    // // Find the entry point symbol `_start` and get its virtual address.
-    // let entry_point = if let Some(entry_symbol) = global_symbol_map.get("_start") {
-    //     entry_symbol.virtual_address
-    // } else {
-    //     return Err(LinkerError::Message(
-    //         "Entry point symbol \"_start\" not found in the global symbols".to_string(),
-    //     ));
-    // };
-
     let resolved_modules = fragment_modules
         .into_iter()
         .zip(resolved_symbolss)
@@ -181,13 +172,13 @@ pub fn resolve<'a>(
 
 pub fn find_entry_point(
     global_symbols: &HashMap<String, GlobalSymbolMapEntry>,
-) -> Result<usize, LinkerError> {
+) -> Result<u64, LinkerError> {
     if let Some(entry_symbol) = global_symbols.get("_start") {
         match entry_symbol.value {
             GlobalSymbolValue::Defined {
                 virtual_address, ..
             } => Ok(virtual_address),
-            GlobalSymbolValue::Absolute(value) => Ok(value as usize),
+            GlobalSymbolValue::Absolute(value) => Ok(value),
         }
     } else {
         Err(LinkerError::Message(
@@ -312,7 +303,7 @@ mod tests {
                 linker_generated_symbols.insert(
                     ".TOC.".to_string(),
                     GlobalSymbolMapEntry::new(
-                        GlobalSymbolValue::Absolute((toc_address + 0x8000) as u64),
+                        GlobalSymbolValue::Absolute(toc_address + 0x8000),
                         false,
                     ),
                 );
