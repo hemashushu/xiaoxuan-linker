@@ -187,7 +187,7 @@ pub fn find_entry_point(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
 
     use pretty_assertions::assert_eq;

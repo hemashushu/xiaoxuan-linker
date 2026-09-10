@@ -679,7 +679,7 @@ pub fn read_relocatable_module<'a>(
     Ok(relocatable_module)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use pretty_assertions::assert_eq;
     use std::{fmt::Display, vec};

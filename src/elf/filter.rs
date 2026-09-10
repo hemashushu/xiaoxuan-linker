@@ -139,7 +139,7 @@ pub fn filter<'a>(
     Ok(reachable_modules)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
 
     use pretty_assertions::assert_eq;

@@ -210,7 +210,7 @@ pub trait RelocationResolver {
     ) -> Result<Vec<PatchModule>, LinkerError>;
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
 
     use std::{collections::HashMap, fmt::Display};

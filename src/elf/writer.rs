@@ -918,7 +918,7 @@ fn align_up(val: u64, align: u64) -> u64 {
     (val + align - 1) & !(align - 1)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
 
     use std::{

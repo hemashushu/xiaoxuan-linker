@@ -8,13 +8,15 @@
 
 output/
 
+*.o
+
 *.elf
 *.so
 *.so.1
 *.so.1.0.0
-*.a
-*.o
-*.obj
+
+*.macho
+*.dylib
 
 .idea/
 .vscode/
