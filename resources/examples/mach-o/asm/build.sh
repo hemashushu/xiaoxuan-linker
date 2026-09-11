@@ -23,6 +23,8 @@ rm -f "$DIR"/*.o "$DIR"/*.macho || true
 
 pushd "$DIR" >/dev/null
 
+CFLAGS_COMMON=(-arch arm64 -isysroot "$SDK" -mmacosx-version-min="$MIN_VERSION")
+
 as -arch arm64 -o minimal.o minimal.s
 as -arch arm64 -o function.o function.s
 as -arch arm64 -o data.o data.s
@@ -32,13 +34,11 @@ as -arch arm64 -o override-weak.o override-weak.s
 as -arch arm64 -o override-strong.o override-strong.s
 as -arch arm64 -o relocate-within-data.o relocate-within-data.s
 
-LD_COMMON=(-arch arm64 -platform_version macos "$MIN_VERSION" "$MIN_VERSION" -syslibroot "$SDK" -lSystem)
-
-ld "${LD_COMMON[@]}" -e _start -o minimal.macho minimal.o
-ld "${LD_COMMON[@]}" -e _start -o function.macho function.o
-ld "${LD_COMMON[@]}" -e _start -o data.macho data.o
-ld "${LD_COMMON[@]}" -e _start -o symbol.macho symbol-export.o symbol-import.o
-ld "${LD_COMMON[@]}" -e _start -o override.macho override-weak.o override-strong.o
-ld "${LD_COMMON[@]}" -e _start -o relocate-within-data.macho relocate-within-data.o
+clang "${CFLAGS_COMMON[@]}" -o minimal.macho minimal.o
+clang "${CFLAGS_COMMON[@]}" -o function.macho function.o
+clang "${CFLAGS_COMMON[@]}" -o data.macho data.o
+clang "${CFLAGS_COMMON[@]}" -o symbol.macho symbol-export.o symbol-import.o
+clang "${CFLAGS_COMMON[@]}" -o override.macho override-weak.o override-strong.o
+clang "${CFLAGS_COMMON[@]}" -o relocate-within-data.macho relocate-within-data.o
 
 popd >/dev/null

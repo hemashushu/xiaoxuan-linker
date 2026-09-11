@@ -32,7 +32,8 @@ _b:
 .zerofill __DATA,__bss,_y,8,3  // uninitialized global variable (8 bytes)
 
 .section __TEXT,__text,regular,pure_instructions
-.globl _start
+.globl _main
+.p2align 2
 
 .globl _foo
 .globl _bar
@@ -41,8 +42,8 @@ _b:
 .globl _x
 .globl _y
 
-// fn _start() -> void
-_start:
+// fn main() -> int
+_main:
     // read `_foo` and subtract 1, then store the result in `_a`.
     // (`_a` should be 10 after this)
     adrp x0, _foo@PAGE
@@ -81,13 +82,8 @@ _start:
     add x1, x1, _y@PAGEOFF
     str x0, [x1]
 
-    // read `_y` and exit with the value of `_y` as the status code.
-    //
-    // exit program using syscall `exit(status)`
-    // syscall number: 1 (BSD class 0x2000000)
+    // read `_y` and return the value of `_y` as the status code.
     adrp x0, _y@PAGE
     add x0, x0, _y@PAGEOFF
     ldr x0, [x0]
-    movz x16, #0x0001
-    movk x16, #0x0200, lsl #16
-    svc #0x80
+    ret

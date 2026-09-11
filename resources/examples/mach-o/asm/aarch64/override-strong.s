@@ -10,8 +10,9 @@
 .extern _foo
 
 .section __TEXT,__text,regular,pure_instructions
-.globl _start
+.globl _main
 .globl _bar
+.p2align 2
 
 // Override the weak symbol `_bar` with a strong symbol.
 //
@@ -24,8 +25,11 @@ _bar:
     mov x0, #42                 // return 42
     ret
 
-// fn _start() -> void
-_start:
+// fn main() -> int
+_main:
+    stp x19, x30, [sp, #-16]!
+    mov x29, sp
+
     // Call `_foo`.
     // Now `x0` should be 11 (the value returned by `_foo`).
     bl _foo
@@ -39,10 +43,5 @@ _start:
     // Now `x0` should be 53 (11 + 42).
     add x0, x0, x19
 
-    // Exit with the sum as the status code.
-    //
-    // Exit program using syscall `exit(status)`.
-    // syscall number: 1 (BSD class 0x2000000)
-    movz x16, #0x0001
-    movk x16, #0x0200, lsl #16
-    svc #0x80
+    ldp x19, x30, [sp], #16
+    ret

@@ -50,7 +50,8 @@ _pbar:
 .section __TEXT,__text,regular,pure_instructions
 .globl _dec
 .globl _inc
-.globl _start
+.globl _main
+.p2align 2
 
 // fn dec(n: int64_t) -> int64_t
 _dec:
@@ -62,8 +63,11 @@ _inc:
     add x0, x0, #1              // increment by 1
     ret                         // return x0
 
-// fn _start() -> void
-_start:
+// fn main() -> int
+_main:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
     // Read the value of `_foo` by dereferencing the pointer `_pfoo` (in __DATA_CONST,__const).
     adrp x2, _pfoo@PAGE
     ldr x2, [x2, _pfoo@PAGEOFF]
@@ -100,10 +104,5 @@ _start:
     ldr x1, [x1, _bar@PAGEOFF]
     add x0, x0, x1
 
-    // Exit with the sum as the status code.
-    //
-    // exit program using syscall `exit(status)`
-    // syscall number: 1 (BSD class 0x2000000)
-    movz x16, #0x0001
-    movk x16, #0x0200, lsl #16
-    svc #0x80
+    ldp x29, x30, [sp], #16
+    ret

@@ -9,7 +9,8 @@
 // - Exit with status code 24.
 
 .section __TEXT,__text,regular,pure_instructions
-.globl _start
+.globl _main
+.p2align 2
 
 .extern _foo
 .extern _bar
@@ -20,8 +21,11 @@
 .extern _dec
 .extern _inc
 
-// fn _start() -> void
-_start:
+// fn main() -> int
+_main:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
     // read `_foo` and subtract 1 (by function `_dec`), then store the result in `_a`.
     // (`_a` should be 10 after this)
     adrp x0, _foo@PAGE
@@ -55,12 +59,9 @@ _start:
     adrp x1, _y@PAGE
     str x0, [x1, _y@PAGEOFF]
 
-    // read `_y` and exit with the value of `_y` as the status code.
-    //
-    // exit program using syscall `exit(status)`
-    // syscall number: 1 (BSD class 0x2000000)
+    // read `_y` and return the value of `_y` as the status code.
     adrp x0, _y@PAGE
     ldr x0, [x0, _y@PAGEOFF]
-    movz x16, #0x0001
-    movk x16, #0x0200, lsl #16
-    svc #0x80
+
+    ldp x29, x30, [sp], #16
+    ret

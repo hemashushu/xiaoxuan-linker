@@ -29,8 +29,6 @@
 //     clang -arch arm64 -o relocate-within-data.macho relocate-within-data.o
 //     ./relocate-within-data.macho; echo "exit code: $?"
 
-#include "common.in"
-
 // __DATA,__data
 long foo = 11;
 long bar = 13;
@@ -53,8 +51,7 @@ long (*pinc)(long) = inc;
 long *const pfoo = &foo;
 long *const pbar = &bar;
 
-[[noreturn]]
-void start(void)
+int main(void)
 {
     long i = *pfoo;   // i = 11
     long j = pdec(i); // j = 10
@@ -65,5 +62,5 @@ void start(void)
     bar = n;          // bar = 14
 
     long r = foo + bar; // r = 10 + 14 = 24
-    exit(r);
+    return (int)r;
 }
