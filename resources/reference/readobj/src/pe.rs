@@ -1,0 +1,794 @@
+use super::*;
+use object::LittleEndian as LE;
+use object::pe::*;
+use object::read::coff::*;
+use object::read::pe::*;
+use object::{Bytes, U32, U64};
+
+pub(super) fn print_coff(p: &mut Printer<'_>, data: &[u8]) {
+    let mut offset = 0;
+    if let Some(header) = ImageFileHeader::parse(data, &mut offset).print_err(p) {
+        writeln!(p.w(), "Format: COFF").unwrap();
+        print_file(p, header);
+        let sections = header.sections(data, offset).print_err(p);
+        let symbols = header.symbols(data).print_err(p);
+        if let Some(ref sections) = sections {
+            print_sections(p, data, header.machine.get(LE), symbols.as_ref(), sections);
+        }
+        if let Some(ref symbols) = symbols {
+            print_symbols(p, sections.as_ref(), symbols);
+        }
+    }
+}
+
+pub(super) fn print_coff_big(p: &mut Printer<'_>, data: &[u8]) {
+    let mut offset = 0;
+    if let Some(header) = AnonObjectHeaderBigobj::parse(data, &mut offset).print_err(p) {
+        writeln!(p.w(), "Format: COFF bigobj").unwrap();
+        print_bigobj(p, header);
+        let sections = header.sections(data, offset).print_err(p);
+        let symbols = header.symbols(data).print_err(p);
+        if let Some(ref sections) = sections {
+            print_sections(p, data, header.machine.get(LE), symbols.as_ref(), sections);
+        }
+        if let Some(ref symbols) = symbols {
+            print_symbols(p, sections.as_ref(), symbols);
+        }
+    }
+}
+
+pub(super) fn print_coff_import(p: &mut Printer<'_>, data: &[u8]) {
+    let mut offset = 0;
+    if let Some(header) = ImportObjectHeader::parse(data, &mut offset).print_err(p) {
+        writeln!(p.w(), "Format: COFF import").unwrap();
+        if !p.options.file {
+            return;
+        }
+        p.group("ImportObjectHeader", |p| {
+            p.field_hex("Signature1", header.sig1.get(LE));
+            p.field_hex("Signature2", header.sig2.get(LE));
+            p.field("Version", header.version.get(LE));
+            p.field_consts("Machine", header.machine.get(LE), Machine::NAMES);
+            p.field("TimeDateStamp", header.time_date_stamp.get(LE));
+            p.field_hex("SizeOfData", header.size_of_data.get(LE));
+            p.field("OrdinalOrHint", header.ordinal_or_hint.get(LE));
+            p.field_consts(
+                "ImportType",
+                header.import_type(),
+                pe::ImportObjectType::NAMES,
+            );
+            p.field_consts(
+                "NameType",
+                header.name_type(),
+                pe::ImportObjectNameType::NAMES,
+            );
+            if let Some(data) = header.parse_data(data, &mut offset).print_err(p) {
+                p.field_inline_string("Symbol", data.symbol());
+                p.field_inline_string("Dll", data.dll());
+                if let Some(export) = data.export() {
+                    p.field_inline_string("Export", export);
+                }
+            }
+        });
+    }
+}
+
+pub(super) fn print_pe32(p: &mut Printer<'_>, data: &[u8]) {
+    writeln!(p.w(), "Format: PE 32-bit").unwrap();
+    print_pe::<ImageNtHeaders32>(p, data);
+}
+
+pub(super) fn print_pe64(p: &mut Printer<'_>, data: &[u8]) {
+    writeln!(p.w(), "Format: PE 64-bit").unwrap();
+    print_pe::<ImageNtHeaders64>(p, data);
+}
+
+fn print_pe<Pe: ImageNtHeaders>(p: &mut Printer<'_>, data: &[u8]) {
+    if let Some(dos_header) = ImageDosHeader::parse(data).print_err(p) {
+        print_dos(p, dos_header);
+        let mut offset = dos_header.nt_headers_offset().into();
+        print_rich(p, data, offset);
+        if let Some((nt_headers, data_directories)) = Pe::parse(data, &mut offset).print_err(p) {
+            if p.options.file {
+                p.group("ImageNtHeaders", |p| {
+                    p.field_hex("Signature", nt_headers.signature());
+                });
+            }
+            let header = nt_headers.file_header();
+            let machine = header.machine.get(LE);
+            let sections = header.sections(data, offset).print_err(p);
+            let symbols = header.symbols(data).print_err(p);
+            print_file(p, header);
+            print_optional(p, nt_headers.optional_header());
+            print_data_directories(p, &data_directories);
+            if let Some(ref sections) = sections {
+                print_sections(p, data, machine, symbols.as_ref(), sections);
+            }
+            if let Some(ref symbols) = symbols {
+                print_symbols(p, sections.as_ref(), symbols);
+            }
+            if let Some(ref sections) = sections {
+                print_export_dir(p, data, sections, &data_directories);
+                print_import_dir::<Pe>(p, data, sections, &data_directories);
+                print_delay_load_dir::<Pe>(p, data, sections, &data_directories);
+                print_reloc_dir(p, data, machine, sections, &data_directories);
+                print_resource_dir(p, data, sections, &data_directories);
+            }
+        }
+    }
+}
+
+fn print_dos(p: &mut Printer<'_>, dos_header: &ImageDosHeader) {
+    if !p.options.file {
+        return;
+    }
+    p.group("ImageDosHeader", |p| {
+        p.field_hex("Magic", dos_header.e_magic.get(LE));
+        p.field_hex("CountBytesLastPage", dos_header.e_cblp.get(LE));
+        p.field_hex("CountPages", dos_header.e_cp.get(LE));
+        p.field_hex("CountRelocations", dos_header.e_crlc.get(LE));
+        p.field_hex("CountHeaderParagraphs", dos_header.e_cparhdr.get(LE));
+        p.field_hex("MinAllocParagraphs", dos_header.e_minalloc.get(LE));
+        p.field_hex("MaxAllocParagraphs", dos_header.e_maxalloc.get(LE));
+        p.field_hex("StackSegment", dos_header.e_ss.get(LE));
+        p.field_hex("StackPointer", dos_header.e_sp.get(LE));
+        p.field_hex("Checksum", dos_header.e_csum.get(LE));
+        p.field_hex("InstructionPointer", dos_header.e_ip.get(LE));
+        p.field_hex("CodeSegment", dos_header.e_cs.get(LE));
+        p.field_hex("AddressOfRelocations", dos_header.e_lfarlc.get(LE));
+        p.field_hex("OverlayNumber", dos_header.e_ovno.get(LE));
+        p.field_hex("OemId", dos_header.e_oemid.get(LE));
+        p.field_hex("OemInfo", dos_header.e_oeminfo.get(LE));
+        p.field_hex("AddressOfNewHeader", dos_header.e_lfanew.get(LE));
+    });
+}
+
+fn print_rich(p: &mut Printer<'_>, data: &[u8], offset: u64) {
+    if !p.options.pe_rich {
+        return;
+    }
+    if let Some(rich_header) = RichHeaderInfo::parse(data, offset) {
+        p.group("RichHeader", |p| {
+            p.field_hex("Offset", rich_header.offset);
+            p.field_hex("Length", rich_header.length);
+            p.field_hex("XorKey", rich_header.xor_key);
+            for entry in rich_header.unmasked_entries() {
+                p.group("RichHeaderEntry", |p| {
+                    p.field("ComponentId", format!("0x{:08X}", entry.comp_id));
+                    p.field("Count", entry.count);
+                });
+            }
+        });
+    }
+}
+
+fn print_file(p: &mut Printer<'_>, header: &ImageFileHeader) {
+    if !p.options.file {
+        return;
+    }
+    p.group("ImageFileHeader", |p| {
+        p.field_consts("Machine", header.machine.get(LE), Machine::NAMES);
+        p.field("NumberOfSections", header.number_of_sections.get(LE));
+        p.field("TimeDateStamp", header.time_date_stamp.get(LE));
+        p.field_hex(
+            "PointerToSymbolTable",
+            header.pointer_to_symbol_table.get(LE),
+        );
+        p.field("NumberOfSymbols", header.number_of_symbols.get(LE));
+        p.field_hex(
+            "SizeOfOptionalHeader",
+            header.size_of_optional_header.get(LE),
+        );
+        p.field_flags(
+            "Characteristics",
+            header.characteristics.get(LE),
+            FileFlags::NAMES,
+        );
+    });
+}
+
+fn print_optional(p: &mut Printer<'_>, header: &impl ImageOptionalHeader) {
+    if !p.options.file {
+        return;
+    }
+    p.group("ImageOptionalHeader", |p| {
+        p.field_hex("Magic", header.magic());
+        p.field("MajorLinkerVersion", header.major_linker_version());
+        p.field("MinorLinkerVersion", header.minor_linker_version());
+        p.field_hex("SizeOfCode", header.size_of_code());
+        p.field_hex("SizeOfInitializedData", header.size_of_initialized_data());
+        p.field_hex(
+            "SizeOfUninitializedData",
+            header.size_of_uninitialized_data(),
+        );
+        p.field_hex("AddressOfEntryPoint", header.address_of_entry_point());
+        p.field_hex("BaseOfCode", header.base_of_code());
+        p.field_hex("ImageBase", header.image_base());
+        p.field_hex("SectionAlignment", header.section_alignment());
+        p.field_hex("FileAlignment", header.file_alignment());
+        p.field(
+            "MajorOperatingSystemVersion",
+            header.major_operating_system_version(),
+        );
+        p.field(
+            "MinorOperatingSystemVersion",
+            header.minor_operating_system_version(),
+        );
+        p.field("MajorImageVersion", header.major_image_version());
+        p.field("MinorImageVersion", header.minor_image_version());
+        p.field("MajorSubsystemVersion", header.major_subsystem_version());
+        p.field("MinorSubsystemVersion", header.minor_subsystem_version());
+        p.field("Win32VersionValue", header.win32_version_value());
+        p.field_hex("SizeOfImage", header.size_of_image());
+        p.field_hex("SizeOfHeaders", header.size_of_headers());
+        p.field_hex("CheckSum", header.check_sum());
+        p.field_consts("Subsystem", header.subsystem(), Subsystem::NAMES);
+        p.field_flags(
+            "DllCharacteristics",
+            header.dll_characteristics(),
+            DllFlags::NAMES,
+        );
+        p.field_hex("SizeOfStackReserve", header.size_of_stack_reserve());
+        p.field_hex("SizeOfStackCommit", header.size_of_stack_commit());
+        p.field_hex("SizeOfHeapReserve", header.size_of_heap_reserve());
+        p.field_hex("SizeOfHeapCommit", header.size_of_heap_commit());
+        p.field_hex("LoaderFlags", header.loader_flags());
+        p.field_hex("NumberOfRvaAndSizes", header.number_of_rva_and_sizes());
+    });
+}
+
+fn print_data_directories(p: &mut Printer<'_>, data_directories: &DataDirectories) {
+    if !p.options.file {
+        return;
+    }
+    for (index, dir) in data_directories.iter().enumerate() {
+        p.group("ImageDataDirectory", |p| {
+            p.field_consts("Index", index, &NAMES_DIRECTORY_ENTRY);
+            p.field_hex("VirtualAddress", dir.virtual_address.get(LE));
+            p.field_hex("Size", dir.size.get(LE));
+        });
+    }
+}
+
+fn print_bigobj(p: &mut Printer<'_>, header: &AnonObjectHeaderBigobj) {
+    if !p.options.file {
+        return;
+    }
+    p.group("AnonObjectHeaderBigObj", |p| {
+        p.field_hex("Signature1", header.sig1.get(LE));
+        p.field_hex("Signature2", header.sig2.get(LE));
+        p.field("Version", header.version.get(LE));
+        p.field_consts("Machine", header.machine.get(LE), Machine::NAMES);
+        p.field("TimeDateStamp", header.time_date_stamp.get(LE));
+        p.field(
+            "ClassId",
+            format!(
+                "{:08X}-{:04X}-{:04X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                header.class_id.data1().get(LE),
+                header.class_id.data2().get(LE),
+                header.class_id.data3().get(LE),
+                header.class_id.data4()[0],
+                header.class_id.data4()[1],
+                header.class_id.data4()[2],
+                header.class_id.data4()[3],
+                header.class_id.data4()[4],
+                header.class_id.data4()[5],
+                header.class_id.data4()[6],
+                header.class_id.data4()[7],
+            ),
+        );
+        p.field_hex("SizeOfData", header.size_of_data.get(LE));
+        p.field_hex("Flags", header.flags.get(LE));
+        p.field_hex("MetaDataSize", header.meta_data_size.get(LE));
+        p.field_hex("MetaDataOffset", header.meta_data_offset.get(LE));
+        p.field("NumberOfSections", header.number_of_sections.get(LE));
+        p.field_hex(
+            "PointerToSymbolTable",
+            header.pointer_to_symbol_table.get(LE),
+        );
+        p.field("NumberOfSymbols", header.number_of_symbols.get(LE));
+    });
+}
+
+fn print_export_dir(
+    p: &mut Printer<'_>,
+    data: &[u8],
+    sections: &SectionTable,
+    data_directories: &DataDirectories,
+) -> Option<()> {
+    if !p.options.pe_exports {
+        return Some(());
+    }
+    let export_dir = data_directories
+        .export_directory(data, sections)
+        .print_err(p)??;
+    p.group("ImageExportDirectory", |p| {
+        p.field_hex("Characteristics", export_dir.characteristics.get(LE));
+        p.field_hex("TimeDateStamp", export_dir.time_date_stamp.get(LE));
+        p.field("MajorVersion", export_dir.major_version.get(LE));
+        p.field("MinorVersion", export_dir.minor_version.get(LE));
+        p.field_hex("Name", export_dir.name.get(LE));
+        p.field("Base", export_dir.base.get(LE));
+        p.field("NumberOfFunctions", export_dir.number_of_functions.get(LE));
+        p.field("NumberOfNames", export_dir.number_of_names.get(LE));
+        p.field_hex(
+            "AddressOfFunctions",
+            export_dir.address_of_functions.get(LE),
+        );
+        p.field_hex("AddressOfNames", export_dir.address_of_names.get(LE));
+        p.field_hex(
+            "AddressOfNameOrdinals",
+            export_dir.address_of_name_ordinals.get(LE),
+        );
+        if let Some(Some(export_table)) = data_directories.export_table(data, sections).print_err(p)
+        {
+            // TODO: the order of the name pointers might be interesting?
+            let mut names = vec![None; export_table.addresses().len()];
+            for (name_pointer, index) in export_table.name_iter() {
+                if let Some(name) = names.get_mut(index.0 as usize) {
+                    *name = Some(name_pointer);
+                }
+            }
+
+            for (index, ordinal, address) in export_table.address_iter() {
+                p.group("Export", |p| {
+                    p.field("Ordinal", ordinal);
+                    if let Some(name_pointer) = names[index.0 as usize] {
+                        p.field_string(
+                            "Name",
+                            name_pointer,
+                            export_table.name_from_pointer(name_pointer),
+                        );
+                    }
+                    p.field_hex("Address", address);
+                    if let Some(target) = export_table.target_from_address(address).print_err(p) {
+                        match target {
+                            ExportTarget::Address(_) => {}
+                            ExportTarget::ForwardByOrdinal(library, ordinal) => {
+                                p.field_inline_string("ForwardLibrary", library);
+                                p.field("ForwardOrdinal", ordinal);
+                            }
+                            ExportTarget::ForwardByName(library, name) => {
+                                p.field_inline_string("ForwardLibrary", library);
+                                p.field_inline_string("ForwardName", name);
+                            }
+                        }
+                    } else if let Some(Some(forward)) =
+                        export_table.forward_string(address).print_err(p)
+                    {
+                        p.field_inline_string("Forward", forward);
+                    }
+                });
+            }
+        }
+    });
+    Some(())
+}
+
+fn print_import_dir<Pe: ImageNtHeaders>(
+    p: &mut Printer<'_>,
+    data: &[u8],
+    sections: &SectionTable,
+    data_directories: &DataDirectories,
+) -> Option<()> {
+    if !p.options.pe_imports {
+        return Some(());
+    }
+    let import_table = data_directories
+        .import_table(data, sections)
+        .print_err(p)??;
+    let mut import_descs = import_table.descriptors().print_err(p)?;
+    p.group("ImageImportDirectory", |p| {
+        while let Some(Some(import_desc)) = import_descs.next().print_err(p) {
+            p.group("ImageImportDescriptor", |p| {
+                p.field_hex("LookupTable", import_desc.original_first_thunk.get(LE));
+                p.field_hex("TimeDataStamp", import_desc.time_date_stamp.get(LE));
+                p.field_hex("ForwarderChain", import_desc.forwarder_chain.get(LE));
+                let name = import_desc.name.get(LE);
+                p.field_string("Name", name, import_table.name(name));
+                p.field_hex("AddressTable", import_desc.first_thunk.get(LE));
+
+                let mut address_thunks = import_table
+                    .thunks(import_desc.first_thunk.get(LE))
+                    .print_err(p);
+
+                let mut lookup_thunks;
+                let mut thunks;
+                if import_desc.original_first_thunk.get(LE) != 0 {
+                    lookup_thunks = import_table
+                        .thunks(import_desc.original_first_thunk.get(LE))
+                        .print_err(p);
+                    thunks = lookup_thunks.clone();
+                } else {
+                    lookup_thunks = None;
+                    thunks = address_thunks.clone();
+                }
+
+                if let Some(thunks) = thunks.as_mut() {
+                    while let Some(Some(thunk)) = thunks.next::<Pe>().print_err(p) {
+                        p.group("Thunk", |p| {
+                            if let Some(Some(thunk)) = lookup_thunks
+                                .as_mut()
+                                .and_then(|thunks| thunks.next::<Pe>().print_err(p))
+                            {
+                                p.field_hex("Lookup", thunk.raw());
+                            }
+                            if let Some(Some(thunk)) = address_thunks
+                                .as_mut()
+                                .and_then(|thunks| thunks.next::<Pe>().print_err(p))
+                            {
+                                p.field_hex("Address", thunk.raw());
+                            }
+                            if thunk.is_ordinal() {
+                                p.field("Ordinal", thunk.ordinal());
+                            } else if let Some((hint, name)) =
+                                import_table.hint_name(thunk.address()).print_err(p)
+                            {
+                                p.field("Hint", hint);
+                                p.field_inline_string("Name", name);
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    });
+    Some(())
+}
+
+fn print_delay_load_dir<Pe: ImageNtHeaders>(
+    p: &mut Printer<'_>,
+    data: &[u8],
+    sections: &SectionTable,
+    data_directories: &DataDirectories,
+) -> Option<()> {
+    if !p.options.pe_imports {
+        return Some(());
+    }
+    let import_table = data_directories
+        .delay_load_import_table(data, sections)
+        .print_err(p)??;
+    let mut import_descs = import_table.descriptors().print_err(p)?;
+    p.group("ImageDelayLoadDirectory", |p| {
+        while let Some(Some(import_desc)) = import_descs.next().print_err(p) {
+            p.group("ImageDelayLoadDescriptor", |p| {
+                p.field_hex("Attributes", import_desc.attributes.get(LE));
+                let dll_name = import_desc.dll_name_rva.get(LE);
+                p.field_string("DllName", dll_name, import_table.name(dll_name));
+                p.field_hex("ModuleHandle", import_desc.module_handle_rva.get(LE));
+                p.field_hex(
+                    "ImportAddressTable",
+                    import_desc.import_address_table_rva.get(LE),
+                );
+                p.field_hex("ImportNameTable", import_desc.import_name_table_rva.get(LE));
+                p.field_hex(
+                    "BoundImportAddressTable",
+                    import_desc.bound_import_address_table_rva.get(LE),
+                );
+                p.field_hex(
+                    "UnloadInformationTable",
+                    import_desc.unload_information_table_rva.get(LE),
+                );
+                p.field_hex("TimeDateStamp", import_desc.time_date_stamp.get(LE));
+
+                let mut name_thunks = import_table
+                    .thunks(import_desc.import_name_table_rva.get(LE))
+                    .print_err(p);
+
+                if let Some(thunks) = name_thunks.as_mut() {
+                    while let Some(Some(thunk)) = thunks.next::<Pe>().print_err(p) {
+                        p.group("Thunk", |p| {
+                            if thunk.is_ordinal() {
+                                p.field("Ordinal", thunk.ordinal());
+                            } else if let Some((hint, name)) =
+                                import_table.hint_name(thunk.address()).print_err(p)
+                            {
+                                p.field("Hint", hint);
+                                p.field_inline_string("Name", name);
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    });
+    Some(())
+}
+
+fn print_resource_dir(
+    p: &mut Printer<'_>,
+    data: &[u8],
+    sections: &SectionTable,
+    data_directories: &DataDirectories,
+) -> Option<()> {
+    if !p.options.pe_resources {
+        return Some(());
+    }
+    let directory = data_directories
+        .resource_directory(data, sections)
+        .print_err(p)??;
+    let root = directory.root().print_err(p)?;
+    print_resource_table(p, directory, root, 0);
+    Some(())
+}
+
+fn print_resource_table(
+    p: &mut Printer<'_>,
+    directory: ResourceDirectory<'_>,
+    table: ResourceDirectoryTable<'_>,
+    level: usize,
+) {
+    p.group("ImageResourceDirectory", |p| {
+        p.field("Characteristics", table.header.characteristics.get(LE));
+        p.field("TimeDateStamp", table.header.time_date_stamp.get(LE));
+        p.field("MajorVersion", table.header.major_version.get(LE));
+        p.field("MinorVersion", table.header.minor_version.get(LE));
+        p.field(
+            "NumberOfNamedEntries",
+            table.header.number_of_named_entries.get(LE),
+        );
+        p.field(
+            "NumberOfIdEntries",
+            table.header.number_of_id_entries.get(LE),
+        );
+        for entry in table.entries {
+            p.group("ImageResourceDirectoryEntry", |p| {
+                match entry.name_or_id() {
+                    ResourceNameOrId::Name(name) => {
+                        let offset = entry.name_or_id.get(LE);
+                        if let Some(name) = name.to_string_lossy(directory).print_err(p) {
+                            p.field_name("NameOrId");
+                            writeln!(p.w, "\"{}\" (0x{:X})", name, offset).unwrap();
+                        } else {
+                            p.field_hex("NameOrId", offset);
+                        }
+                    }
+                    ResourceNameOrId::Id(id) => {
+                        if level == 0 {
+                            p.field_consts("NameOrId", id, NAMES_RT);
+                        } else {
+                            p.field("NameOrId", id);
+                        }
+                    }
+                }
+                p.field_hex(
+                    "OffsetToDataOrDirectory",
+                    entry.offset_to_data_or_directory.get(LE),
+                );
+
+                match entry.data(directory).print_err(p) {
+                    Some(ResourceDirectoryEntryData::Table(table)) => {
+                        print_resource_table(p, directory, table, level + 1)
+                    }
+                    Some(ResourceDirectoryEntryData::Data(data_entry)) => {
+                        p.group("ImageResourceDataEntry", |p| {
+                            p.field_hex("VirtualAddress", data_entry.offset_to_data.get(LE));
+                            p.field("Size", data_entry.size.get(LE));
+                            p.field("CodePage", data_entry.code_page.get(LE));
+                            p.field_hex("Reserved", data_entry.reserved.get(LE));
+                        });
+                    }
+                    None => {}
+                }
+            });
+        }
+    })
+}
+
+fn print_sections<'data, Coff: CoffHeader>(
+    p: &mut Printer<'_>,
+    data: &[u8],
+    machine: pe::Machine,
+    symbols: Option<&SymbolTable<'data, &'data [u8], Coff>>,
+    sections: &SectionTable,
+) {
+    if !p.options.sections && !p.options.relocations {
+        return;
+    }
+    for (index, section) in sections.iter().enumerate() {
+        if !p.options.sections
+            && !(p.options.relocations && section.number_of_relocations.get(LE) != 0)
+        {
+            continue;
+        }
+        p.group("ImageSectionHeader", |p| {
+            p.field("Index", index + 1);
+            if let Some(name) =
+                symbols.and_then(|symbols| section.name(symbols.strings()).print_err(p))
+            {
+                p.field_inline_string("Name", name);
+            } else {
+                p.field_inline_string("Name", section.raw_name());
+            }
+            if p.options.sections {
+                p.field_hex("VirtualSize", section.virtual_size.get(LE));
+                p.field_hex("VirtualAddress", section.virtual_address.get(LE));
+                p.field_hex("SizeOfRawData", section.size_of_raw_data.get(LE));
+                p.field_hex("PointerToRawData", section.pointer_to_raw_data.get(LE));
+                p.field_hex(
+                    "PointerToRelocations",
+                    section.pointer_to_relocations.get(LE),
+                );
+                p.field_hex(
+                    "PointerToLinenumbers",
+                    section.pointer_to_linenumbers.get(LE),
+                );
+                p.field("NumberOfRelocations", section.number_of_relocations.get(LE));
+                p.field("NumberOfLinenumbers", section.number_of_linenumbers.get(LE));
+                p.field_flags(
+                    "Characteristics",
+                    section.characteristics.get(LE),
+                    SectionFlags::NAMES,
+                );
+            }
+            print_relocations(p, data, machine, symbols, section);
+        });
+    }
+}
+
+fn print_relocations<'data, Coff: CoffHeader>(
+    p: &mut Printer<'_>,
+    data: &[u8],
+    machine: pe::Machine,
+    symbols: Option<&SymbolTable<'data, &'data [u8], Coff>>,
+    section: &ImageSectionHeader,
+) {
+    if !p.options.relocations {
+        return;
+    }
+    if let Some(relocations) = section.coff_relocations(data).print_err(p) {
+        let names = pe::machine_names(machine);
+        for relocation in relocations {
+            p.group("ImageRelocation", |p| {
+                p.field_hex("VirtualAddress", relocation.virtual_address.get(LE));
+                let index = relocation.symbol();
+                let name = symbols.and_then(|symbols| {
+                    symbols
+                        .symbol(index)
+                        .and_then(|symbol| symbol.name(symbols.strings()))
+                        .print_err(p)
+                });
+                p.field_string_option("Symbol", index.0, name);
+                let typ = relocation.typ.get(LE);
+                p.field_flags("Type", typ, names.rel);
+            });
+        }
+    }
+}
+
+fn print_symbols<'data, Coff: CoffHeader>(
+    p: &mut Printer<'_>,
+    sections: Option<&SectionTable>,
+    symbols: &SymbolTable<'data, &'data [u8], Coff>,
+) {
+    if !p.options.symbols {
+        return;
+    }
+    for (index, symbol) in symbols.iter().take(p.options.limit) {
+        p.group("ImageSymbol", |p| {
+            p.field("Index", index);
+            if let Some(name) = symbol.name(symbols.strings()).print_err(p) {
+                p.field_inline_string("Name", name);
+            } else {
+                p.field("Name", format!("{:X?}", symbol.raw_name()));
+            }
+            p.field_hex("Value", symbol.value());
+            if let Some(section_index) = symbol.section() {
+                let section_name = sections.and_then(|sections| {
+                    sections
+                        .section(section_index)
+                        .and_then(|section| section.name(symbols.strings()))
+                        .print_err(p)
+                });
+                p.field_string_option("Section", section_index.0, section_name);
+            } else {
+                p.field_consts_display(
+                    "Section",
+                    symbol.section_number(),
+                    pe::SymbolSection::NAMES,
+                );
+            }
+            p.field_flags("Type", symbol.typ(), pe::SymbolType::NAMES);
+            p.field_consts(
+                "StorageClass",
+                symbol.storage_class(),
+                pe::SymbolClass::NAMES,
+            );
+            p.field_hex("NumberOfAuxSymbols", symbol.number_of_aux_symbols());
+            if symbol.has_aux_file_name()
+                && let Some(name) = symbols
+                    .aux_file_name(index, symbol.number_of_aux_symbols())
+                    .print_err(p)
+            {
+                p.group("ImageAuxSymbolFile", |p| {
+                    p.field_inline_string("Name", name);
+                });
+            }
+            if symbol.has_aux_function()
+                && let Some(aux) = symbols.aux_function(index).print_err(p)
+            {
+                p.group("ImageAuxSymbolFunction", |p| {
+                    p.field("TagIndex", aux.tag_index.get(LE));
+                    p.field("TotalSize", aux.total_size.get(LE));
+                    p.field_hex("PointerToLinenumber", aux.pointer_to_linenumber.get(LE));
+                    p.field(
+                        "PointerToNextFunction",
+                        aux.pointer_to_next_function.get(LE),
+                    );
+                    p.field("Unused", format!("{:X?}", aux.unused));
+                });
+            }
+            if symbol.has_aux_section()
+                && let Some(aux) = symbols.aux_section(index).print_err(p)
+            {
+                p.group("ImageAuxSymbolSection", |p| {
+                    p.field_hex("Length", aux.length.get(LE));
+                    p.field("NumberOfRelocations", aux.number_of_relocations.get(LE));
+                    p.field("NumberOfLinenumbers", aux.number_of_linenumbers.get(LE));
+                    p.field_hex("CheckSum", aux.check_sum.get(LE));
+                    p.field("Number", aux.number.get(LE));
+                    p.field_consts("Selection", aux.selection, pe::ComdatSelection::NAMES);
+                    p.field_hex("Reserved", aux.reserved);
+                    p.field("HighNumber", aux.high_number.get(LE));
+                });
+            }
+            if symbol.has_aux_weak_external()
+                && let Some(aux) = symbols.aux_weak_external(index).print_err(p)
+            {
+                p.group("ImageAuxWeak", |p| {
+                    let index = aux.default_symbol();
+                    let name = symbols
+                        .symbol(index)
+                        .and_then(|symbol| symbol.name(symbols.strings()))
+                        .print_err(p);
+                    p.field_string_option("DefaultSymbol", index.0, name);
+                    p.field_consts(
+                        "SearchType",
+                        aux.weak_search_type.get(LE),
+                        pe::WeakExternSearch::NAMES,
+                    );
+                });
+            }
+            // TODO: ImageAuxSymbolFunctionBeginEnd
+        });
+    }
+}
+
+fn print_reloc_dir(
+    p: &mut Printer<'_>,
+    data: &[u8],
+    machine: pe::Machine,
+    sections: &SectionTable,
+    data_directories: &DataDirectories,
+) -> Option<()> {
+    if !p.options.pe_base_relocs {
+        return Some(());
+    }
+    let names = pe::machine_names(machine);
+    let mut blocks = data_directories
+        .relocation_blocks(data, sections)
+        .print_err(p)??;
+    while let Some(block) = blocks.next().print_err(p)? {
+        let block_address = block.virtual_address();
+        let block_data = sections.pe_data_at(data, block_address).map(Bytes);
+        for reloc in block {
+            p.group("ImageBaseRelocation", |p| {
+                p.field_hex("VirtualAddress", reloc.virtual_address);
+                p.field_consts("Type", reloc.typ, names.rel_based);
+                let offset = (reloc.virtual_address - block_address) as usize;
+                if let Some(addend) = match reloc.typ {
+                    IMAGE_REL_BASED_HIGHLOW => block_data
+                        .and_then(|data| data.read_at::<U32<LE>>(offset).ok())
+                        .map(|addend| u64::from(addend.get(LE))),
+                    IMAGE_REL_BASED_DIR64 => block_data
+                        .and_then(|data| data.read_at::<U64<LE>>(offset).ok())
+                        .map(|addend| addend.get(LE)),
+                    _ => None,
+                } {
+                    p.field_hex("Addend", addend);
+                }
+            });
+        }
+    }
+    Some(())
+}

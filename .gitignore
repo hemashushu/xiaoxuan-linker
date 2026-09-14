@@ -1,12 +1,11 @@
-/target
-
-/IGNORE
-/IGNORE_THIS
 /TODO
 /REF
 /DEPRECATED
+/IGNORE
 
 output/
+target/
+build/
 
 *.o
 
@@ -17,6 +16,3 @@ output/
 
 *.macho
 *.dylib
-
-.idea/
-.vscode/

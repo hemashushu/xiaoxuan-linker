@@ -1,0 +1,13 @@
+{
+    /*
+    use launch.json to configure the arguments for debugging,
+    and use settings.json to configure the arguments for runnables.
+    */
+
+    /*
+    "rust-analyzer.runnables.extraArgs": [
+        "--",
+        "/Users/yang/projects/xiaoxuan-linker/resources/examples/mach-o/clang/aarch64/data.o"
+    ]
+    */
+}

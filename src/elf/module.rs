@@ -9,8 +9,8 @@ use std::fmt::Display;
 // Executable ELF file layout
 // ==========================
 //
-// Overall
-// -------
+// Overall Structure
+// -----------------
 //
 // | Size   | Content         |
 // |--------|-----------------|

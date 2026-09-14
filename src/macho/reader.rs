@@ -223,7 +223,16 @@ fn parse_symbol_table(
 
         let symbol = match type_type {
             0 => {
-                if is_ext {
+                if is_ext && value > 0 {
+                    // Common/tentative symbol definition (e.g. `long x;` in C)
+                    Symbol::Defined {
+                        name,
+                        section_index: 0,
+                        bind,
+                        symbol_type: SymbolType::Object,
+                        value: 0,
+                    }
+                } else if is_ext {
                     Symbol::External(name)
                 } else if value == 0 {
                     Symbol::Null

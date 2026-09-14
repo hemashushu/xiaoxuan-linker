@@ -1,0 +1,9 @@
+[package]
+name = "readobj"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = "4.6.6"
+memmap2 = "0.9.11"
+object = { version = "0.40.0", features = ["read", "names"] }

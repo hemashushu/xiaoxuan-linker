@@ -1,0 +1,9 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "cargo check": true,
+        "otool": true,
+        "codesign": true,
+        "hexdump": true,
+        "lldb": true
+    }
+}

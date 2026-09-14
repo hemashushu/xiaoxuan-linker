@@ -12,12 +12,12 @@ use std::fmt::Display;
 // Overall Structure
 // -----------------
 //
-// | Size        | Content                     |
-// |-------------|-----------------------------|
-// | 32          | Mach-O 64-bit Header        |
-// | sizeofcmds  | Load Commands               |
-// | ...         | Segment / Section Data      |
-// | ...         | Linkedit Data (Symbols, etc)|
+// | Size       | Content                      |
+// |------------|------------------------------|
+// | 32         | Mach-O 64-bit Header         |
+// | sizeofcmds | Load Commands                |
+// | ...        | Segment / Section Data       |
+// | ...        | Linkedit Data (Symbols, etc) |
 //
 // Common Segments and Sections (Executable)
 // ----------------------------------------

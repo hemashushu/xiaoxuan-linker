@@ -1,0 +1,429 @@
+use std::io::Write;
+use std::ops::{BitAnd, Not};
+use std::{fmt, str};
+
+use object::read::archive::ArchiveFile;
+use object::read::macho::{FatArch, FatHeader};
+use object::{ConstantNames, Endianness, FlagNames, Wrap};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrintOptions {
+    // Selectors
+    pub file: bool,
+    pub segments: bool,
+    pub sections: bool,
+    pub symbols: bool,
+    pub relocations: bool,
+
+    // ELF specific selectors
+    pub elf_dynamic: bool,
+    pub elf_dynamic_symbols: bool,
+    pub elf_notes: bool,
+    pub elf_versions: bool,
+    pub elf_attributes: bool,
+
+    // Mach-O specific selectors
+    pub macho_load_commands: bool,
+    pub macho_function_starts: bool,
+    pub macho_exports_trie: bool,
+    pub macho_fixups: bool,
+    pub macho_fixup_opcodes: bool,
+    pub macho_code_signature: bool,
+
+    // PE specific selectors
+    pub pe_rich: bool,
+    pub pe_base_relocs: bool,
+    pub pe_imports: bool,
+    pub pe_exports: bool,
+    pub pe_resources: bool,
+
+    // Modifiers
+    pub string_indices: bool,
+    // Only implemented for PE symbols currently; add others as needed.
+    pub limit: usize,
+}
+
+impl PrintOptions {
+    /// Returns a new `PrintOptions` with all selectors enabled and default modifiers.
+    pub fn all() -> Self {
+        Self {
+            file: true,
+            segments: true,
+            sections: true,
+            symbols: true,
+            relocations: true,
+            elf_dynamic: true,
+            elf_dynamic_symbols: true,
+            elf_notes: true,
+            elf_versions: true,
+            elf_attributes: true,
+            macho_load_commands: true,
+            macho_function_starts: true,
+            macho_exports_trie: true,
+            macho_fixups: true,
+            macho_fixup_opcodes: true,
+            macho_code_signature: true,
+            pe_rich: true,
+            pe_base_relocs: true,
+            pe_imports: true,
+            pe_exports: true,
+            pe_resources: true,
+            string_indices: true,
+            limit: usize::MAX,
+        }
+    }
+
+    /// Returns a new `PrintOptions` with all selectors disabled and default modifiers.
+    pub fn none() -> Self {
+        Self {
+            file: false,
+            segments: false,
+            sections: false,
+            symbols: false,
+            relocations: false,
+            elf_dynamic: false,
+            elf_dynamic_symbols: false,
+            elf_notes: false,
+            elf_versions: false,
+            elf_attributes: false,
+            macho_load_commands: false,
+            macho_function_starts: false,
+            macho_exports_trie: false,
+            macho_fixups: false,
+            macho_fixup_opcodes: false,
+            macho_code_signature: false,
+            pe_rich: false,
+            pe_base_relocs: false,
+            pe_imports: false,
+            pe_exports: false,
+            pe_resources: false,
+            string_indices: true,
+            limit: usize::MAX,
+        }
+    }
+}
+
+pub fn print(
+    w: &mut dyn Write,
+    e: &mut dyn Write,
+    file: &[u8],
+    extra_files: &[&[u8]],
+    options: &PrintOptions,
+) {
+    let mut printer = Printer::new(w, e, options);
+    print_object(&mut printer, file, extra_files);
+}
+
+struct Printer<'a> {
+    w: &'a mut dyn Write,
+    e: &'a mut dyn Write,
+    indent: usize,
+    options: &'a PrintOptions,
+}
+
+impl<'a> Printer<'a> {
+    fn new(w: &'a mut dyn Write, e: &'a mut dyn Write, options: &'a PrintOptions) -> Self {
+        Self {
+            w,
+            e,
+            indent: 0,
+            options,
+        }
+    }
+
+    fn w(&mut self) -> &mut dyn Write {
+        self.w
+    }
+
+    fn blank(&mut self) {
+        writeln!(self.w).unwrap();
+    }
+
+    fn print_indent(&mut self) {
+        if self.indent != 0 {
+            write!(self.w, "{:-1$}", " ", self.indent * 4).unwrap();
+        }
+    }
+
+    fn print_string(&mut self, s: &[u8]) {
+        if let Ok(s) = str::from_utf8(s) {
+            write!(self.w, "\"{}\"", s).unwrap();
+        } else {
+            write!(self.w, "{:X?}", s).unwrap();
+        }
+    }
+
+    fn indent<F: FnOnce(&mut Self)>(&mut self, f: F) {
+        self.indent += 1;
+        f(self);
+        self.indent -= 1;
+    }
+
+    fn group<F: FnOnce(&mut Self)>(&mut self, name: &str, f: F) {
+        self.print_indent();
+        writeln!(self.w, "{} {{", name).unwrap();
+        self.indent(f);
+        self.print_indent();
+        writeln!(self.w, "}}").unwrap();
+    }
+
+    fn field_name(&mut self, name: &str) {
+        self.print_indent();
+        if !name.is_empty() {
+            write!(self.w, "{}: ", name).unwrap();
+        }
+    }
+
+    fn field<T: fmt::Display>(&mut self, name: &str, value: T) {
+        self.field_name(name);
+        writeln!(self.w, "{}", value).unwrap();
+    }
+
+    fn field_hex<T: fmt::UpperHex>(&mut self, name: &str, value: T) {
+        self.field_name(name);
+        writeln!(self.w, "0x{:X}", value).unwrap();
+    }
+
+    fn field_bytes(&mut self, name: &str, value: &[u8]) {
+        self.field_name(name);
+        writeln!(self.w, "{:X?}", value).unwrap();
+    }
+
+    fn field_hash(&mut self, name: &str, value: &[u8]) {
+        self.field_name(name);
+        for byte in value {
+            write!(self.w, "{:02x}", byte).unwrap();
+        }
+        writeln!(self.w).unwrap();
+    }
+
+    fn field_string_option<T: fmt::UpperHex>(&mut self, name: &str, value: T, s: Option<&[u8]>) {
+        if let Some(s) = s {
+            self.field_name(name);
+            self.print_string(s);
+            if self.options.string_indices {
+                write!(self.w, " (0x{:X})", value).unwrap();
+            }
+            writeln!(self.w).unwrap();
+        } else {
+            self.field_hex(name, value);
+        }
+    }
+
+    fn field_string<T: fmt::UpperHex, E: fmt::Display>(
+        &mut self,
+        name: &str,
+        value: T,
+        s: Result<&[u8], E>,
+    ) {
+        let s = s.print_err(self);
+        self.field_string_option(name, value, s);
+    }
+
+    fn field_inline_string(&mut self, name: &str, s: &[u8]) {
+        self.field_name(name);
+        self.print_string(s);
+        writeln!(self.w).unwrap();
+    }
+
+    fn field_consts<T>(&mut self, name: &str, value: T, consts: &ConstantNames<T>)
+    where
+        T: Wrap + Copy,
+        T::Inner: fmt::UpperHex + PartialEq,
+    {
+        if let Some(flag_name) = consts.name(value) {
+            self.field_name(name);
+            writeln!(self.w, "{} (0x{:X})", flag_name, value.into_inner()).unwrap();
+        } else {
+            self.field_hex(name, value.into_inner());
+        }
+    }
+
+    fn field_consts_display<T>(&mut self, name: &str, value: T, consts: &ConstantNames<T>)
+    where
+        T: Wrap + Copy,
+        T::Inner: fmt::Display + PartialEq,
+    {
+        if let Some(flag_name) = consts.name(value) {
+            self.field_name(name);
+            writeln!(self.w, "{} ({})", flag_name, value.into_inner()).unwrap();
+        } else {
+            self.field(name, value.into_inner());
+        }
+    }
+
+    fn field_flags<T>(&mut self, name: &str, value: T, flags: &FlagNames<T>)
+    where
+        T: Wrap + Copy,
+        T::Inner: fmt::UpperHex
+            + Default
+            + Copy
+            + PartialEq
+            + BitAnd<Output = T::Inner>
+            + Not<Output = T::Inner>,
+    {
+        // If only one flag is set, then display on one line. This handles the case where
+        // a field is usually one group, with other bits rarely set.
+        let mut first_entry = None;
+        let mut write_entry = |count, subname, subvalue| {
+            if count == 0 {
+                first_entry = Some((subname, subvalue));
+                return;
+            }
+            if let Some((first_name, first_value)) = first_entry {
+                self.field_hex(name, value.into_inner());
+                self.indent(|p| {
+                    p.print_indent();
+                    writeln!(p.w, "{} (0x{:X})", first_name, first_value).unwrap();
+                });
+                first_entry = None;
+            }
+            self.indent(|p| {
+                p.print_indent();
+                writeln!(p.w, "{} (0x{:X})", subname, subvalue).unwrap();
+            });
+        };
+
+        let mut count = 0;
+        let unmatched = flags.names(value, |subvalue, subname| {
+            write_entry(count, subname, subvalue);
+            count += 1;
+        });
+
+        if count == 0 {
+            // No entries.
+            self.field_hex(name, value.into_inner());
+        } else if unmatched != T::Inner::default() {
+            // At least one entry + unmatched entry.
+            write_entry(count, "<other>", unmatched);
+        } else if let Some((subname, subvalue)) = first_entry {
+            // Single entry on one line.
+            self.field_name(name);
+            writeln!(self.w, "{} (0x{:X})", subname, subvalue).unwrap();
+        } else {
+            // Entries already written.
+        }
+    }
+
+    fn flag_bits<T>(&mut self, value: T, flags: &FlagNames<T>)
+    where
+        T: Wrap,
+        T::Inner: fmt::UpperHex
+            + Default
+            + Copy
+            + PartialEq
+            + BitAnd<Output = T::Inner>
+            + Not<Output = T::Inner>,
+    {
+        self.indent(|p| {
+            let unmatched = flags.bit_names(value, |bit, name| {
+                p.print_indent();
+                writeln!(p.w, "{} (0x{:X})", name, bit).unwrap();
+            });
+            if unmatched != T::Inner::default() {
+                p.print_indent();
+                writeln!(p.w, "<other> (0x{:X})", unmatched).unwrap();
+            }
+        });
+    }
+
+    fn flag_const<T, U>(&mut self, value: U, consts: &ConstantNames<U>)
+    where
+        T: Wrap,
+        T::Inner: fmt::UpperHex,
+        U: Wrap + Into<T> + Copy,
+        U::Inner: PartialEq,
+    {
+        if let Some(name) = consts.name(value) {
+            self.indent(|p| {
+                p.print_indent();
+                writeln!(p.w, "{} (0x{:X})", name, value.into().into_inner()).unwrap();
+            });
+        }
+    }
+}
+
+fn print_object(p: &mut Printer<'_>, data: &[u8], extra_files: &[&[u8]]) {
+    let kind = match object::FileKind::parse(data) {
+        Ok(file) => file,
+        Err(err) => {
+            println!("Failed to parse file: {}", err);
+            return;
+        }
+    };
+    match kind {
+        object::FileKind::Archive => print_archive(p, data),
+        object::FileKind::Coff => pe::print_coff(p, data),
+        object::FileKind::CoffBig => pe::print_coff_big(p, data),
+        object::FileKind::CoffImport => pe::print_coff_import(p, data),
+        object::FileKind::DyldCache => macho::print_dyld_cache(p, data, extra_files),
+        object::FileKind::Elf32 => elf::print_elf32(p, data),
+        object::FileKind::Elf64 => elf::print_elf64(p, data),
+        object::FileKind::MachO32 => macho::print_macho32(p, data, 0, None),
+        object::FileKind::MachO64 => macho::print_macho64(p, data, 0, None),
+        object::FileKind::MachOFat32 => macho::print_macho_fat32(p, data),
+        object::FileKind::MachOFat64 => macho::print_macho_fat64(p, data),
+        object::FileKind::Pe32 => pe::print_pe32(p, data),
+        object::FileKind::Pe64 => pe::print_pe64(p, data),
+        object::FileKind::Xcoff32 => xcoff::print_xcoff32(p, data),
+        object::FileKind::Xcoff64 => xcoff::print_xcoff64(p, data),
+        // TODO
+        _ => {}
+    }
+}
+
+fn print_archive(p: &mut Printer<'_>, data: &[u8]) {
+    if let Some(archive) = ArchiveFile::parse(data).print_err(p) {
+        write!(p.w(), "Format: Archive ({:?})", archive.kind()).unwrap();
+        if archive.is_thin() {
+            write!(p.w(), " (thin)").unwrap();
+        }
+        p.blank();
+        for member in archive.members() {
+            if let Some(member) = member.print_err(p) {
+                p.blank();
+                p.field_inline_string("Member", member.name());
+                if member.is_thin() {
+                    p.field("Size", member.size());
+                } else if let Some(data) = member.data(data).print_err(p) {
+                    print_object(p, data, &[]);
+                }
+            }
+        }
+        if let Some(symbols) = archive.symbols().print_err(p).flatten() {
+            p.blank();
+            for symbol in symbols {
+                if let Some(symbol) = symbol.print_err(p) {
+                    p.group("Symbol", |p| {
+                        p.field_inline_string("Name", symbol.name());
+                        let offset = symbol.offset();
+                        if let Some(member) = archive.member(offset).print_err(p) {
+                            p.field_inline_string("Member", member.name());
+                        }
+                    });
+                }
+            }
+        }
+    }
+}
+
+trait PrintErr<T> {
+    fn print_err(self, p: &mut Printer<'_>) -> Option<T>;
+}
+
+impl<T, E: fmt::Display> PrintErr<T> for Result<T, E> {
+    fn print_err(self, p: &mut Printer<'_>) -> Option<T> {
+        match self {
+            Ok(val) => Some(val),
+            Err(err) => {
+                writeln!(p.e, "Error: {}", err).unwrap();
+                None
+            }
+        }
+    }
+}
+
+mod elf;
+mod macho;
+mod pe;
+mod xcoff;

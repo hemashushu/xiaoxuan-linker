@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug readobj",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=readobj",
+                    "--package=readobj"
+                ],
+                "filter": {
+                    "name": "readobj",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "/Users/yang/projects/xiaoxuan-linker/resources/examples/mach-o/clang/aarch64/data.o"
+            ],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
