@@ -71,6 +71,8 @@ run_case relocate-within-data.macho 24 ""
 run_case tls.macho 66 ""
 run_case relocate-within-tls.macho 126 ""
 run_case share.macho 199 ""
+run_case external.macho 0 "hello
+(11, 13)"
 
 if [[ $fail_count -ne 0 ]]; then
     echo

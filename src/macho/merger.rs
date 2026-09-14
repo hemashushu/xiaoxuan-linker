@@ -243,6 +243,10 @@ pub struct MergedAsset<'a> {
     pub merged_file_layout: MergedFileLayout,
 }
 
+/// TODO::
+/// 1. Add crt1.o? which is located in SDK path, e.g.,
+///    "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk"
+///    Obtain the path to crt1.o with command: `xcrun --sdk macosx --show-sdk-path` and append `/usr/lib/crt1.o` to the path.
 pub fn merge<'a>(
     modules: Vec<RelocatableModule<'a>>,
     cpu_type: CpuType,

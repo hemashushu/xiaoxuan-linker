@@ -42,6 +42,10 @@ clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/symbol.macho" "$OUT_DIR/symbol-export.o
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/override.macho" "$OUT_DIR/override-weak.o" "$OUT_DIR/override-strong.o"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/relocate-within-data.macho" "$OUT_DIR/relocate-within-data.o"
 
+# C with standard library examples
+clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/external.o" "$SCRIPT_DIR/external.c"
+clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/external.macho" "$OUT_DIR/external.o"
+
 # Thread-local storage examples
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/tls.macho" "$SCRIPT_DIR/tls.c"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/relocate-within-tls.macho" "$SCRIPT_DIR/relocate-within-tls.c"
