@@ -41,6 +41,9 @@ configure_runner() {
             [[ -x "$RUNNER" ]] || RUNNER=qemu-aarch64
             if [[ -x /usr/bin/aarch64-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/aarch64-linux-gnu-gcc -print-sysroot)"
+                if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                    SYSROOT="/usr/aarch64-linux-gnu"
+                fi
                 RUNNER_ARGS=(-L "$SYSROOT")
             fi
             ;;
@@ -49,6 +52,9 @@ configure_runner() {
             [[ -x "$RUNNER" ]] || RUNNER=qemu-loongarch64
             if [[ -x /usr/bin/loongarch64-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/loongarch64-linux-gnu-gcc -print-sysroot)"
+                if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                    SYSROOT="/usr/loongarch64-linux-gnu"
+                fi
                 RUNNER_ARGS=(-L "$SYSROOT")
             fi
             ;;
@@ -57,6 +63,9 @@ configure_runner() {
             [[ -x "$RUNNER" ]] || RUNNER=qemu-ppc64le
             if [[ -x /usr/bin/powerpc64le-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/powerpc64le-linux-gnu-gcc -print-sysroot)"
+                if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                    SYSROOT="/usr/powerpc64le-linux-gnu"
+                fi
                 RUNNER_ARGS=(-L "$SYSROOT")
             fi
             ;;
@@ -65,6 +74,9 @@ configure_runner() {
             [[ -x "$RUNNER" ]] || RUNNER=qemu-riscv64
             if [[ -x /usr/bin/riscv64-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/riscv64-linux-gnu-gcc -print-sysroot)"
+                if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                    SYSROOT="/usr/riscv64-linux-gnu"
+                fi
                 RUNNER_ARGS=(-L "$SYSROOT")
             fi
             ;;
@@ -73,6 +85,9 @@ configure_runner() {
             [[ -x "$RUNNER" ]] || RUNNER=qemu-s390x
             if [[ -x /usr/bin/s390x-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/s390x-linux-gnu-gcc -print-sysroot)"
+                if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                    SYSROOT="/usr/s390x-linux-gnu"
+                fi
                 RUNNER_ARGS=(-L "$SYSROOT")
             fi
             ;;
@@ -81,6 +96,9 @@ configure_runner() {
             [[ -x "$RUNNER" ]] || RUNNER=qemu-x86_64
             if [[ -x /usr/bin/x86_64-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/x86_64-linux-gnu-gcc -print-sysroot)"
+                if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                    SYSROOT="/usr/x86_64-linux-gnu"
+                fi
                 RUNNER_ARGS=(-L "$SYSROOT")
             fi
             ;;
