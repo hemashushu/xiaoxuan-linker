@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOST_ARCH="$(uname -m)"
 
 ARCH="${1:-}"
 if [[ -z "$ARCH" ]]; then
@@ -20,8 +21,8 @@ case "$ARCH" in
 esac
 
 select_gcc() {
-    local arch="$1"
-    case "$arch" in
+    local target_arch="$1"
+    case "$target_arch" in
         aarch64)
             GCC=/usr/bin/aarch64-linux-gnu-gcc
             [[ -x "$GCC" ]] || GCC=gcc
@@ -59,15 +60,23 @@ select_gcc() {
             LDFLAGS_ARCH=()
             ;;
     esac
+
+    # Check if the cross-compiler exists
+    if [[ ! "$HOST_ARCH" == "$target_arch" ]]; then
+        if [[ "$GCC" == "gcc" ]]; then
+            echo "Cross-compiler for architecture $target_arch not found" >&2
+            exit 1
+        fi
+    fi
 }
 
 CFLAGS_UNWIND=(-fno-unwind-tables -fno-asynchronous-unwind-tables)
 
 build_arch() {
-    local arch="$1"
-    local out_dir="$SCRIPT_DIR/$arch"
+    local target_arch="$1"
+    local out_dir="$SCRIPT_DIR/$target_arch"
 
-    select_gcc "$arch"
+    select_gcc "$target_arch"
 
     mkdir -p "$out_dir"
     rm -f "$out_dir"/*.o "$out_dir"/*.elf "$out_dir"/*.so || true
