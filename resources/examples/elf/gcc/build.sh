@@ -73,6 +73,8 @@ select_gcc() {
 CFLAGS_UNWIND=(-fno-unwind-tables -fno-asynchronous-unwind-tables)
 
 build_arch() {
+    echo "Building for architecture... $1"
+
     local target_arch="$1"
     local out_dir="$SCRIPT_DIR/$target_arch"
 

@@ -81,6 +81,8 @@ select_tools() {
 }
 
 build_arch() {
+    echo "Building for architecture... $1"
+
     local target_arch="$1"
     local dir="$SCRIPT_DIR/$target_arch"
 

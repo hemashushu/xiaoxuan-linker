@@ -27,6 +27,7 @@ configure_runner() {
 
     RUN_MODE="native"
     RUNNER=""
+    SYSROOT=""
     RUNNER_ARGS=()
 
     if [[ "$HOST_ARCH" == "$target_arch" ]]; then
@@ -106,7 +107,7 @@ configure_runner() {
 
     # Check if the runner exists
     if [[ ! -x "$RUNNER" ]]; then
-        echo "Runner for architecture $target_arch not found" >&2
+        echo "Runner QEMU-user for architecture $target_arch not found" >&2
         exit 1
     fi
 }
