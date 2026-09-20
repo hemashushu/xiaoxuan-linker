@@ -27,6 +27,7 @@ configure_runner() {
 
     RUN_MODE="native"
     RUNNER=""
+    SYSROOT=""
     RUNNER_ARGS=()
 
     if [[ "$HOST_ARCH" == "$target_arch" ]]; then
@@ -41,50 +42,74 @@ configure_runner() {
             [[ -x "$RUNNER" ]] || RUNNER=qemu-aarch64
             if [[ -x /usr/bin/aarch64-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/aarch64-linux-gnu-gcc -print-sysroot)"
-                RUNNER_ARGS=(-L "$SYSROOT")
             fi
+            if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                SYSROOT="/usr/aarch64-linux-gnu"
+            fi
+            RUNNER_ARGS=(-L "$SYSROOT")
             ;;
         loongarch64)
             RUNNER=${QEMU_USER:-/usr/bin/qemu-loongarch64}
             [[ -x "$RUNNER" ]] || RUNNER=qemu-loongarch64
             if [[ -x /usr/bin/loongarch64-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/loongarch64-linux-gnu-gcc -print-sysroot)"
-                RUNNER_ARGS=(-L "$SYSROOT")
             fi
+            if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                SYSROOT="/usr/loongarch64-linux-gnu"
+            fi
+            RUNNER_ARGS=(-L "$SYSROOT")
             ;;
         powerpc64le)
             RUNNER=${QEMU_USER:-/usr/bin/qemu-ppc64le}
             [[ -x "$RUNNER" ]] || RUNNER=qemu-ppc64le
             if [[ -x /usr/bin/powerpc64le-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/powerpc64le-linux-gnu-gcc -print-sysroot)"
-                RUNNER_ARGS=(-L "$SYSROOT")
             fi
+            if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                SYSROOT="/usr/powerpc64le-linux-gnu"
+            fi
+            RUNNER_ARGS=(-L "$SYSROOT")
             ;;
         riscv64)
             RUNNER=${QEMU_USER:-/usr/bin/qemu-riscv64}
             [[ -x "$RUNNER" ]] || RUNNER=qemu-riscv64
             if [[ -x /usr/bin/riscv64-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/riscv64-linux-gnu-gcc -print-sysroot)"
-                RUNNER_ARGS=(-L "$SYSROOT")
             fi
+            if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                SYSROOT="/usr/riscv64-linux-gnu"
+            fi
+            RUNNER_ARGS=(-L "$SYSROOT")
             ;;
         s390x)
             RUNNER=${QEMU_USER:-/usr/bin/qemu-s390x}
             [[ -x "$RUNNER" ]] || RUNNER=qemu-s390x
             if [[ -x /usr/bin/s390x-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/s390x-linux-gnu-gcc -print-sysroot)"
-                RUNNER_ARGS=(-L "$SYSROOT")
             fi
+            if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                SYSROOT="/usr/s390x-linux-gnu"
+            fi
+            RUNNER_ARGS=(-L "$SYSROOT")
             ;;
         x86_64)
             RUNNER=${QEMU_USER:-/usr/bin/qemu-x86_64}
             [[ -x "$RUNNER" ]] || RUNNER=qemu-x86_64
             if [[ -x /usr/bin/x86_64-linux-gnu-gcc ]]; then
                 SYSROOT="$(/usr/bin/x86_64-linux-gnu-gcc -print-sysroot)"
-                RUNNER_ARGS=(-L "$SYSROOT")
             fi
+            if [[ -z "$SYSROOT" || "$SYSROOT" == "/" ]]; then
+                SYSROOT="/usr/x86_64-linux-gnu"
+            fi
+            RUNNER_ARGS=(-L "$SYSROOT")
             ;;
     esac
+
+    # Check if the runner exists
+    if [[ ! -x "$RUNNER" ]]; then
+        echo "Runner QEMU-user for architecture $target_arch not found" >&2
+        exit 1
+    fi
 }
 
 run_case() {

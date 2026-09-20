@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOST_ARCH="$(uname -m)"
 
 ARCH="${1:-}"
 if [[ -z "$ARCH" ]]; then
@@ -20,8 +21,8 @@ case "$ARCH" in
 esac
 
 select_tools() {
-    local arch="$1"
-    case "$arch" in
+    local target_arch="$1"
+    case "$target_arch" in
         aarch64)
             AS=/usr/bin/aarch64-linux-gnu-as
             LD=/usr/bin/aarch64-linux-gnu-ld
@@ -65,13 +66,27 @@ select_tools() {
             AS_ARGS=(--64)
             ;;
     esac
+
+    # Check if the cross-compiler exists
+    if [[ ! "$HOST_ARCH" == "$target_arch" ]]; then
+        if [[ "$AS" == "as" ]]; then
+            echo "Cross-assembler for architecture $target_arch not found" >&2
+            exit 1
+        fi
+        if [[ "$LD" == "ld" ]]; then
+            echo "Cross-linker for architecture $target_arch not found" >&2
+            exit 1
+        fi
+    fi
 }
 
 build_arch() {
-    local arch="$1"
-    local dir="$SCRIPT_DIR/$arch"
+    echo "Building for architecture... $1"
 
-    select_tools "$arch"
+    local target_arch="$1"
+    local dir="$SCRIPT_DIR/$target_arch"
+
+    select_tools "$target_arch"
 
     rm -f "$dir"/*.o "$dir"/*.elf || true
 
