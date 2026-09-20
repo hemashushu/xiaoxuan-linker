@@ -12,20 +12,32 @@ use std::fmt::Display;
 // Overall Structure
 // -----------------
 //
-// | Size       | Content                      |
-// |------------|------------------------------|
-// | 32         | Mach-O 64-bit Header         |
-// | sizeofcmds | Load Commands                |
-// | ...        | Segment / Section Data       |
-// | ...        | Linkedit Data (Symbols, etc) |
+// | Size       | Content              |
+// |------------|----------------------|
+// | 32         | Mach-O 64-bit Header |
+// | sizeofcmds | Load Commands        | <-- data table
+// | ...        | Segment/Section Data | <-- two-level data binary
 //
-// Common Segments and Sections (Executable)
+// Load Commands (Object)
+//
+//
+//
+// Segments and Sections (Object)
+//
+//
+//
+// Load Commands (Executable)
+//
+//
+//
+// Segments and Sections (Executable)
 // ----------------------------------------
 //
 // | Segment       | Section            | Description                     | Prot |
 // |---------------|--------------------|---------------------------------|------|
 // | `__PAGEZERO`  | -                  | Unmapped memory page (NULL ptr) | ---  |
 // | `__TEXT`      | `__text`           | Executable code                 | R E  |
+// |               | `__cstring`        | String literals                 | R E  |
 // |               | `__const`          | Read-only constants             | R E  |
 // |               | `__stubs`          | Dynamic linker stubs            | R E  |
 // |               | `__stub_helper`    | Dynamic linker stub helper      | R E  |

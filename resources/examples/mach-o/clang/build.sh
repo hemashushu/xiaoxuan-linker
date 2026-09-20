@@ -20,7 +20,7 @@ fi
 
 OUT_DIR="$SCRIPT_DIR/aarch64"
 
-CFLAGS_COMMON=(-arch arm64 -isysroot "$SDK" -mmacosx-version-min="$MIN_VERSION" -std=c23 -O0)
+CFLAGS_COMMON=(-arch arm64 -isysroot "$SDK" -mmacosx-version-min="$MIN_VERSION" -std=c23 -O0 -fno-unwind-tables -fno-asynchronous-unwind-tables)
 
 mkdir -p "$OUT_DIR"
 rm -f "$OUT_DIR"/*.o "$OUT_DIR"/*.macho "$OUT_DIR"/*.dylib || true
