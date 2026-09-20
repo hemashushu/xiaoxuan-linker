@@ -924,6 +924,7 @@ mod tests {
     use std::{
         collections::HashMap,
         fmt::Display,
+        io::Read,
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
         process::Command,
@@ -934,6 +935,7 @@ mod tests {
         Endianness,
         write::{StreamingBuffer, WritableBuffer},
     };
+    use wait_timeout::ChildExt;
 
     use crate::elf::{
         external_symbol_resolver::{ResolvedAsset, find_entry_point, resolve},
@@ -1136,103 +1138,153 @@ mod tests {
         expected_exit_code: i32,
         expected_output: &str,
     ) {
-        // Sleep 5ms to avoid `Os { code: 26, kind: ExecutableFileBusy, message: "Text file busy" }` error.
-        const RETRY_INTERVAL: Duration = Duration::from_millis(5);
+        // Sleep 50ms to avoid `Os { code: 26, kind: ExecutableFileBusy, message: "Text file busy" }` error.
+        const RETRY_INTERVAL: Duration = Duration::from_millis(50);
+
+        // Set a timeout duration for the child process execution.
+        const TIMEOUT_DURATION: Duration = Duration::from_secs(5);
+
         std::thread::sleep(RETRY_INTERVAL);
 
         // Use QEMU to run the executable on non-native architectures.
-        //
-        // For example, to run the aarch64 executable on x86_64, you can use:
-        //
+        // E.g., to run the aarch64 executable on x86_64, you can use:
         // qemu-aarch64 -L $(aarch64-linux-gnu-gcc -print-sysroot) ./executable_file
 
         let current_arch = std::env::consts::ARCH;
-        let output_result = match arch {
+        let file_path_str = file_path.to_str().unwrap_or_else(|| {
+            panic!(
+                "Failed to convert file path to string: {:?}",
+                file_path.display()
+            )
+        });
+
+        let command_and_args = match arch {
             Machine::X86_64 => {
                 if current_arch == "x86_64" {
-                    Command::new(file_path).output()
+                    vec![file_path_str]
                 } else {
-                    Command::new("qemu-x86_64")
-                        .arg("-L")
-                        .arg("$(x86_64-linux-gnu-gcc -print-sysroot)")
-                        .arg(file_path)
-                        .output()
+                    vec![
+                        "qemu-x86_64",
+                        "-L",
+                        "$(x86_64-linux-gnu-gcc -print-sysroot)",
+                        file_path_str,
+                    ]
                 }
             }
             Machine::AArch64 => {
                 if current_arch == "aarch64" {
-                    Command::new(file_path).output()
+                    vec![file_path_str]
                 } else {
-                    Command::new("qemu-aarch64")
-                        .arg("-L")
-                        .arg("$(aarch64-linux-gnu-gcc -print-sysroot)")
-                        .arg(file_path)
-                        .output()
+                    vec![
+                        "qemu-aarch64",
+                        "-L",
+                        "$(aarch64-linux-gnu-gcc -print-sysroot)",
+                        file_path_str,
+                    ]
                 }
             }
             Machine::RiscV => {
                 if current_arch == "riscv64" {
-                    Command::new(file_path).output()
+                    vec![file_path_str]
                 } else {
-                    Command::new("qemu-riscv64")
-                        .arg("-L")
-                        .arg("$(riscv64-linux-gnu-gcc -print-sysroot)")
-                        .arg(file_path)
-                        .output()
+                    vec![
+                        "qemu-riscv64",
+                        "-L",
+                        "$(riscv64-linux-gnu-gcc -print-sysroot)",
+                        file_path_str,
+                    ]
                 }
             }
             Machine::LoongArch => {
                 if current_arch == "loongarch64" {
-                    Command::new(file_path).output()
+                    vec![file_path_str]
                 } else {
-                    Command::new("qemu-loongarch64")
-                        .arg("-L")
-                        .arg("$(loongarch64-linux-gnu-gcc -print-sysroot)")
-                        .arg(file_path)
-                        .output()
+                    vec![
+                        "qemu-loongarch64",
+                        "-L",
+                        "$(loongarch64-linux-gnu-gcc -print-sysroot)",
+                        file_path_str,
+                    ]
                 }
             }
             Machine::PowerPC64 => {
                 if current_arch == "powerpc64" {
-                    Command::new(file_path).output()
+                    vec![file_path_str]
                 } else {
-                    Command::new("qemu-ppc64le")
-                        .arg("-L")
-                        .arg("$(powerpc64le-linux-gnu-gcc -print-sysroot)")
-                        .arg(file_path)
-                        .output()
+                    vec![
+                        "qemu-ppc64le",
+                        "-L",
+                        "$(powerpc64le-linux-gnu-gcc -print-sysroot)",
+                        file_path_str,
+                    ]
                 }
             }
             Machine::S390 => {
                 if current_arch == "s390x" {
-                    Command::new(file_path).output()
+                    vec![file_path_str]
                 } else {
-                    Command::new("qemu-s390x")
-                        .arg("-L")
-                        .arg("$(s390x-linux-gnu-gcc -print-sysroot)")
-                        .arg(file_path)
-                        .output()
+                    vec![
+                        "qemu-s390x",
+                        "-L",
+                        "$(s390x-linux-gnu-gcc -print-sysroot)",
+                        file_path_str,
+                    ]
                 }
             }
-            Machine::Other(_) => unimplemented!(),
+            _ => unimplemented!(),
         };
 
-        let output = match output_result {
-            Ok(output) => output,
-            Err(e) => panic!("Failed to execute the executable: {}. arch: {}", e, arch),
-        };
+        let mut command = Command::new(command_and_args[0]);
+        let mut child_process = command
+            .args(&command_and_args[1..])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to execute the executable {} with command {}: {}",
+                    file_path_str,
+                    command_and_args.join(", "),
+                    e
+                )
+            });
 
-        let exit_code_opt = output.status.code();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let (exit_code_opt, stdout, stderr) = match child_process.wait_timeout(TIMEOUT_DURATION) {
+            Ok(exit_status_opt) => {
+                let exit_code_opt = match exit_status_opt {
+                    Some(exit_status) => exit_status.code(),
+                    None => {
+                        panic!("Executable terminated.");
+                    }
+                };
+
+                let out_text = match child_process.stdout {
+                    Some(mut stdout) => {
+                        let mut out_text = Vec::new();
+                        stdout.read_to_end(&mut out_text).unwrap();
+                        String::from_utf8_lossy(&out_text).to_string()
+                    }
+                    None => String::new(),
+                };
+
+                let err_text = match child_process.stderr {
+                    Some(mut stderr) => {
+                        let mut err_text = Vec::new();
+                        stderr.read_to_end(&mut err_text).unwrap();
+                        String::from_utf8_lossy(&err_text).to_string()
+                    }
+                    None => String::new(),
+                };
+
+                (exit_code_opt, out_text, err_text)
+            }
+            Err(e) => panic!("Failed to wait for the executable to finish: {}", e),
+        };
 
         let exit_code = match exit_code_opt {
             Some(code) => code,
             None => {
-                panic!(
-                    "Executable terminated by signal. stdout: {}, stderr: {}, arch: {}",
-                    stdout, stderr, arch
-                );
+                panic!("Executable terminated. stderr: {}", stderr);
             }
         };
 
