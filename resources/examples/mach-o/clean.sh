@@ -12,3 +12,4 @@ delete_outputs() {
 
 delete_outputs "$SCRIPT_DIR/asm/aarch64"
 delete_outputs "$SCRIPT_DIR/clang/aarch64"
+delete_outputs "$SCRIPT_DIR/fat-binary/aarch64"

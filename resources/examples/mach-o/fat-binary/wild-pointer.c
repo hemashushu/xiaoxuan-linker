@@ -6,13 +6,9 @@
  * For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
  */
 
-#include <stdio.h>
-
 int main()
 {
-    puts("Hello, world!");
-    int a = 11;
-    int b = 13;
-    printf("(%d, %d)\n", a, b);
-    return 0;
+    int *p;  // wild pointer: declared but never initialized
+    *p = 42; // dereferences an indeterminate address
+    return *p;
 }

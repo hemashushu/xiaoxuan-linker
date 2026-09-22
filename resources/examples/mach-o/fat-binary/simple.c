@@ -11,8 +11,5 @@
 int main()
 {
     puts("Hello, world!");
-    int a = 11;
-    int b = 13;
-    printf("(%d, %d)\n", a, b);
     return 0;
 }

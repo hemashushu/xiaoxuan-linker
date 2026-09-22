@@ -6,13 +6,12 @@
  * For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
  */
 
-#include <stdio.h>
+#include <stdlib.h>
 
 int main()
 {
-    puts("Hello, world!");
-    int a = 11;
-    int b = 13;
-    printf("(%d, %d)\n", a, b);
+    int *p = malloc(sizeof(int));
+    free(p);
+    free(p); // double free: `p` is freed twice
     return 0;
 }
