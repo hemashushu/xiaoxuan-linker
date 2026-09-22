@@ -28,7 +28,7 @@ use crate::{
             SEGMENT_ALIGN_PHDR, SEGMENT_ALIGN_TLS, get_load_address_base, get_section_align_text,
             get_segment_align_page_size,
         },
-        relocator::{RelocatedModule, RelocatedSectionBinary},
+        relocation_resolver::{RelocatedModule, RelocatedSectionBinary},
     },
     error::LinkerError,
 };
@@ -938,7 +938,7 @@ mod tests {
     use wait_timeout::ChildExt;
 
     use crate::elf::{
-        external_symbol_resolver::{ResolvedAsset, find_entry_point, resolve},
+        symbol_resolver::{ResolvedAsset, find_entry_point, resolve},
         merger::{
             GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, MergedFileLayout, SectionName,
             merge,

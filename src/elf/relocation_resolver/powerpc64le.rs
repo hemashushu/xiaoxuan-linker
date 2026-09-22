@@ -4,26 +4,23 @@
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
-use std::collections::HashMap;
-
 use crate::{
     elf::{
-        external_symbol_resolver::{ResolvedModule, ResolvedSymbol},
+        symbol_resolver::{ResolvedModule, ResolvedSymbol},
         merger::{
             FragmentRelocationSection, FragmentSection, FragmentSectionBinary, MergedFileLayout,
             SectionName,
         },
-        module::{Relocation, RelocationType},
-        relocator::{PatchItem, PatchModule, RelocationResolver},
+        module::{Relocation, RelocationType, get_load_address_base},
+        relocation_resolver::{PatchItem, PatchModule, RelocationResolver},
     },
     error::LinkerError,
 };
+use std::collections::HashMap;
 
-pub struct RiscV64RelocationResolver;
+pub struct PowerPC64LERelocationResolver;
 
-/// This linker does not support changing code size (e.g., relaxation of the RISC-V instruction set),
-/// so a relocation resolver only needs to resolve the relocation entries and generate the corresponding patch items.
-impl RelocationResolver for RiscV64RelocationResolver {
+impl RelocationResolver for PowerPC64LERelocationResolver {
     fn resolve(
         merged_file_layout: &MergedFileLayout,
         resolved_modules: &[ResolvedModule],
@@ -61,7 +58,7 @@ impl RelocationResolver for RiscV64RelocationResolver {
 
 fn resolve_section(
     module_name: &str,
-    _merged_file_layout: &MergedFileLayout,
+    merged_file_layout: &MergedFileLayout,
     fragment_sections: &HashMap<SectionName, FragmentSection>,
     target_section_name: &SectionName,
     relocations: &[Relocation],
@@ -86,13 +83,11 @@ fn resolve_section(
         }
     };
 
-    let mut hi_targets = HashMap::new();
-    for relocation in relocations {
-        if relocation.relocation_type == RelocationType::R_RISCV_PCREL_HI20 {
-            let p = target_fragment_section.virtual_address + relocation.offset;
-            hi_targets.insert(p , get_symbol_value(relocation)?);
-        }
-    }
+    let toc_value = merged_file_layout
+        .get_non_empty_section_info(SectionName::TOC)
+        .map(|section| section.virtual_address)
+        .unwrap_or_else(|| get_load_address_base(crate::elf::module::Machine::PowerPC64))
+        + 0x8000;
 
     let mut patch_items = Vec::new();
 
@@ -101,69 +96,61 @@ fn resolve_section(
         let placeholder_offset = relocation.offset;
         let addend = relocation.addend;
 
-        let instruction = read_u32(binary, placeholder_offset);
         let symbol_value = get_symbol_value(relocation)?;
         let target = symbol_value.wrapping_add(addend as u64);
-        let place = target_fragment_section.virtual_address + placeholder_offset ;
+        let place = target_fragment_section.virtual_address + placeholder_offset;
+        let signed = match relocation_type {
+            RelocationType::R_PPC64_TOC16_HA
+            | RelocationType::R_PPC64_TOC16_LO
+            | RelocationType::R_PPC64_TOC16_LO_DS => target.wrapping_sub(toc_value ),
+            _ => target,
+        };
+
+        let value16 = match relocation_type {
+            RelocationType::R_PPC64_ADDR16_HIGHEST => target >> 48,
+            RelocationType::R_PPC64_ADDR16_HIGHER => target >> 32,
+            RelocationType::R_PPC64_ADDR16_HI => target >> 16,
+            RelocationType::R_PPC64_ADDR16_LO => target,
+            RelocationType::R_PPC64_ADDR16_HIGHERA => (target.wrapping_add(0x8000)) >> 32,
+            RelocationType::R_PPC64_ADDR16_HIGHESTA => (target.wrapping_add(0x8000)) >> 48,
+            RelocationType::R_PPC64_REL16_HA => (symbol_value + 0x8000) >> 16,
+            RelocationType::R_PPC64_REL16_LO => symbol_value,
+            RelocationType::R_PPC64_TOC16_HA => signed.wrapping_add(0x8000) >> 16,
+            RelocationType::R_PPC64_TOC16_LO | RelocationType::R_PPC64_TOC16_LO_DS => signed,
+            _ => 0,
+        } as u32;
 
         let patch_item = match relocation_type {
-            RelocationType::R_RISCV_64 => PatchItem::from_u64(placeholder_offset, target),
-            RelocationType::R_RISCV_PCREL_HI20 | RelocationType::R_RISCV_HI20 => {
-                let delta = if relocation_type == RelocationType::R_RISCV_PCREL_HI20 {
-                    target.wrapping_sub(place) as i32
-                } else {
-                    target as i32
-                };
-                let hi = ((delta + 0x800) >> 12) as u32;
-                PatchItem::from_u32(placeholder_offset, (instruction & 0xfff) | (hi << 12))
-            }
-            RelocationType::R_RISCV_PCREL_LO12_I => {
-                let hi_address = target;
-                let hi_target = *hi_targets.get(&hi_address).ok_or_else(|| {
-                    LinkerError::Message(format!(
-                        "RISC-V PC-relative HI20/LO12 relocation pair mismatch at offset {}, section {} in module {}",
-                        placeholder_offset, target_section_name, module_name))
-                })?;
-                let delta = hi_target.wrapping_sub(hi_address) as u32;
+            RelocationType::R_PPC64_ADDR64 => PatchItem::from_u64(placeholder_offset, target),
+            RelocationType::R_PPC64_REL24 => {
+                let ins = read32(binary, placeholder_offset);
+                let displacement = target.wrapping_sub(place );
                 PatchItem::from_u32(
                     placeholder_offset,
-                    (instruction & 0x000f_ffff) | ((delta & 0xfff) << 20),
+                    (ins & !0x03ff_fffc) | ((displacement as u32) & 0x03ff_fffc),
                 )
             }
-            RelocationType::R_RISCV_LO12_I => PatchItem::from_u32(
-                placeholder_offset,
-                (instruction & 0x000f_ffff) | ((target as u32 & 0xfff) << 20),
-            ),
-            RelocationType::R_RISCV_LO12_S => {
-                let immediate = target as u32 & 0xfff;
-                let patched = (instruction & 0x01fff07f)
-                    | ((immediate & 0x1f) << 7)
-                    | ((immediate >> 5) << 25);
-                PatchItem::from_u32(placeholder_offset, patched)
-            }
-            RelocationType::R_RISCV_CALL_PLT => {
-                let delta = target.wrapping_sub(place) as i32;
-                let hi = ((delta + 0x800) >> 12) as u32;
-                let lo = delta as u32 & 0xfff;
-                let first = (instruction & 0xfff) | (hi << 12);
-                let second = read_u32(binary, placeholder_offset + 4);
-                let second2 = (second & 0x000f_ffff) | (lo << 20);
-                PatchItem::new(
+            _ => {
+                let ins = read32(binary, placeholder_offset);
+                let instruction = if relocation_type == RelocationType::R_PPC64_REL16_HA {
+                    // Static ET_EXEC does not provide the ELFv2 r12 entry value.
+                    // Use r0 as the addis base to construct the absolute TOC address.
+                    ins & !(0x1f << 16)
+                } else {
+                    ins
+                };
+                PatchItem::from_u32(
                     placeholder_offset,
-                    [first.to_le_bytes(), second2.to_le_bytes()].concat(),
+                    (instruction & 0xffff_0000) | (value16 & 0xffff),
                 )
             }
-            _ => unreachable!(
-                "Relocation type {:?} is not supported for RISC-V architecture",
-                relocation_type
-            ),
         };
         patch_items.push(patch_item);
     }
     Ok(patch_items)
 }
 
-fn read_u32(binary: &[u8], offset: u64) -> u32 {
+fn read32(binary: &[u8], offset: u64) -> u32 {
     u32::from_le_bytes(
         binary[offset as usize..offset as usize + 4]
             .try_into()

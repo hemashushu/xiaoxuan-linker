@@ -6,10 +6,10 @@
 
 use crate::{
     elf::{
-        external_symbol_resolver::{ResolvedModule, ResolvedSymbol},
+        symbol_resolver::{ResolvedModule, ResolvedSymbol},
         merger::{FragmentRelocationSection, FragmentSection, MergedFileLayout, SectionName},
         module::{Relocation, RelocationType},
-        relocator::{PatchItem, PatchModule, RelocationResolver},
+        relocation_resolver::{PatchItem, PatchModule, RelocationResolver},
     },
     error::LinkerError,
 };

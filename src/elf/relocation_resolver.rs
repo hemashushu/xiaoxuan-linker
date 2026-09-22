@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::{
     elf::{
-        external_symbol_resolver::ResolvedModule,
+        symbol_resolver::ResolvedModule,
         merger::{FragmentSectionBinary, MergedFileLayout, SectionName},
         module::Machine,
     },
@@ -216,7 +216,7 @@ mod tests {
     use std::{collections::HashMap, fmt::Display};
 
     use crate::elf::{
-        external_symbol_resolver::{ResolvedAsset, resolve},
+        symbol_resolver::{ResolvedAsset, resolve},
         merger::{
             GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, MergedFileLayout, SectionName,
             merge,

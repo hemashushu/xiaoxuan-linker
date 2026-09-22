@@ -194,7 +194,7 @@ mod tests {
     use std::{collections::HashMap, fmt::Display};
 
     use crate::elf::{
-        external_symbol_resolver::resolve,
+        symbol_resolver::resolve,
         merger::{
             GlobalSymbolMapEntry, GlobalSymbolValue, MergedAsset, MergedFileLayout, SectionName,
             merge,

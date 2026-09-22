@@ -4,23 +4,24 @@
 // the Mozilla Public License version 2.0 and additional exceptions.
 // For more details, see the LICENSE, LICENSE.additional, and CONTRIBUTING files.
 
+use std::collections::HashMap;
+
 use crate::{
     elf::{
-        external_symbol_resolver::{ResolvedModule, ResolvedSymbol},
+        symbol_resolver::{ResolvedModule, ResolvedSymbol},
         merger::{
             FragmentRelocationSection, FragmentSection, FragmentSectionBinary, MergedFileLayout,
             SectionName,
         },
-        module::{Relocation, RelocationType, get_load_address_base},
-        relocator::{PatchItem, PatchModule, RelocationResolver},
+        module::{Relocation, RelocationType},
+        relocation_resolver::{PatchItem, PatchModule, RelocationResolver},
     },
     error::LinkerError,
 };
-use std::collections::HashMap;
 
-pub struct PowerPC64LERelocationResolver;
+pub struct AArch64RelocationResolver;
 
-impl RelocationResolver for PowerPC64LERelocationResolver {
+impl RelocationResolver for AArch64RelocationResolver {
     fn resolve(
         merged_file_layout: &MergedFileLayout,
         resolved_modules: &[ResolvedModule],
@@ -50,6 +51,7 @@ impl RelocationResolver for PowerPC64LERelocationResolver {
 
                     patch_sections.insert(*target_section_name, patch_items);
                 }
+
                 Ok(PatchModule { patch_sections })
             })
             .collect()
@@ -58,7 +60,7 @@ impl RelocationResolver for PowerPC64LERelocationResolver {
 
 fn resolve_section(
     module_name: &str,
-    merged_file_layout: &MergedFileLayout,
+    _merged_file_layout: &MergedFileLayout,
     fragment_sections: &HashMap<SectionName, FragmentSection>,
     target_section_name: &SectionName,
     relocations: &[Relocation],
@@ -83,12 +85,6 @@ fn resolve_section(
         }
     };
 
-    let toc_value = merged_file_layout
-        .get_non_empty_section_info(SectionName::TOC)
-        .map(|section| section.virtual_address)
-        .unwrap_or_else(|| get_load_address_base(crate::elf::module::Machine::PowerPC64))
-        + 0x8000;
-
     let mut patch_items = Vec::new();
 
     for relocation in relocations {
@@ -98,59 +94,59 @@ fn resolve_section(
 
         let symbol_value = get_symbol_value(relocation)?;
         let target = symbol_value.wrapping_add(addend as u64);
-        let place = target_fragment_section.virtual_address + placeholder_offset;
-        let signed = match relocation_type {
-            RelocationType::R_PPC64_TOC16_HA
-            | RelocationType::R_PPC64_TOC16_LO
-            | RelocationType::R_PPC64_TOC16_LO_DS => target.wrapping_sub(toc_value ),
-            _ => target,
-        };
-
-        let value16 = match relocation_type {
-            RelocationType::R_PPC64_ADDR16_HIGHEST => target >> 48,
-            RelocationType::R_PPC64_ADDR16_HIGHER => target >> 32,
-            RelocationType::R_PPC64_ADDR16_HI => target >> 16,
-            RelocationType::R_PPC64_ADDR16_LO => target,
-            RelocationType::R_PPC64_ADDR16_HIGHERA => (target.wrapping_add(0x8000)) >> 32,
-            RelocationType::R_PPC64_ADDR16_HIGHESTA => (target.wrapping_add(0x8000)) >> 48,
-            RelocationType::R_PPC64_REL16_HA => (symbol_value + 0x8000) >> 16,
-            RelocationType::R_PPC64_REL16_LO => symbol_value,
-            RelocationType::R_PPC64_TOC16_HA => signed.wrapping_add(0x8000) >> 16,
-            RelocationType::R_PPC64_TOC16_LO | RelocationType::R_PPC64_TOC16_LO_DS => signed,
-            _ => 0,
-        } as u32;
 
         let patch_item = match relocation_type {
-            RelocationType::R_PPC64_ADDR64 => PatchItem::from_u64(placeholder_offset, target),
-            RelocationType::R_PPC64_REL24 => {
-                let ins = read32(binary, placeholder_offset);
-                let displacement = target.wrapping_sub(place );
-                PatchItem::from_u32(
-                    placeholder_offset,
-                    (ins & !0x03ff_fffc) | ((displacement as u32) & 0x03ff_fffc),
-                )
+            RelocationType::R_AARCH64_ABS64 => PatchItem::from_u64(placeholder_offset, target),
+            RelocationType::R_AARCH64_ADR_PREL_PG_HI21 => {
+                // ADRP: Page(S + A) - Page(P), encoded as immhi:immlo.
+                let instruction = read_instruction(binary, placeholder_offset);
+                let place = target_fragment_section.virtual_address + placeholder_offset;
+                let page_delta = ((target & !0xfff) as i64).wrapping_sub((place & !0xfff) as i64);
+                let immediate = ((page_delta >> 12) as u32) & 0x1f_ffff;
+                let patched = (instruction & !0x60ff_ffe0)
+                    | ((immediate & 0x3) << 29)
+                    | ((immediate >> 2) << 5);
+
+                PatchItem::from_u32(placeholder_offset, patched)
+            }
+            RelocationType::R_AARCH64_ADD_ABS_LO12_NC => {
+                // ADD: bits [11:0] of S + A are stored in instruction bits [21:10].
+                let instruction = read_instruction(binary, placeholder_offset);
+                let patched = (instruction & !0x003f_fc00) | ((target as u32 & 0xfff) << 10);
+
+                PatchItem::from_u32(placeholder_offset, patched)
+            }
+            RelocationType::R_AARCH64_LDST64_ABS_LO12_NC => {
+                // LD/ST 64-bit: bits [11:3] of S + A are stored in instruction bits [21:10].
+                let instruction = read_instruction(binary, placeholder_offset);
+                let patched = (instruction & !0x003f_fc00) | (((target as u32 & 0xfff) >> 3) << 10);
+
+                PatchItem::from_u32(placeholder_offset, patched)
+            }
+            RelocationType::R_AARCH64_CALL26 => {
+                // CALL26: S + A - P, divided by four, is stored in instruction bits [25:0].
+                let instruction = read_instruction(binary, placeholder_offset);
+                let place = target_fragment_section.virtual_address + placeholder_offset;
+                let immediate = target.wrapping_sub(place) >> 2;
+                let patched = (instruction & !0x03ff_ffff) | (immediate as u32 & 0x03ff_ffff);
+
+                PatchItem::from_u32(placeholder_offset, patched)
             }
             _ => {
-                let ins = read32(binary, placeholder_offset);
-                let instruction = if relocation_type == RelocationType::R_PPC64_REL16_HA {
-                    // Static ET_EXEC does not provide the ELFv2 r12 entry value.
-                    // Use r0 as the addis base to construct the absolute TOC address.
-                    ins & !(0x1f << 16)
-                } else {
-                    ins
-                };
-                PatchItem::from_u32(
-                    placeholder_offset,
-                    (instruction & 0xffff_0000) | (value16 & 0xffff),
-                )
+                unreachable!(
+                    "Relocation type {:?} is not supported for AArch64 architecture",
+                    relocation_type
+                );
             }
         };
+
         patch_items.push(patch_item);
     }
+
     Ok(patch_items)
 }
 
-fn read32(binary: &[u8], offset: u64) -> u32 {
+fn read_instruction(binary: &[u8], offset: u64) -> u32 {
     u32::from_le_bytes(
         binary[offset as usize..offset as usize + 4]
             .try_into()
