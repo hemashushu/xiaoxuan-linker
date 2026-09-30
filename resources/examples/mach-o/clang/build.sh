@@ -50,7 +50,7 @@ clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/external.macho" "$OUT_DIR/external.o"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/tls.macho" "$SCRIPT_DIR/tls.c"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/relocate-within-tls.macho" "$SCRIPT_DIR/relocate-within-tls.c"
 
-# Shared library example (dylib instead of ELF .so).
+# Shared library example
 clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/share-export.o" "$SCRIPT_DIR/share-export.c"
 clang "${CFLAGS_COMMON[@]}" -dynamiclib -install_name @rpath/libshare-export.dylib -o "$OUT_DIR/libshare-export.dylib" "$OUT_DIR/share-export.o"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/share.macho" "$SCRIPT_DIR/share-import.c" -L"$OUT_DIR" -Wl,-rpath,@executable_path -lshare-export

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Builds fat (universal) Mach-O executables combining two arm64e variants:
+# Builds fat (universal) Mach-O executables with three AArch64 slices:
+# - arm64:     standard AArch64 ABI, without the arm64e ABI.
 # - arm64e:    baseline pointer authentication (PAC) ABI.
 # - arm64e.x1: PAC version 2 (CPA2) + Memory Tagging Extension (MTE) ABI.
-# Both are recognized by clang/lipo/otool as distinct CPU_SUBTYPE_ARM64E capability variants.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
@@ -17,8 +17,8 @@ CFLAGS_COMMON=(-isysroot "$SDK" -mmacosx-version-min="$MIN_VERSION" -std=c23 -O0
 # arm64e.x1 only: instrument stack/heap accesses with MTE tag-check instructions (irg/stg/...).
 CFLAGS_ARM64E_X1=(-fsanitize=memtag-stack,memtag-heap)
 
-ARCHS=(arm64e arm64e.x1)
-SOURCES=(simple pac out-of-bound use-after-free double-free wild-pointer)
+ARCHS=(arm64 arm64e arm64e.x1)
+SOURCES=(simple)
 
 mkdir -p "$OUT_DIR"
 rm -f "$OUT_DIR"/*.o "$OUT_DIR"/*.macho || true
@@ -37,7 +37,4 @@ for name in "${SOURCES[@]}"; do
 
     # Pack the per-arch slices into a single fat binary.
     lipo -create -output "$OUT_DIR/$name.macho" "${slices[@]}"
-
-    # Ad-hoc (self) signing, required for execution/debugging on Apple Silicon.
-    codesign -s - -f "$OUT_DIR/$name.macho"
 done
