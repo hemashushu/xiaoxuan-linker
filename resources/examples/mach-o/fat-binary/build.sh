@@ -13,7 +13,7 @@ MIN_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 
 OUT_DIR="$SCRIPT_DIR/aarch64"
 
-CFLAGS_COMMON=(-isysroot "$SDK" -mmacosx-version-min="$MIN_VERSION" -std=c23 -O0 -fno-unwind-tables -fno-asynchronous-unwind-tables)
+CFLAGS_COMMON=(-isysroot "$SDK" -mmacosx-version-min="$MIN_VERSION" -std=c23 -O0 -fno-common -fno-unwind-tables -fno-asynchronous-unwind-tables)
 # arm64e.x1 only: instrument stack/heap accesses with MTE tag-check instructions (irg/stg/...).
 CFLAGS_ARM64E_X1=(-fsanitize=memtag-stack,memtag-heap)
 
