@@ -28,16 +28,16 @@
 //   Check the dynamic linking info of the executable:
 //     otool -L share.macho
 
-extern int foo;            // loaded via a non-lazy (GOT-equivalent) pointer
-extern int foo_plus(void); // called via a lazy symbol stub (PLT-equivalent)
+extern int share_num;           // loaded via a non-lazy (GOT-equivalent) pointer
+extern int share_fn_plus(void); // called via a lazy symbol stub (PLT-equivalent)
 
 int main(void)
 {
     // call through the lazy stub: resolved to libshare-export.dylib's foo_plus
-    int a = foo_plus(); // 100
+    int a = share_fn_plus(); // 100
 
-    // load through the non-lazy pointer: resolved to libshare-export.dylib's foo
-    int b = foo; // 99
+    // load through the non-lazy pointer: resolved to libshare-export.dylib's share_num
+    int b = share_num; // 99
 
     return a + b; // exit code 199
 }

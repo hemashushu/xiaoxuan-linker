@@ -4,23 +4,23 @@
 // - Exit with status code 24.
 
 // __TEXT,__const
-const long foo = 11;
-const long bar = 13;
+const long const0 = 11;
+const long const1 = 13;
 
 // __DATA,__data
-long a = 17;
-long b = 19;
+long init0 = 17;
+long init1 = 19;
 
 // __DATA,__bss
-long x;
-long y;
+long uninit0;
+long uninit1;
 
 int main(void)
 {
-    a = foo - 1; // 11 - 1 = 10
-    b = bar + 1; // 13 + 1 = 14
-    x = a + b;   // 10 + 14 = 24
-    y = x;       // 24
+    init0 = const0 - 1;      // 11 - 1 = 10
+    init1 = const1 + 1;      // 13 + 1 = 14
+    uninit0 = init0 + init1; // 10 + 14 = 24
+    uninit1 = uninit0;       // 24
 
-    return (int)y;
+    return (int)uninit1;
 }

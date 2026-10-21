@@ -176,6 +176,7 @@ test_arch() {
     run_case "$arch" function.elf 0 "Hello, world!"
     run_case "$arch" data.elf 24 ""
     run_case "$arch" symbol.elf 24 ""
+    run_case "$arch" bind.elf 112 ""
     run_case "$arch" override.elf 53 ""
     run_case "$arch" relocate-within-data.elf 24 ""
     run_case "$arch" tls.elf 66 ""

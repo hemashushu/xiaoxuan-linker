@@ -25,9 +25,9 @@
 //   Note: unlike ELF, Mach-O code is always position-independent by default
 //   on arm64 (there is no `-fno-pic`/`-fno-pie` equivalent needed here).
 
-int foo = 99;
+int share_num = 99;
 
-int foo_plus()
+int share_fn_plus()
 {
-    return foo + 1; // returns 100
+    return share_num + 1; // returns 100
 }

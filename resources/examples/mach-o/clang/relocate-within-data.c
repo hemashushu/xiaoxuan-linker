@@ -30,8 +30,8 @@
 //     ./relocate-within-data.macho; echo "exit code: $?"
 
 // __DATA,__data
-long foo = 11;
-long bar = 13;
+long num0 = 11;
+long num1 = 13;
 
 long dec(long x)
 {
@@ -44,23 +44,23 @@ long inc(long x)
 }
 
 // __DATA,__data
-long (*pdec)(long) = dec;
-long (*pinc)(long) = inc;
+long (*addr_fn_dec)(long) = dec;
+long (*addr_fn_inc)(long) = inc;
 
 // __DATA_CONST,__const
-long *const pfoo = &foo;
-long *const pbar = &bar;
+long *const addr_num0 = &num0;
+long *const addr_num1 = &num1;
 
 int main(void)
 {
-    long i = *pfoo;   // i = 11
-    long j = pdec(i); // j = 10
-    foo = j;          // foo = 10
+    long i = *addr_num0;     // i = 11
+    long j = addr_fn_dec(i); // j = 10
+    num0 = j;                // num0 = 10
 
-    long m = *pbar;   // m = 13
-    long n = pinc(m); // n = 14
-    bar = n;          // bar = 14
+    long m = *addr_num1;     // m = 13
+    long n = addr_fn_inc(m); // n = 14
+    num1 = n;                // num1 = 14
 
-    long r = foo + bar; // r = 10 + 14 = 24
+    long r = num0 + num1; // r = 10 + 14 = 24
     return (int)r;
 }

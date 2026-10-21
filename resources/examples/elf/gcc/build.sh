@@ -88,6 +88,8 @@ build_arch() {
     "$GCC" -std=c23 -c -O0 -fno-pic -fno-pie "${CFLAGS_UNWIND[@]}" "${CFLAGS_ARCH[@]}" -o "$out_dir/data.o" "$SCRIPT_DIR/data.c"
     "$GCC" -std=c23 -c -O0 -fno-pic -fno-pie "${CFLAGS_UNWIND[@]}" "${CFLAGS_ARCH[@]}" -o "$out_dir/symbol-export.o" "$SCRIPT_DIR/symbol-export.c"
     "$GCC" -std=c23 -c -O0 -fno-pic -fno-pie "${CFLAGS_UNWIND[@]}" "${CFLAGS_ARCH[@]}" -o "$out_dir/symbol-import.o" "$SCRIPT_DIR/symbol-import.c"
+    "$GCC" -std=c23 -c -O0 -fno-pic -fno-pie "${CFLAGS_UNWIND[@]}" "${CFLAGS_ARCH[@]}" -o "$out_dir/bind-export.o" "$SCRIPT_DIR/bind-export.c"
+    "$GCC" -std=c23 -c -O0 -fno-pic -fno-pie "${CFLAGS_UNWIND[@]}" "${CFLAGS_ARCH[@]}" -o "$out_dir/bind-import.o" "$SCRIPT_DIR/bind-import.c"
     "$GCC" -std=c23 -c -O0 -fno-pic -fno-pie "${CFLAGS_UNWIND[@]}" "${CFLAGS_ARCH[@]}" -o "$out_dir/override-weak.o" "$SCRIPT_DIR/override-weak.c"
     "$GCC" -std=c23 -c -O0 -fno-pic -fno-pie "${CFLAGS_UNWIND[@]}" "${CFLAGS_ARCH[@]}" -o "$out_dir/override-strong.o" "$SCRIPT_DIR/override-strong.c"
     "$GCC" -std=c23 -c -O0 -fno-pic -fno-pie "${CFLAGS_UNWIND[@]}" "${CFLAGS_ARCH[@]}" -o "$out_dir/relocate-within-data.o" "$SCRIPT_DIR/relocate-within-data.c"
@@ -96,6 +98,7 @@ build_arch() {
     "$GCC" "${LDFLAGS_ARCH[@]}" -nostdlib -static -no-pie -o "$out_dir/function.elf" "$out_dir/function.o"
     "$GCC" "${LDFLAGS_ARCH[@]}" -nostdlib -static -no-pie -o "$out_dir/data.elf" "$out_dir/data.o"
     "$GCC" "${LDFLAGS_ARCH[@]}" -nostdlib -static -no-pie -o "$out_dir/symbol.elf" "$out_dir/symbol-export.o" "$out_dir/symbol-import.o"
+    "$GCC" "${LDFLAGS_ARCH[@]}" -nostdlib -static -no-pie -o "$out_dir/bind.elf" "$out_dir/bind-export.o" "$out_dir/bind-import.o"
     "$GCC" "${LDFLAGS_ARCH[@]}" -nostdlib -static -no-pie -o "$out_dir/override.elf" "$out_dir/override-weak.o" "$out_dir/override-strong.o"
     "$GCC" "${LDFLAGS_ARCH[@]}" -nostdlib -static -no-pie -o "$out_dir/relocate-within-data.elf" "$out_dir/relocate-within-data.o"
 

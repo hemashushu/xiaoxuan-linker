@@ -10,19 +10,21 @@
 // No source changes were needed; only the build flags/output format differ
 // (see build.sh).
 
-const long foo = 11;
-const long bar = 13;
+const long const0 = 11;
+const long const1 = 13;
 
-long a = 17;
-long b = 19;
+long init0 = 17;
+long init1 = 19;
 
-long x;
-long y;
+long uninit0;
+long uninit1;
 
-long dec(long n) {
+long dec(long n)
+{
     return n - 1;
 }
 
-long inc(long n) {
+long inc(long n)
+{
     return n + 1;
 }

@@ -11,7 +11,7 @@
 // pub(crate) mod writer;
 
 pub mod module;
-pub mod reader;
+// pub mod reader;
 
 // pub use symbol_resolver::find_entry_point;
 // pub use symbol_resolver::resolve;

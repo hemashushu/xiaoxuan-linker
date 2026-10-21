@@ -31,21 +31,21 @@
 
 // thread-local variables (TLV descriptors in __DATA,__thread_vars,
 // initial values in __DATA,__thread_data)
-__thread long foo = 11;
-__thread long bar = 13;
+__thread long num_tls_0 = 11;
+__thread long num_tls_1 = 13;
 
 // thread-local variable, zero-initialized (__DATA,__thread_bss)
-__thread long x = 0;
+__thread long uninit_tls = 0;
 
 // regular global variable: placed in __DATA,__data
 long abc = 42;
 
 int main(void)
 {
-    foo--;                 // foo = 10
-    bar++;                 // bar = 14
-    x = foo + bar;         // x = 10 + 14 = 24
-    long result = x + abc; // result = 24 + 42 = 66
+    num_tls_0--;           // num_tls_0 = 10
+    num_tls_1++;            // num_tls_1 = 14
+    uninit_tls = num_tls_0 + num_tls_1;   // uninit_tls = 10 + 14 = 24
+    long result = uninit_tls + abc; // result = 24 + 42 = 66
 
     // exit with `result` as the exit code (expected: 66)
     return (int)result;

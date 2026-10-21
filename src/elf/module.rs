@@ -15,9 +15,9 @@ use std::fmt::Display;
 // | Size   | Content         |
 // |--------|-----------------|
 // | 64     | ELF header      |
-// | m * 56 | program headers | <-- data table
-// | ...    | section data    | <-- data binary
-// | n * 64 | section headers | <-- data table
+// | m * 56 | program headers | <-- data table, fixed-size records
+// | ...    | section data    | <-- binary
+// | n * 64 | section headers | <-- data table, fixed-size records
 //
 // Sections (in file order)
 // ------------------------

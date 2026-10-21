@@ -25,21 +25,21 @@
 //   ./relocate-within-tls.macho; echo "exit code: $?"
 
 // The target symbol whose address is stored as a pointer in each section.
-int target = 42;
+int num0 = 42;
 
 // Const pointer: the compiler places this wherever it can apply a load-time
 // fixup safely (never in the read-only __TEXT segment on Mach-O).
-const int *const rodata_ptr = &target;
+const int *const addr_num0_ro = &num0;
 
 // Stored in __DATA,__data (non-const pointer).
-int *data_ptr = &target;
+int *addr_num0_rw = &num0;
 
 // Thread-local pointer: initializer is a link-time constant address, stored
 // in the TLV initial-value template (__DATA,__thread_data).
-__thread int *tdata_ptr = &target;
+__thread int *addr_num0_tls = &num0;
 
 int main(void)
 {
     // dereference each pointer so the compiler cannot optimize them away
-    return *rodata_ptr + *data_ptr + *tdata_ptr; // 42 + 42 + 42 = 126
+    return *addr_num0_ro + *addr_num0_rw + *addr_num0_tls; // 42 + 42 + 42 = 126
 }

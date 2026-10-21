@@ -31,6 +31,8 @@ clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/function.o" "$SCRIPT_DIR/function.c"
 clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/data.o" "$SCRIPT_DIR/data.c"
 clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/symbol-export.o" "$SCRIPT_DIR/symbol-export.c"
 clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/symbol-import.o" "$SCRIPT_DIR/symbol-import.c"
+clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/bind-export.o" "$SCRIPT_DIR/bind-export.c"
+clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/bind-import.o" "$SCRIPT_DIR/bind-import.c"
 clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/override-weak.o" "$SCRIPT_DIR/override-weak.c"
 clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/override-strong.o" "$SCRIPT_DIR/override-strong.c"
 clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/relocate-within-data.o" "$SCRIPT_DIR/relocate-within-data.c"
@@ -39,6 +41,7 @@ clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/minimal.macho" "$OUT_DIR/minimal.o"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/function.macho" "$OUT_DIR/function.o"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/data.macho" "$OUT_DIR/data.o"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/symbol.macho" "$OUT_DIR/symbol-export.o" "$OUT_DIR/symbol-import.o"
+clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/bind.macho" "$OUT_DIR/bind-export.o" "$OUT_DIR/bind-import.o"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/override.macho" "$OUT_DIR/override-weak.o" "$OUT_DIR/override-strong.o"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/relocate-within-data.macho" "$OUT_DIR/relocate-within-data.o"
 
@@ -47,10 +50,14 @@ clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/external.o" "$SCRIPT_DIR/external.c"
 clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/external.macho" "$OUT_DIR/external.o"
 
 # Thread-local storage examples
-clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/tls.macho" "$SCRIPT_DIR/tls.c"
-clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/relocate-within-tls.macho" "$SCRIPT_DIR/relocate-within-tls.c"
+clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/tls.o" "$SCRIPT_DIR/tls.c"
+clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/relocate-within-tls.o" "$SCRIPT_DIR/relocate-within-tls.c"
+
+clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/tls.macho" "$OUT_DIR/tls.o"
+clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/relocate-within-tls.macho" "$OUT_DIR/relocate-within-tls.o"
 
 # Shared library example
 clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/share-export.o" "$SCRIPT_DIR/share-export.c"
+clang "${CFLAGS_COMMON[@]}" -c -o "$OUT_DIR/share-import.o" "$SCRIPT_DIR/share-import.c"
 clang "${CFLAGS_COMMON[@]}" -dynamiclib -install_name @rpath/libshare-export.dylib -o "$OUT_DIR/libshare-export.dylib" "$OUT_DIR/share-export.o"
-clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/share.macho" "$SCRIPT_DIR/share-import.c" -L"$OUT_DIR" -Wl,-rpath,@executable_path -lshare-export
+clang "${CFLAGS_COMMON[@]}" -o "$OUT_DIR/share.macho" "$OUT_DIR/share-import.o" -L"$OUT_DIR" -Wl,-rpath,@executable_path -lshare-export
